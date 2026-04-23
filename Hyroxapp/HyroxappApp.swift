@@ -1,11 +1,5 @@
-//
-//  HyroxappApp.swift
-//  Hyroxapp
-//
-//  Created by Umang Gurung on 4/23/26.
-//
-
 import SwiftUI
+import SwiftData
 
 @main
 struct HyroxappApp: App {
@@ -13,5 +7,10 @@ struct HyroxappApp: App {
         WindowGroup {
             ContentView()
         }
+        // Registers a SwiftData container for `Race` — creates the underlying
+        // store on first launch and injects a `ModelContext` into the view
+        // hierarchy via the environment. Views and view models reach it with
+        // `@Environment(\.modelContext)`.
+        .modelContainer(for: Race.self)
     }
 }
