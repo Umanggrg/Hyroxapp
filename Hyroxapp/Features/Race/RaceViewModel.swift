@@ -129,8 +129,15 @@ final class RaceViewModel {
     }
 
     func advance() {
+        // Detect the transition to `.finished` so we can mirror the race out
+        // to HealthKit exactly once (not on every advance).
+        let wasFinished = engine.isFinished
         engine.advance(at: Date())
         persistActiveRace()
+
+        if !wasFinished, engine.isFinished {
+            saveFinishedRaceToHealthKit()
+        }
     }
 
     // Called from the Done button on the finished-summary screen. Keeps the
@@ -185,5 +192,22 @@ final class RaceViewModel {
     // will catch up.
     private func saveContextSilently() {
         try? modelContext?.save()
+    }
+
+    // MARK: - HealthKit
+
+    // Fire-and-forget push of the just-finished race to Apple Health. The
+    // first call per install triggers the iOS authorization sheet; later
+    // calls are silent. Failures (permission denied, HealthKit unavailable
+    // on this device, missing entitlement, etc.) are swallowed — the race
+    // is already saved locally and shown in History, so HealthKit is
+    // additive not essential.
+    private func saveFinishedRaceToHealthKit() {
+        #if canImport(HealthKit)
+        guard let race = activeRace else { return }
+        Task {
+            try? await HealthKitService.shared.saveRace(race)
+        }
+        #endif
     }
 }
