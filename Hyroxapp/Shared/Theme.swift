@@ -119,3 +119,26 @@ extension View {
         modifier(CapsLabelStyle())
     }
 }
+
+// MARK: - Navigation Bar Styling
+
+// Consolidated nav-bar treatment used by HistoryView, RaceDetailView, and
+// ProfileView. `navigationBarTitleDisplayMode`, `.toolbarBackground(_:for:)`,
+// and `.toolbarColorScheme(_:for:)` with `.navigationBar` placement are
+// iOS / iPadOS / visionOS / Mac-Catalyst only — macOS native uses a
+// different title-bar model. The helper no-ops on macOS so the rest of the
+// view tree compiles on every platform the project currently targets.
+extension View {
+    @ViewBuilder
+    func hyroxDarkNavigationBar(inline: Bool = false) -> some View {
+        #if !os(macOS)
+        self
+            .navigationBarTitleDisplayMode(inline ? .inline : .large)
+            .toolbarBackground(Color.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+        #else
+        self
+        #endif
+    }
+}

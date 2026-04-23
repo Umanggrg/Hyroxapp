@@ -41,10 +41,7 @@ struct HistoryView: View {
                 }
             }
             .navigationTitle("History")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbarBackground(Color.background, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .hyroxDarkNavigationBar()
             .navigationDestination(for: Race.self) { race in
                 RaceDetailView(race: race)
             }

@@ -18,10 +18,7 @@ struct RaceDetailView: View {
             }
         }
         .navigationTitle(race.startedAt.formatted(date: .abbreviated, time: .shortened))
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(Color.background, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        .hyroxDarkNavigationBar(inline: true)
     }
 
     private var heroCard: some View {
