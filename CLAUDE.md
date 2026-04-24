@@ -140,7 +140,9 @@ If I ask for any of these during v0.1, push back and remind me we're scoped to R
 
 ### v2 — Full Social + Watch + Duo
 
-- **Apple Watch app** (standalone Race Mode on the wrist)
+- **Apple Watch companion** — **partially done**. Phone↔Watch bidirectional sync architecture is shipped: phone pushes `RaceStateSnapshot` on every race event via `WCSession.updateApplicationContext`; Watch renders live from it. Watch's Next Station button sends `WatchAction.advance` via `sendMessage`; iPhone receives it and advances the race. Verified end-to-end on the iPhone+Watch simulator pair. **Still open**: hold-to-finish on Watch final station, real-hardware install validated on watchOS 26+ (current free-dev-account + Apple Watch SE on watchOS 11 blocks the companion install with a generic "could not install" error, but the code is proven correct on sim). Ship once tested on newer Watch.
+- **Detailed per-station race summary** (Roxfit-style) — per-station breakdown view with: this-station's split vs your PB for that station, pace curve, HR curve (see below), comparison to your last N races. Accessed by tapping any split row in History detail. Needs `SwiftCharts` framework. 2-3 sessions.
+- **HealthKit read integration** — currently we only *write* races to Health. Add HR (and eventually active calories, VO2 max) *read* during a race, storing samples on each `Split`. Minimum: HKHealthStore read auth for `.heartRate`, query current HR at each station advance, display avg/max HR per split in the summary. Deeper: continuous HR sampling via `HKAnchoredObjectQuery` during the race, HR curve rendering via SwiftCharts, zone breakdowns (Z1–Z5 time in zone). ~1 session for basic capture + display, ~1 more for charts + zones.
 - **Duo Mode** (see §4.5 below — real-time partner sync)
 - Segments / micro-challenges (fastest sled push, etc.)
 - Achievements / badges
@@ -416,10 +418,12 @@ Things we haven't decided yet but will need to soon:
 
 - Exact station distances for the "simulation" mode when training at a gym without the full HYROX setup (e.g., if I don't have a sled, do I time a substitute movement?)
 - How to handle the 1km runs when indoors vs outdoors (GPS only works outdoors)
-- Whether the 75 vs 100 wall ball count depends on gender/division (it does in real HYROX — need a setting)
+- ~~Whether the 75 vs 100 wall ball count depends on gender/division~~ — **resolved**: `Division` setting on `UserProfile`, `Station.target(for:)` renders the correct count.
 - For Duo Mode: does each partner get credited with the full race, or does the UI distinguish who did which work?
 - For social feed: is it chronological, algorithmic, or filterable (friends / local / global)?
 - Privacy: can a user set races to private? Per-race or global default?
+- Near-term iPhone-only slice: **race notes** ("how did this feel?" text field on `RaceSummaryView`, editable later in `RaceDetailView`, persisted on `Race.notes`). ~30 min, ungated by anything.
+- Tooling constraint: Apple Watch companion install on **free-tier dev account + older Watch hardware (Apple Watch SE on watchOS 11)** consistently fails with a generic "could not install at this time" error even with correct Embed Watch Content build phase. Code is proven correct on the iPhone+Watch simulator pair. Re-test on watchOS 26+ hardware when available (friend's device or newer personal Watch) before concluding the companion ships. Paid Apple Developer Program ($99/yr) likely also resolves it.
 
 Don't build for these yet — just flagging.
 
