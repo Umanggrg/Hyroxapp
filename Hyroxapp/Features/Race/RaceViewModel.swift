@@ -142,15 +142,34 @@ final class RaceViewModel {
 
     // MARK: - Actions
 
-    func startRace() {
+    // Begin a race. Defaults to the full 16-segment HYROX sequence so
+    // the standard "Start Race" button keeps its zero-config behavior.
+    // Pass an explicit `sequence` to run a custom workout — a shortened
+    // session, a strength-focused circuit, a repeating pattern — and
+    // the engine handles advance/finish naturally because it already
+    // parameterizes on the segment list.
+    //
+    // Pass `targetDuration` to record a finish-time goal ("beat 1:30:00").
+    // Engine itself is target-unaware; this value lives on the Race
+    // row and views read it for display/comparison.
+    //
+    // Empty `sequence` is a no-op (nothing to start). Callers should
+    // validate before calling; the guard here is defensive.
+    func startRace(
+        sequence: [Station] = Station.raceSequence,
+        targetDuration: TimeInterval? = nil
+    ) {
+        guard !sequence.isEmpty else { return }
+
         let now = Date()
-        engine = RaceEngine()
+        engine = RaceEngine(sequence: sequence)
         engine.start(at: now)
 
         let race = Race(
             startedAt: now,
             currentSegmentStartedAt: now,
-            sequence: engine.sequence
+            sequence: engine.sequence,
+            targetDuration: targetDuration
         )
         modelContext?.insert(race)
         activeRace = race
@@ -162,11 +181,71 @@ final class RaceViewModel {
         // to HealthKit exactly once (not on every advance).
         let wasFinished = engine.isFinished
         engine.advance(at: Date())
+        // Capture the index of the split that `engine.advance` just appended
+        // so the async HR patch can find and update it below. Must be read
+        // before `persistActiveRace` because that's a sync write; the HR
+        // task is what races the user forward.
+        let newSplitIndex = engine.splits.count - 1
         persistActiveRace()
 
         if !wasFinished, engine.isFinished {
             saveFinishedRaceToHealthKit()
         }
+
+        // Fire-and-forget: fetch segment-window HR stats from HealthKit
+        // and patch them onto the just-completed split. Runs in the
+        // background so the UI transition to the next station is instant
+        // (no ~100-200ms HealthKit query latency between tap and advance).
+        // If HR isn't available (no Watch, read auth denied, no samples)
+        // the split simply keeps its `nil` values and the UI omits them.
+        attachHeartRateStats(to: newSplitIndex)
+    }
+
+    // MARK: - HR capture
+
+    // Query HealthKit for avg + max HR over the just-completed
+    // segment's time window, and patch the split at `index` with the
+    // result. Re-persists afterwards so the Race row in SwiftData
+    // carries the HR through to History.
+    //
+    // The segment window is read from the split itself (its startedAt
+    // and endedAt) rather than being passed in — the engine already
+    // has the authoritative timestamps for the segment by the time
+    // this runs, and reading them here keeps the HR capture path
+    // robust to any future changes in how advance is invoked.
+    //
+    // Guarded `#if canImport(HealthKit)` so macOS builds — which lack
+    // HealthKit — compile without the query path at all.
+    private func attachHeartRateStats(to index: Int) {
+        #if canImport(HealthKit)
+        // Read the segment bounds on the current actor before hopping
+        // into the async Task — avoids capturing mutable engine state
+        // across a suspension point.
+        guard engine.splits.indices.contains(index) else { return }
+        let split = engine.splits[index]
+        let segmentStart = split.startedAt
+        let segmentEnd = split.endedAt
+
+        // `@MainActor` on the Task pins the whole closure to MainActor
+        // after the async HealthKit query resumes — safe to mutate the
+        // engine directly without an extra MainActor.run hop.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let stats = await HealthKitService.shared.heartRateStats(
+                from: segmentStart,
+                to: segmentEnd
+            )
+            // Skip the persist round-trip if HealthKit had nothing for
+            // this segment — common for indoor sessions without a Watch.
+            guard stats.avg != nil || stats.max != nil else { return }
+            self.engine.setHeartRateStats(
+                avg: stats.avg,
+                max: stats.max,
+                atSplitIndex: index
+            )
+            self.persistActiveRace()
+        }
+        #endif
     }
 
     // Called from the Done button on the finished-summary screen. Keeps the

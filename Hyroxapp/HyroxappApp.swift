@@ -24,10 +24,13 @@ struct HyroxappApp: App {
         WindowGroup {
             ContentView()
         }
-        // Registers a SwiftData container for `Race` and `UserProfile` —
+        // Registers a SwiftData container for the app's persisted models —
         // creates the underlying store on first launch and injects a
         // `ModelContext` into the view hierarchy via the environment. Views
         // and view models reach it with `@Environment(\.modelContext)`.
-        .modelContainer(for: [Race.self, UserProfile.self])
+        //
+        // Adding a new @Model type? Include it here or queries for it
+        // will crash with "entity not found."
+        .modelContainer(for: [Race.self, UserProfile.self, WorkoutTemplate.self])
     }
 }

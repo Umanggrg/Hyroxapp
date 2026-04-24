@@ -22,6 +22,11 @@ This is simultaneously:
 
 Strava nails this duality. The app is quiet and utilitarian during a run, then transforms into a social feed after. We want the same feel.
 
+### Explicit non-goals
+
+- **No GPS tracking.** The 1km runs are manual start/stop. HYROX is an indoor-first race format; GPS tracking would only matter for outdoor run training, and keeping it out of scope simplifies the tracking layer, battery cost, and privacy surface. Distance (when it matters) is entered manually or derived from station rules.
+- **Not a generic fitness / workout logger.** Freeform lifting, yoga, running-for-running's-sake aren't the target. HYROX-shaped workouts only.
+
 ---
 
 ## 2. Core Philosophy
@@ -144,6 +149,13 @@ If I ask for any of these during v0.1, push back and remind me we're scoped to R
 - **Detailed per-station race summary** (Roxfit-style) — per-station breakdown view with: this-station's split vs your PB for that station, pace curve, HR curve (see below), comparison to your last N races. Accessed by tapping any split row in History detail. Needs `SwiftCharts` framework. 2-3 sessions.
 - **HealthKit read integration** — currently we only *write* races to Health. Add HR (and eventually active calories, VO2 max) *read* during a race, storing samples on each `Split`. Minimum: HKHealthStore read auth for `.heartRate`, query current HR at each station advance, display avg/max HR per split in the summary. Deeper: continuous HR sampling via `HKAnchoredObjectQuery` during the race, HR curve rendering via SwiftCharts, zone breakdowns (Z1–Z5 time in zone). ~1 session for basic capture + display, ~1 more for charts + zones.
 - **Duo Mode** (see §4.5 below — real-time partner sync)
+- **Custom Workout Builder** — let users define their own station sequences (shortened sessions, strength-focused days, conditioning circuits) beyond the official 16-segment race. Template save + reuse. Opens the door to the "Training Blocks" pattern from §13.2.
+- **Hyrox Performance Score** — per-athlete rollup on Profile: Strength, Endurance, Engine (cardio capacity). Derived from historical station performance relative to division benchmarks. Strava's "fitness score" equivalent for HYROX.
+- **Fatigue / effort insights** — post-race narrative callouts: "You slowed down 18% after Station 5," "Your HR peaks highest during lunges." Needs continuous HR sampling + comparison against prior races. Requires the HR charts work first.
+- **Challenges + streaks** — time-boxed goals ("7-day HYROX streak," "improve sled push time by 10% this month"). Displayed on Profile, surfaced in the feed.
+- **Manual reps / distance entry per station** — for stations where the user didn't do the full prescribed work (e.g. partial rep count due to injury, or a different sled distance at a non-standard gym). Logs what actually happened, not just what was prescribed.
+- **Voice / haptic cues on station transitions** — "Next: Sled Push" announced via TTS or audio ping, plus distinct haptic patterns per station category (run vs. heavy workout vs. cardio). Matters most on Watch where the screen isn't always visible.
+- **Shareable workout cards** — Instagram-story-ready visual of a completed race. Clean typography, hero time, key stats, branded. One-tap share from summary.
 - Segments / micro-challenges (fastest sled push, etc.)
 - Achievements / badges
 - Station auto-detection (ML)
@@ -416,8 +428,8 @@ When all checkboxes are true, we move to v1 planning. Not before.
 
 Things we haven't decided yet but will need to soon:
 
-- Exact station distances for the "simulation" mode when training at a gym without the full HYROX setup (e.g., if I don't have a sled, do I time a substitute movement?)
-- How to handle the 1km runs when indoors vs outdoors (GPS only works outdoors)
+- Exact station distances for the "simulation" mode when training at a gym without the full HYROX setup (e.g., if I don't have a sled, do I time a substitute movement?) — partially addressed by the **Custom Workout Builder** roadmap item in §4 v2.
+- ~~How to handle the 1km runs when indoors vs outdoors (GPS only works outdoors)~~ — **resolved**: no GPS at all (see §1 non-goals). All runs are manual start/stop regardless of indoor/outdoor. The athlete controls the timer, not a location sensor.
 - ~~Whether the 75 vs 100 wall ball count depends on gender/division~~ — **resolved**: `Division` setting on `UserProfile`, `Station.target(for:)` renders the correct count.
 - For Duo Mode: does each partner get credited with the full race, or does the UI distinguish who did which work?
 - For social feed: is it chronological, algorithmic, or filterable (friends / local / global)?
@@ -439,3 +451,138 @@ Don't build for these yet — just flagging.
 - **When in doubt:** ask me. Better to clarify than guess wrong.
 
 This file is living. Update it as decisions change.
+
+---
+
+## 13. Vision / Feature Backlog
+
+A structured dump of the bigger product vision — Strava × HYROX, station-based, no GPS, real-time effort + HR, social + competitive. This section is an **idea pool**, not a commitment. Items promote into §4 phased scope when we decide to ship them; until then they live here as reference for design decisions (e.g. "does today's change leave room for future challenges / streaks?").
+
+Status legend for each bullet below:
+- 🟢 **done** — in the current build, usable today
+- 🟡 **partial** — architecture in place, more work needed
+- ⚪ **idea** — not started
+
+### 13.1 — Workout tracking (Watch + iPhone)
+
+The athlete's primary in-session experience.
+
+- 🟢 Start a HYROX workout session (Race Mode) from home screen in one tap
+- 🟢 Pre-loaded official HYROX stations (16 segments, race order)
+- 🟢 Time per station (split capture)
+- 🟢 Tap to move to next station
+- 🟢 Always-visible total timer + segment timer
+- 🟢 Mid-race splits peek (view completed splits without leaving race)
+- 🟢 Hold-to-finish on final station (safety against mis-tap)
+- 🟢 Screen stays awake mid-race
+- 🟢 Resume after force-kill / backgrounding
+- 🟢 Watch companion: phone↔watch live sync (architecture shipped, install on watchOS 26+ TBD)
+- 🟡 Heart rate tracking: avg + max per station via HKStatisticsQuery. Next: live HR display mid-race, HR curve chart, zone breakdowns
+- ⚪ **1km Run with manual start/stop** — explicit "Start Run" / "End Run" on the run segments specifically (rather than treating them as generic stations), so athletes can pre-position themselves before starting the timer. Same pattern as Strava's explicit run start.
+- ⚪ **Calories burned per station** — HealthKit `.activeEnergyBurned` statistics query alongside HR stats
+- ⚪ **Effort level / derived intensity score** — per station + full race rollup. Function of HR (relative to max), station duration, and division benchmark.
+- ⚪ **Manual reps / distance input** — for sleds, carries, lunges, wall balls. Let athletes log what they actually did when gym setup or injury means they deviated from the prescribed rule.
+- ⚪ **Voice / haptic cues on station transitions** — spoken "Next: Sled Push" or audio ping, distinct haptic pattern per station category. Critical for Watch-during-workout where screen isn't visible.
+- ⚪ **Auto-timer between transitions** — optional rest-interval countdown between stations during training (not during race simulation).
+- ⚪ **Pace indicator mid-race** — real-time "ahead / on pace / behind" readout alongside the main timer, based on a per-station time budget derived from the athlete's set target (see §4 v2 target finish-time, shipped). Two data-source tiers:
+  1. **Naïve split of target** — divide `targetDuration` across the 16 stations, either evenly or weighted by station type (runs get a bigger allotment than sled push). Ships as soon as we commit — no backend required.
+  2. **Benchmarked split** (v2+/v3, depends on §13.4 backend + community data) — once Supabase stores enough race history, derive per-station expected times from aggregated splits across the athlete's division. "You're 12 seconds off the average Men's Open athlete on this station." Much more motivating than a flat 1/16th-of-target split.
+
+  Visual sketch: small chevron/arrow on the race screen — green up for ahead, amber flat for on-pace, red down for behind — with a compact `+0:12` / `on pace` / `−0:18` delta vs. expected for the current station. Dependencies: target finish time (shipped), HR/effort capture (in progress), backend historical splits (not started).
+
+### 13.2 — Structured workout modes
+
+Different container types for "do a workout with this app."
+
+- 🟢 **Full HYROX Simulation** (Race Mode) — the 16-segment official format
+- ⚪ **Custom Workout Builder** — user-defined station sequences, time-based or rep-based, save as templates, reuse. Opens the door to half-rox sessions, strength-focused days, any arbitrary subset.
+- ⚪ **Training Blocks** — named templates for common training patterns:
+  - **Strength day** — heavy-station-focused (sled push/pull + lunges + wall balls)
+  - **Conditioning day** — cardio-station-focused (runs + skierg + row + burpees)
+  - **Hybrid circuits** — shorter mixed sequences for mid-week
+  These are really named Custom Workout Builder templates with good defaults.
+
+### 13.3 — Post-workout analytics
+
+What the athlete sees after tapping Finish.
+
+- 🟢 Race summary with total time + all 16 splits
+- 🟢 Race saved to History as a card
+- 🟢 PB indicator on cards when a race sets a new PB
+- 🟢 Per-race notes ("how did this feel?") — editable from summary + history retroactively
+- 🟡 HR per split (avg + max displayed). Next: HR curve chart, station-level HR comparison
+- ⚪ **Detailed per-station breakdown** (Roxfit-style): tap any split in History → dedicated view with pace curve, HR curve, comparison to your PB for that station, comparison to last N races
+- ⚪ **Heart rate zones graph** — Z1–Z5 time-in-zone for the whole race
+- ⚪ **Fatigue curve** — line chart showing pace relative to rolling average, visualizes where the athlete slowed down
+- ⚪ **Narrative insights** — auto-generated callouts: "You slowed down 18% after Station 5," "Your HR peaks highest during lunges," "Fastest Sled Push in your last 10 races"
+- ⚪ **Recovery score** — post-workout strain estimate (Whoop-style)
+- ⚪ **PBs per station** — dedicated Profile / History section listing personal bests for each of the 16 segments, not just total race time
+- ⚪ **Weekly / monthly performance trends** — charts showing race count, avg total time, avg HR, etc. over rolling windows
+- ⚪ **Fatigue vs performance correlation** — scatter-plot style "when my resting HR is higher, my total race time is X% slower"
+
+### 13.4 — HYROX-specific performance system
+
+The thing that makes this *not* a generic workout logger.
+
+- ⚪ **Station scoring** — each station gets its own score relative to division benchmarks (percentile, or a 0–100 rating)
+- ⚪ **HYROX Performance Score** — rollup on Profile with three pillars:
+  - **Strength** — sled push, sled pull, sandbag lunges, wall balls
+  - **Endurance** — farmers carry, sandbag lunges, total race duration
+  - **Engine** — runs, ski erg, rowing, burpees (cardio capacity)
+  Expressed as a 3-axis radar chart or 3 numerical scores. Updates after every finished race.
+- ⚪ **Benchmarking** — compare against:
+  - Yourself (historical rolling averages)
+  - Other users on the platform
+  - Division averages (men's/women's × open/pro)
+  - (Eventually) official HYROX event times from past races
+
+  Powers the "benchmarked split" tier of the pace indicator in §13.1 — once we can say "the average Men's Open athlete finishes Sled Push in 3:45," the mid-race pace readout stops being an arbitrary 1/16th-of-target and starts being genuinely informative.
+- ⚪ **Strain / readiness** — daily check-in using HR variability + sleep data (HealthKit) to tell the athlete if today's a good day for a full simulation vs. a lighter session
+
+### 13.5 — Social layer (Strava-style)
+
+How athletes see each other's work and stay accountable.
+
+- 🟡 Card design foreshadows social feed (RaceCardView structured for future kudos/comments row)
+- 🟡 Profile screen (real identity, handle, avatar, bio, social stats placeholders)
+- ⚪ **Feed** — timeline of followed athletes' completed races, auto-posted on finish (opt-in), scrollable RaceCardView with kudos + comments
+- ⚪ **Follow / unfollow** — relationship graph, displayed as counts on Profile, drives feed filtering
+- ⚪ **Comments** — threaded comments per race, mentions (@athlete)
+- ⚪ **Kudos** (Strava's "like" equivalent) — one-tap positive reaction
+- ⚪ **Compare workouts** — side-by-side split tables between two athletes' same-format races
+- ⚪ **Share to Instagram** — export a clean, story-ready PNG/video of a finished race; one tap from summary. Includes hero time, key stats, branded.
+- ⚪ **Stories-style recap** — weekly/monthly auto-generated highlight reels ("your week in HYROX")
+
+### 13.6 — Competition + gamification
+
+Structured reasons to keep coming back.
+
+- ⚪ **Leaderboards**:
+  - Fastest full HYROX simulation (global, friends, division)
+  - Best per-station times (fastest sled push, lowest wall ball time, etc.)
+  - Weekly rankings (best race this week)
+- ⚪ **Challenges** — time-boxed goals the athlete opts into:
+  - "7-day HYROX streak" — do something each day
+  - "Improve sled push time by 10% this month"
+  - "Complete 4 full simulations in 4 weeks"
+- ⚪ **Badges** — achievements displayed on Profile:
+  - First simulation completed
+  - Elite performance tiers (sub-1:00:00 total race, sub-5:00 run average, etc.)
+  - Consistency streaks (30-day active, 100 total races)
+- ⚪ **Segments / micro-challenges** — like Strava segments but per-station; compete for the fastest Sled Pull within a gym / region / globally
+
+### 13.7 — Inspiration + non-negotiables
+
+- **Reference apps**: Strava (feed, segments, kudos), Roxfit (race format, station detail), Whoop (strain/recovery scoring), Apple Fitness (ring animations, summary typography)
+- **Strict no-GPS** — runs are manual start/stop (see §1 non-goals)
+- **Indoor-first** — HYROX is an indoor race; the app should work on a treadmill or in a garage gym just as well as outdoors
+- **Watch is first-class** — for mid-workout interaction, the wrist beats the phone. Architecture already reflects this.
+
+### 13.8 — How items move from §13 into §4
+
+When we commit to building something from this list:
+1. Pick a specific item and give it an estimate (sessions of work)
+2. Slot it into v1 / v2 / v3 in §4 with a brief scope note
+3. Update its status here to 🟡 while in progress, 🟢 when shipped
+
+Don't let §13 grow unchecked — if an idea has been here 6+ months without moving, either commit or prune.

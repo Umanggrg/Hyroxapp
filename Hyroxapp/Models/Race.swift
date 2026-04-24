@@ -45,6 +45,27 @@ final class Race {
     // race keeps its original chronological slot in the list.
     var createdAt: Date
 
+    // Free-form athlete notes — "how did this feel?", what to remember,
+    // what to try next time. Editable from `RaceSummaryView` immediately
+    // after finishing and from `RaceDetailView` retroactively. Empty
+    // string default keeps SwiftData's lightweight migration happy for
+    // pre-existing rows: adding a String with a default value is a
+    // safe additive schema change (unlike the division-enum case which
+    // had to go optional).
+    var notes: String = ""
+
+    // Athlete's finish-time goal for this race, set at start time
+    // ("I want to beat 1:30:00 today"). Optional because setting a
+    // target is opt-in — some training days are just "show up and
+    // move," not goal-chasing. Displayed as a subtitle under the
+    // in-race timer and on the summary / detail views as a delta
+    // ("+5:23 over target" / "1:15 ahead of target").
+    //
+    // Stored on Race (not UserProfile) because the goal is per-race:
+    // the athlete might aim for 1:30 on one day and a relaxed 1:45
+    // on another. Profile-level default is a future enhancement.
+    var targetDuration: TimeInterval?
+
     init(
         id: UUID = UUID(),
         startedAt: Date,
@@ -53,7 +74,9 @@ final class Race {
         currentSegmentStartedAt: Date? = nil,
         sequence: [Station] = Station.raceSequence,
         mode: RaceMode = .solo,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        notes: String = "",
+        targetDuration: TimeInterval? = nil
     ) {
         self.id = id
         self.startedAt = startedAt
@@ -63,6 +86,8 @@ final class Race {
         self.sequenceRaw = sequence.map(\.rawValue)
         self.modeRawValue = mode.rawValue
         self.createdAt = createdAt
+        self.notes = notes
+        self.targetDuration = targetDuration
     }
 
     // MARK: - Derived

@@ -153,6 +153,43 @@ struct RaceEngine: Sendable {
     mutating func reset() {
         state = .notStarted
     }
+
+    // Attach heart-rate statistics (avg + max over the segment window)
+    // to the split at the given index. Used from RaceViewModel after an
+    // async HealthKit HKStatisticsQuery returns — the advance itself
+    // stays synchronous (the split is appended without HR, then patched
+    // here when HealthKit responds). No-op if the index is out of range
+    // or the engine isn't in a state with splits.
+    //
+    // Safe to call from either `.inProgress` or `.finished` — stats can
+    // be attached to the final split of a freshly-finished race exactly
+    // as to an intermediate split.
+    mutating func setHeartRateStats(
+        avg: Double?,
+        max: Double?,
+        atSplitIndex index: Int
+    ) {
+        switch state {
+        case .notStarted:
+            return
+        case .inProgress(let startedAt, let segmentStart, var splits):
+            guard splits.indices.contains(index) else { return }
+            splits[index] = splits[index].withHeartRateStats(avg: avg, max: max)
+            state = .inProgress(
+                startedAt: startedAt,
+                currentSegmentStartedAt: segmentStart,
+                splits: splits
+            )
+        case .finished(let startedAt, let endedAt, var splits):
+            guard splits.indices.contains(index) else { return }
+            splits[index] = splits[index].withHeartRateStats(avg: avg, max: max)
+            state = .finished(
+                startedAt: startedAt,
+                endedAt: endedAt,
+                splits: splits
+            )
+        }
+    }
 }
 
 // MARK: - Helpers

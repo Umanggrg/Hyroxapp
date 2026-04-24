@@ -83,6 +83,13 @@ struct RaceView: View {
             // so stray messages after the user leaves the Race tab
             // don't advance a race the user isn't watching.
             registerWatchActionHandler()
+            // Ask HealthKit for read/write authorization now (if not
+            // already granted) so the first race's HR queries during
+            // station advances have permission to return samples. iOS
+            // shows the prompt once ever; subsequent calls are no-ops.
+            // Non-blocking — auth arrives in parallel with the user
+            // prepping to tap Start Race.
+            requestHealthKitAuthIfNeeded()
         }
         .onDisappear {
             #if canImport(WatchConnectivity)
@@ -184,16 +191,37 @@ struct RaceView: View {
     }
 
     private func timerColumn(now: Date) -> some View {
-        VStack(spacing: 6) {
-            Text(RaceStats.format(viewModel.elapsed(at: now)))
+        // Read the target once so both the color-check and the subtitle
+        // reference the same value. `viewModel.activeRace` is the
+        // single source of truth for per-race metadata like this.
+        let target = viewModel.activeRace?.targetDuration
+        let elapsed = viewModel.elapsed(at: now)
+        // Warning tint kicks in exactly when the athlete crosses their
+        // goal time — gives a visual "you're past your target now"
+        // glance without needing to compute a delta in their head.
+        let isOverTarget = (target.map { elapsed > $0 }) ?? false
+
+        return VStack(spacing: 6) {
+            Text(RaceStats.format(elapsed))
                 .font(.raceTimer)
                 .monospacedDigit()
-                .foregroundStyle(Color.textPrimary)
+                .foregroundStyle(isOverTarget ? Color.warning : Color.textPrimary)
 
             Text("segment \(RaceStats.format(viewModel.currentSegmentElapsed(at: now)))")
                 .font(.metadata)
                 .monospacedDigit()
                 .foregroundStyle(Color.textSecondary)
+
+            // Target subtitle — only rendered when the athlete set
+            // one. Tiny caps-label style so it reads as metadata, not
+            // a second timer. Color matches the main timer so the
+            // "I'm over goal" cue reinforces itself across both rows.
+            if let target {
+                Text("target \(RaceStats.format(target))")
+                    .font(.metadata)
+                    .monospacedDigit()
+                    .foregroundStyle(isOverTarget ? Color.warning : Color.textTertiary)
+            }
         }
     }
 
@@ -255,6 +283,22 @@ struct RaceView: View {
             }
             .accessibilityLabel("View completed splits")
         }
+    }
+
+    // MARK: - HealthKit
+
+    // Kick off a one-time HealthKit authorization request. Fired from
+    // `.onAppear` so the prompt appears when the user arrives at the
+    // Race tab — contextual ("you're about to record a workout, here's
+    // the permission ask"), not at cold launch (which would feel
+    // invasive). Idempotent: iOS shows the system prompt once per
+    // install regardless of how many times this runs.
+    private func requestHealthKitAuthIfNeeded() {
+        #if canImport(HealthKit)
+        Task {
+            _ = await HealthKitService.shared.requestAuthorization()
+        }
+        #endif
     }
 
     // MARK: - Watch sync

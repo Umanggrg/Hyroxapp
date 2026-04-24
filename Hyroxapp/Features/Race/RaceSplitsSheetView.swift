@@ -73,7 +73,9 @@ struct RaceSplitsSheetView: View {
                 .padding(.bottom, 8)
 
                 VStack(spacing: 0) {
-                    ForEach(Array(viewModel.splits.enumerated()), id: \.element.id) { index, split in
+                    // id: \.offset supports custom workouts with repeated
+                    // stations — see comment in RaceSummaryView.
+                    ForEach(Array(viewModel.splits.enumerated()), id: \.offset) { index, split in
                         splitRow(index: index, split: split)
 
                         if index < viewModel.splits.count - 1 {

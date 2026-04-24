@@ -79,6 +79,72 @@ enum RaceStats {
         return thisTotal < earlierBest
     }
 
+    // MARK: - Per-station PB helpers
+
+    // Fastest previous duration for the given station across races that
+    // came strictly before `race`. Returns nil when the athlete has
+    // never completed that station in an earlier finished race — i.e.
+    // "no prior data to compare against." Callers use this to decide
+    // whether to show a delta (`Δ vs prior best`) or stay silent.
+    //
+    // Shape mirrors `wasPBWhenSet` so both PB paths (whole-race and
+    // per-station) read the same at the call site.
+    static func bestDuration(
+        for station: Station,
+        before race: Race,
+        among all: [Race]
+    ) -> TimeInterval? {
+        all
+            .filter { $0.createdAt < race.createdAt && $0.isFinished }
+            .flatMap(\.splits)
+            .filter { $0.station == station }
+            .map(\.duration)
+            .min()
+    }
+
+    // Was this specific split — the one at index `station` inside this
+    // specific race — the fastest time the athlete had logged for that
+    // station at the time the race was completed? Only races that
+    // actually broke the prior record get `true`; first-time completions
+    // also return `true` (no prior to beat = implicit PB).
+    static func wasPBSplit(
+        _ split: Split,
+        in race: Race,
+        among all: [Race]
+    ) -> Bool {
+        guard let prior = bestDuration(
+            for: split.station,
+            before: race,
+            among: all
+        ) else {
+            return true
+        }
+        return split.duration < prior
+    }
+
+    // Delta vs the athlete's prior best for this station, expressed as
+    // a signed TimeInterval:
+    //   - negative → this split was faster than prior best (good)
+    //   - positive → this split was slower than prior best (bad)
+    //   - nil      → no prior best, no delta to show
+    // Callers format with `format(_:)` plus a sign decoration; keeping
+    // the sign as part of the TimeInterval (not the string) makes the
+    // UI layer do the coloring decision.
+    static func deltaFromPriorBest(
+        for split: Split,
+        in race: Race,
+        among all: [Race]
+    ) -> TimeInterval? {
+        guard let prior = bestDuration(
+            for: split.station,
+            before: race,
+            among: all
+        ) else {
+            return nil
+        }
+        return split.duration - prior
+    }
+
     #endif  // !os(watchOS)
 
     // MARK: - Formatting (shared with watchOS)

@@ -103,4 +103,27 @@ enum Station: Int, CaseIterable, Identifiable, Codable, Hashable, Sendable {
     // The 16 segments in official HYROX order. Convenience alias — equivalent
     // to `Station.allCases` but reads more clearly at the call site.
     static let raceSequence: [Station] = Station.allCases
+
+    // The 9 canonical HYROX station *types* shown in the Custom Workout
+    // Builder's picker. `Station` has 16 enum cases (run1…run8 distinct
+    // so each slot in the standard race has a unique rawValue), but
+    // from the athlete's POV there's only one "1km Run" — so the picker
+    // collapses the eight run cases to a single `.run1` entry.
+    //
+    // Order here is the canonical display order HYROX uses in its
+    // station signage. If the user picks "1km Run" three times in a
+    // custom workout, the sequence gets three `.run1` entries — the
+    // engine and views handle duplicates because split IDs use
+    // position, not station rawValue.
+    static let canonicalPickerOptions: [Station] = [
+        .run1,
+        .skiErg,
+        .sledPush,
+        .sledPull,
+        .burpeeBroadJumps,
+        .rowing,
+        .farmersCarry,
+        .sandbagLunges,
+        .wallBalls
+    ]
 }
