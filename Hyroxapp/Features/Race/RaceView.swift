@@ -77,6 +77,17 @@ struct RaceView: View {
             // Push initial state so the watch is in sync on launch,
             // even if no race action has happened yet.
             publishWatchState()
+            // Register a handler for actions coming from the Watch.
+            // This view owns the race lifecycle, so it's the right
+            // place to dispatch. The handler is cleared on disappear
+            // so stray messages after the user leaves the Race tab
+            // don't advance a race the user isn't watching.
+            registerWatchActionHandler()
+        }
+        .onDisappear {
+            #if canImport(WatchConnectivity)
+            WatchCompanionService.shared.onAction = nil
+            #endif
         }
         // Fires when the user starts a new race, taps Done after finish,
         // or abandons mid-race — any transition in/out of an active-or-
@@ -247,6 +258,26 @@ struct RaceView: View {
     }
 
     // MARK: - Watch sync
+
+    // Install a handler for actions initiated on the Watch (tap Next
+    // Station from the wrist, etc.). The handler is held by the
+    // `WatchCompanionService` singleton and invoked on MainActor when
+    // a message arrives. Cleared in `.onDisappear` so actions received
+    // while the Race tab isn't on screen don't silently advance a race.
+    private func registerWatchActionHandler() {
+        #if canImport(WatchConnectivity)
+        WatchCompanionService.shared.onAction = { action in
+            switch action {
+            case .advance:
+                // Fire the same haptic + advance path as the iPhone's
+                // Next Station button so a wrist tap feels identical
+                // to a phone tap from the user's perspective.
+                Haptics.impact(.medium)
+                viewModel.advance()
+            }
+        }
+        #endif
+    }
 
     // Build a snapshot of the current race + user profile state and push
     // it to the watch companion. Called on view appear and on every

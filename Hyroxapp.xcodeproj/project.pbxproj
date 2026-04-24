@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		E100000000000001AAAAAAA1 /* HyroxappWatch Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = D8BC4D412F9B13B2004472F3 /* HyroxappWatch Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		5FDF83D32F9A9B1C0099C6D1 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -21,7 +25,28 @@
 			remoteGlobalIDString = 5FDF83C42F9A9B160099C6D1;
 			remoteInfo = Hyroxapp;
 		};
+		E100000000000002AAAAAAA2 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5FDF83BD2F9A9B160099C6D1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D8BC4D402F9B13B2004472F3;
+			remoteInfo = "HyroxappWatch Watch App";
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		E100000000000003AAAAAAA3 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				E100000000000001AAAAAAA1 /* HyroxappWatch Watch App.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		5FDF83C52F9A9B160099C6D1 /* Hyroxapp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Hyroxapp.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -42,6 +67,7 @@
 				Shared/RaceStats.swift,
 				Shared/Theme.swift,
 				Shared/WatchSync/RaceStateSnapshot.swift,
+				Shared/WatchSync/WatchAction.swift,
 			);
 			target = D8BC4D402F9B13B2004472F3 /* HyroxappWatch Watch App */;
 		};
@@ -137,10 +163,12 @@
 				5FDF83C12F9A9B160099C6D1 /* Sources */,
 				5FDF83C22F9A9B160099C6D1 /* Frameworks */,
 				5FDF83C32F9A9B160099C6D1 /* Resources */,
+				E100000000000003AAAAAAA3 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				E100000000000004AAAAAAA4 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				5FDF83C72F9A9B160099C6D1 /* Hyroxapp */,
@@ -340,6 +368,11 @@
 			isa = PBXTargetDependency;
 			target = 5FDF83C42F9A9B160099C6D1 /* Hyroxapp */;
 			targetProxy = 5FDF83DD2F9A9B1C0099C6D1 /* PBXContainerItemProxy */;
+		};
+		E100000000000004AAAAAAA4 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D8BC4D402F9B13B2004472F3 /* HyroxappWatch Watch App */;
+			targetProxy = E100000000000002AAAAAAA2 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 

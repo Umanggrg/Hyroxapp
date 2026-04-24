@@ -37,6 +37,19 @@ final class WatchCompanionService: NSObject {
 
     static let shared = WatchCompanionService()
 
+    // Callback invoked on MainActor when the Watch sends an action
+    // (e.g. tap Next Station from the wrist). Callers — typically
+    // `RaceView` — set this on `.onAppear` and clear it on
+    // `.onDisappear` so incoming actions are dispatched to whatever
+    // view is currently orchestrating the race. If no handler is set
+    // (race tab not on screen), the action is logged and dropped —
+    // advancing a race the user isn't looking at would be confusing.
+    //
+    // `@MainActor @Sendable` closure signature so it can be invoked
+    // from the nonisolated delegate method via `Task { @MainActor in
+    // onAction?(action) }` without concurrency warnings.
+    var onAction: (@MainActor @Sendable (WatchAction) -> Void)?
+
     private override init() {
         super.init()
     }
@@ -48,14 +61,13 @@ final class WatchCompanionService: NSObject {
     // wasn't live yet.
     func activate() {
         guard WCSession.isSupported() else {
-            // Some simulator or older device configurations don't support
-            // WatchConnectivity. Nothing to do — the phone app just runs
-            // without a watch companion.
+            print("[WatchCompanion] activate: WCSession.isSupported == false, skipping")
             return
         }
         let session = WCSession.default
         session.delegate = self
         session.activate()
+        print("[WatchCompanion] activate called — state=\(session.activationState.rawValue) paired=\(session.isPaired) installed=\(session.isWatchAppInstalled) reachable=\(session.isReachable)")
     }
 
     // Push the latest race state to the watch. Uses
@@ -77,17 +89,21 @@ final class WatchCompanionService: NSObject {
     // on the phone side should degrade because the watch isn't listening.
     func publish(_ snapshot: RaceStateSnapshot) {
         let session = WCSession.default
+        print("[WatchCompanion] publish requested phase=\(snapshot.phase.rawValue) stationIndex=\(snapshot.currentStationIndex) state=\(session.activationState.rawValue) paired=\(session.isPaired) installed=\(session.isWatchAppInstalled)")
+
         // Activation can be in-flight on first launch; pushing before it
         // completes raises. Skip if not fully activated — the view will
         // re-push on the next state change once activation finishes.
-        guard session.activationState == .activated else { return }
+        guard session.activationState == .activated else {
+            print("[WatchCompanion] publish SKIPPED — not activated")
+            return
+        }
 
         do {
             try session.updateApplicationContext(snapshot.toDictionary())
+            print("[WatchCompanion] publish OK")
         } catch {
-            // Intentional: logged silently for now. Hook into a structured
-            // logger (`os.Logger`) in a later polish pass.
-            _ = error
+            print("[WatchCompanion] publish FAILED — \(error.localizedDescription)")
         }
     }
 }
@@ -107,10 +123,7 @@ extension WatchCompanionService: WCSessionDelegate {
         activationDidCompleteWith activationState: WCSessionActivationState,
         error: Error?
     ) {
-        // Intentionally no logging yet — we'll add a structured logger
-        // (`Logger` from `os`) in Chunk 2b once we have real events to
-        // trace. Silent-by-default during scaffolding.
-        _ = (session, activationState, error)
+        print("[WatchCompanion] activation completed — state=\(activationState.rawValue) error=\(error?.localizedDescription ?? "none") paired=\(session.isPaired) installed=\(session.isWatchAppInstalled) reachable=\(session.isReachable)")
     }
 
     // iOS only — these two delegate methods don't exist on watchOS (the
@@ -130,6 +143,31 @@ extension WatchCompanionService: WCSessionDelegate {
         // call is the #1 cause of "my watch stopped receiving messages
         // after I switched devices."
         WCSession.default.activate()
+    }
+
+    // Watch → iPhone action receiver. Fired when the Watch calls
+    // `sendMessage(_:...)` with a payload that decodes into a WatchAction.
+    // Decodes on the background queue, then hops to MainActor to invoke
+    // the callback (which will typically mutate the race view model).
+    //
+    // This version has no replyHandler parameter — the Watch sends
+    // actions fire-and-forget. If we later need acknowledgements
+    // (e.g. "did the phone actually advance?"), we'd add a paired
+    // delegate method with a replyHandler.
+    nonisolated func session(
+        _ session: WCSession,
+        didReceiveMessage message: [String: Any]
+    ) {
+        print("[WatchCompanion] didReceiveMessage FIRED — keys: \(message.keys.sorted())")
+        guard let action = WatchAction(dictionary: message) else {
+            print("[WatchCompanion] didReceiveMessage — failed to decode action, ignoring")
+            return
+        }
+
+        Task { @MainActor in
+            print("[WatchCompanion] dispatching action=\(action) — handler \(Self.shared.onAction == nil ? "NOT set" : "set")")
+            Self.shared.onAction?(action)
+        }
     }
 }
 

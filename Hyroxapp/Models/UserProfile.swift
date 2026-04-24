@@ -43,7 +43,11 @@ final class UserProfile {
     //
     // Always read / write via `resolvedDivision`, never this property
     // directly, so the fallback default is consistently applied.
-    var division: Division? = .mensOpen
+    //
+    // Default value written as `Division.mensOpen` (fully qualified) —
+    // not `.mensOpen` — because SwiftData's `@Model` macro expansion
+    // can't infer the type from the optional declaration context.
+    var division: Division? = Division.mensOpen
 
     // Non-optional accessor with a safe fallback. Views and view models
     // should use this — it insulates them from the stored optional and
@@ -64,7 +68,7 @@ final class UserProfile {
         location: String = "",
         bio: String = "",
         avatarData: Data? = nil,
-        division: Division? = .mensOpen,
+        division: Division? = Division.mensOpen,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {

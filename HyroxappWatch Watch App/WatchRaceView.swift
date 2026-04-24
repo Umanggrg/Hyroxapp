@@ -166,12 +166,21 @@ struct WatchRaceView: View {
 
     // MARK: - Advance button
 
-    // Placeholder tap button — in Chunk 3 this sends a `.advance` action
-    // back to the phone via WCSession. For now it's a no-op button so
-    // the layout is correct and the user sees the right shape.
+    // On tap: fire a light haptic for immediate tactile confirmation
+    // ("your tap was seen"), then send the advance action to the paired
+    // iPhone. The iPhone's `RaceViewModel.advance()` handles the state
+    // transition; the resulting state change propagates back to the
+    // Watch via the application-context push, updating this view's
+    // `snapshot` within 1-2 seconds.
+    //
+    // No hold-to-finish on Watch yet — the phone still requires it on
+    // the final station, so the Watch's tap on station 16 is a safety
+    // risk if mistapped. Worth addressing in a polish pass; for MVP we
+    // rely on the user being deliberate with their wrist.
     private var advanceButton: some View {
         Button {
-            // No-op until Chunk 3 wires watch → phone messages.
+            Haptics.impact(.medium)
+            WatchRaceClient.shared.send(.advance)
         } label: {
             Text("Next Station")
                 .font(.system(size: 15, weight: .bold, design: .rounded))
