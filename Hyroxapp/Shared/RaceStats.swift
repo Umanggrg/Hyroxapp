@@ -4,9 +4,19 @@ import Foundation
 // Profile. Consolidated here so every surface uses the same numbers and the
 // same MM:SS / H:MM:SS rendering — future retuning (millisecond display,
 // pace per km, etc.) is a single-file change.
+//
+// A subset of this file is also shared with the watchOS target (via
+// target membership), because the watch's placeholder race screen needs
+// `RaceStats.format()` to render its timer. But the watch target does NOT
+// include `Race.swift` — Race is a SwiftData `@Model` with persistence
+// semantics the watch doesn't need. To keep one file for both platforms,
+// everything that touches `Race` is guarded `#if !os(watchOS)`; only
+// `format()` is unconditionally compiled and therefore visible on watch.
 enum RaceStats {
 
-    // MARK: - Per-race stats
+    // MARK: - Per-race stats (phone only)
+
+    #if !os(watchOS)
 
     static func totalTime(_ race: Race) -> String {
         format(race.totalDuration ?? 0)
@@ -34,7 +44,7 @@ enum RaceStats {
         return format(split.duration)
     }
 
-    // MARK: - Cross-race aggregates (for Profile)
+    // MARK: - Cross-race aggregates (for Profile) — phone only
 
     // Fastest total race time across the provided races (nil if none).
     static func personalBest(_ races: [Race]) -> TimeInterval? {
@@ -69,12 +79,15 @@ enum RaceStats {
         return thisTotal < earlierBest
     }
 
-    // MARK: - Formatting
+    #endif  // !os(watchOS)
+
+    // MARK: - Formatting (shared with watchOS)
 
     // Render a TimeInterval as MM:SS, or H:MM:SS when it crosses an hour.
     // Rounds down to whole seconds — sub-second precision is distracting on
     // the big timer and only matters in the split table where raw splits
-    // are already shown alongside.
+    // are already shown alongside. Pure arithmetic — no platform-specific
+    // dependencies — so it compiles unchanged on iOS and watchOS.
     static func format(_ interval: TimeInterval) -> String {
         let total = max(0, Int(interval))
         let h = total / 3600

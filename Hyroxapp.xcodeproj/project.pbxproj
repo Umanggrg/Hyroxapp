@@ -34,7 +34,14 @@
 		D846B5952F9B21B10022C5ED /* Exceptions for "Hyroxapp" folder in "HyroxappWatch Watch App" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				Features/Race/RaceEngine.swift,
+				Models/Division.swift,
+				Models/Split.swift,
+				Models/Station.swift,
+				Shared/Haptics.swift,
+				Shared/RaceStats.swift,
 				Shared/Theme.swift,
+				Shared/WatchSync/RaceStateSnapshot.swift,
 			);
 			target = D8BC4D402F9B13B2004472F3 /* HyroxappWatch Watch App */;
 		};

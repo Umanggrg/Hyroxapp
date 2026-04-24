@@ -32,14 +32,27 @@ final class UserProfile {
 
     // Competitive HYROX division. Determines the wall ball rep count in
     // the race screen and (eventually) sled / sandbag weight defaults.
-    // Defaults to `.mensOpen` on first install for existing rows that
-    // predate this field — users can change it from Settings.
     //
-    // Stored as a raw String via SwiftData's default handling of
-    // RawRepresentable enums. Adding new cases later is a safe additive
-    // change; the field has a default so lightweight migration populates
-    // existing rows with `.mensOpen`.
-    var division: Division = Division.mensOpen
+    // Stored as Optional<Division> on purpose: SwiftData's lightweight
+    // migration doesn't reliably populate a new non-optional field on
+    // pre-existing rows (observed crash:
+    //   "Could not cast value of type 'Swift.Optional<Any>' to 'Division'"
+    // on `UserProfile.division.getter`). Optional-plus-default is the
+    // robust pattern — existing rows load as `nil`, the `resolvedDivision`
+    // computed property below gives every caller a non-optional value.
+    //
+    // Always read / write via `resolvedDivision`, never this property
+    // directly, so the fallback default is consistently applied.
+    var division: Division? = .mensOpen
+
+    // Non-optional accessor with a safe fallback. Views and view models
+    // should use this — it insulates them from the stored optional and
+    // ensures a consistent default (`.mensOpen`) when the field is nil
+    // (freshly migrated rows from before the division field existed).
+    var resolvedDivision: Division {
+        get { division ?? .mensOpen }
+        set { division = newValue }
+    }
 
     var createdAt: Date
     var updatedAt: Date
@@ -51,7 +64,7 @@ final class UserProfile {
         location: String = "",
         bio: String = "",
         avatarData: Data? = nil,
-        division: Division = .mensOpen,
+        division: Division? = .mensOpen,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {

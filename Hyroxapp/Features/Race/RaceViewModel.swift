@@ -101,6 +101,11 @@ final class RaceViewModel {
         engine = RaceEngine(sequence: race.sequence, state: race.engineState)
         activeRace = race
         pendingResume = nil
+        // If multiple unfinished races accumulated from prior force-kills
+        // (we only ever offer the most recent), delete the older orphans
+        // so History stays clean and future checkForResumableRace calls
+        // don't fish up stale rows.
+        purgeOrphanedUnfinishedRaces(excluding: race)
     }
 
     // User tapped Discard on the launch prompt.
@@ -108,6 +113,30 @@ final class RaceViewModel {
         guard let race = pendingResume else { return }
         modelContext?.delete(race)
         pendingResume = nil
+        // Discard also cleans up any even older orphans — the user has
+        // signaled they don't want any unfinished race to persist.
+        purgeOrphanedUnfinishedRaces(excluding: nil)
+        saveContextSilently()
+    }
+
+    // Delete every unfinished (`endedAt == nil`) race except optionally
+    // the one being actively resumed. Called after both resume and
+    // discard flows to keep storage tidy — a single athlete should never
+    // have more than one unfinished race in flight at a time.
+    //
+    // `except` is the one race we want to keep; pass `nil` on discard to
+    // wipe everything unfinished.
+    private func purgeOrphanedUnfinishedRaces(excluding except: Race?) {
+        guard let modelContext else { return }
+
+        let descriptor = FetchDescriptor<Race>(
+            predicate: #Predicate { $0.endedAt == nil }
+        )
+        guard let allUnfinished = try? modelContext.fetch(descriptor) else { return }
+
+        for race in allUnfinished where race.id != except?.id {
+            modelContext.delete(race)
+        }
         saveContextSilently()
     }
 

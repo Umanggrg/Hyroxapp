@@ -1,37 +1,63 @@
 import SwiftUI
 
-// Static placeholder Race screen for the watchOS companion app.
+// Live race screen for the watchOS companion app.
 //
-// Today renders hardcoded values — 00:00 timer, "1km Run" station, etc.
-// No state, no phone connectivity. The point of this step is to verify:
-//   - the Watch target compiles cleanly against Theme.swift
-//   - the watchOS simulator renders the dark Strava-style theme correctly
-//   - the layout fits the tiny watch canvas without clipping
+// Reads `WatchRaceClient.shared.snapshot` via `@Environment` and renders
+// one of three states:
+//   - `.waiting`   — no snapshot received yet (launched before the phone
+//                    pushed anything, or paired phone not reachable).
+//   - `.inProgress` — live race: computes its own timer from
+//                     `snapshot.startedAt` every frame via TimelineView,
+//                     shows current station + target + advance button.
+//   - `.finished`   — frozen final time (from `endedAt - startedAt`),
+//                     labeled "Finished".
+// A separate `notStarted` phase rolls into `.waiting` visually — an
+// idle phone with no active race looks the same to the athlete as a
+// watch that hasn't heard from the phone yet.
 //
-// Next session this becomes driven by a `WatchRaceClient` that receives
-// race state from the phone via WCSession. When that lands, the View's
-// shape doesn't change — it just reads its values from a `@State` or
-// `@Observable` instead of hardcoded literals.
-//
-// Design notes for the watch canvas (much smaller than iOS):
-//   - Apple Watch screens are 176×216pt (38mm) up to 224×272pt (Ultra).
-//   - Horizontal padding is tight — use `.padding(.horizontal, 6)` at most.
-//   - The Digital Crown can scroll, but taps land on whatever's visible.
-//   - Keep type sizes smaller than iOS (36pt timer vs iOS's 72pt).
+// The watch does NOT own race state. Every field rendered here comes
+// from the snapshot pushed by the phone. The only thing the watch
+// computes locally is elapsed time (to avoid per-frame pushes eating
+// the battery and network).
 struct WatchRaceView: View {
+
+    @Environment(WatchRaceClient.self) private var client
+
     var body: some View {
         ZStack {
-            // Full-bleed background to match the phone app's aesthetic.
-            // watchOS doesn't have the same `.ignoresSafeArea` patterns
-            // as iOS but `Color.background` fills the scene root anyway.
             Color.background.ignoresSafeArea()
 
+            // Switch on phase. The `case` bindings pull the snapshot into
+            // each branch so we can pass concrete values to the subviews
+            // without having to unwrap optional fields everywhere.
+            if let snapshot = client.snapshot {
+                switch snapshot.phase {
+                case .inProgress:
+                    inProgressView(snapshot: snapshot)
+                case .finished:
+                    finishedView(snapshot: snapshot)
+                case .notStarted:
+                    waitingView
+                }
+            } else {
+                waitingView
+            }
+        }
+    }
+
+    // MARK: - In-progress
+
+    // Live race layout. TimelineView re-evaluates every animation frame;
+    // we pass `context.date` into the timer formatter so the digits tick
+    // without any manual `Timer` bookkeeping.
+    private func inProgressView(snapshot: RaceStateSnapshot) -> some View {
+        TimelineView(.periodic(from: .now, by: 0.5)) { context in
             VStack(spacing: 8) {
-                stationHeader
+                stationHeader(snapshot: snapshot)
 
                 Spacer(minLength: 4)
 
-                timerDisplay
+                timerDisplay(snapshot: snapshot, now: context.date)
 
                 Spacer(minLength: 4)
 
@@ -42,53 +68,110 @@ struct WatchRaceView: View {
         }
     }
 
-    // Small Strava-style caps label telling you which segment you're on.
-    // On the phone this lives in the top header with a splits-peek chip;
-    // on the watch we keep just the counter for screen real estate.
-    private var stationHeader: some View {
+    private func stationHeader(snapshot: RaceStateSnapshot) -> some View {
         VStack(spacing: 2) {
-            Text("STATION 1 OF 16")
+            // 1-based station counter — matches the phone's "Station 3 of 16" label.
+            Text("STATION \(snapshot.completedStationsCount + 1) OF \(snapshot.totalStations)")
                 .font(.system(size: 10, weight: .bold))
                 .tracking(0.5)
                 .foregroundStyle(Color.textSecondary)
 
-            Text("1km Run")
+            Text(snapshot.currentStation?.displayName ?? "—")
                 .font(.system(size: 18, weight: .bold, design: .rounded))
                 .foregroundStyle(Color.textPrimary)
                 .lineLimit(1)
 
-            Text("1000 m")
-                .font(.system(size: 11))
-                .foregroundStyle(Color.textSecondary)
+            // Station target uses the user's division (from the snapshot)
+            // so wall balls renders 75 reps / 100 reps correctly on the
+            // watch too — no need for the watch to know about UserProfile.
+            if let station = snapshot.currentStation {
+                Text(station.target(for: snapshot.division))
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.textSecondary)
+            }
         }
     }
 
-    // The hero timer. Smaller than phone's 72pt — watchOS face is ~5x
-    // narrower than an iPhone, so 36pt is the sweet spot where the digits
-    // still read at arm's length without wrapping.
-    private var timerDisplay: some View {
-        VStack(spacing: 2) {
-            Text("00:00")
+    private func timerDisplay(snapshot: RaceStateSnapshot, now: Date) -> some View {
+        // Compute elapsed locally from startedAt so the watch ticks in
+        // sync with the phone without per-second pushes. `startedAt` is
+        // always present in inProgress snapshots — but we guard with ??
+        // for safety.
+        let total = snapshot.startedAt.map { now.timeIntervalSince($0) } ?? 0
+        let segment = snapshot.currentSegmentStartedAt.map { now.timeIntervalSince($0) } ?? 0
+
+        return VStack(spacing: 2) {
+            Text(RaceStats.format(total))
                 .font(.system(size: 36, weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(Color.textPrimary)
 
-            Text("segment 00:00")
+            Text("segment \(RaceStats.format(segment))")
                 .font(.system(size: 10))
                 .monospacedDigit()
                 .foregroundStyle(Color.textSecondary)
         }
     }
 
-    // Giant primary action button — same ergonomic goal as the phone's
-    // 80pt in-race button. On watchOS we use the full width and ~44pt
-    // height; any less and sweaty fingers miss it. No hold-to-finish on
-    // the watch today (we'll add that when we wire up the state machine
-    // next session).
+    // MARK: - Finished
+
+    private func finishedView(snapshot: RaceStateSnapshot) -> some View {
+        let total: TimeInterval = {
+            guard let start = snapshot.startedAt, let end = snapshot.endedAt else {
+                return 0
+            }
+            return end.timeIntervalSince(start)
+        }()
+
+        return VStack(spacing: 10) {
+            Text("FINISHED")
+                .font(.system(size: 11, weight: .bold))
+                .tracking(0.5)
+                .foregroundStyle(Color.accent)
+
+            Text(RaceStats.format(total))
+                .font(.system(size: 36, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(Color.textPrimary)
+
+            Text("\(snapshot.completedStationsCount) / \(snapshot.totalStations) stations")
+                .font(.system(size: 11))
+                .foregroundStyle(Color.textSecondary)
+        }
+        .padding(.horizontal, 6)
+    }
+
+    // MARK: - Waiting / idle
+
+    // Shown when no snapshot has arrived yet, OR the phone reports
+    // `.notStarted` (no race active). Visually identical for both —
+    // from the athlete's perspective, nothing's happening yet.
+    private var waitingView: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "timer")
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(Color.textTertiary)
+
+            Text("Ready")
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .foregroundStyle(Color.textPrimary)
+
+            Text("Start a race on your iPhone")
+                .font(.system(size: 11))
+                .foregroundStyle(Color.textSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 12)
+        }
+    }
+
+    // MARK: - Advance button
+
+    // Placeholder tap button — in Chunk 3 this sends a `.advance` action
+    // back to the phone via WCSession. For now it's a no-op button so
+    // the layout is correct and the user sees the right shape.
     private var advanceButton: some View {
         Button {
-            // No-op placeholder. Will route to `WatchCompanionService.advance()`
-            // in the next session's work.
+            // No-op until Chunk 3 wires watch → phone messages.
         } label: {
             Text("Next Station")
                 .font(.system(size: 15, weight: .bold, design: .rounded))
@@ -104,4 +187,5 @@ struct WatchRaceView: View {
 
 #Preview {
     WatchRaceView()
+        .environment(WatchRaceClient.shared)
 }

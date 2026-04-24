@@ -51,12 +51,16 @@ struct SettingsView: View {
     // audio cues, they slot in here.
     private var hyroxSection: some View {
         Section {
-            // `Picker` inside a Form on iOS renders as a tappable row that
-            // opens a dedicated pick screen — exactly what we want for a
-            // list of 4 divisions. Bind directly to the model's field so
-            // changes persist without a save button (SwiftData autosaves
-            // on model dealloc and the ModelContext debounces writes).
-            Picker("Division", selection: $profile.division) {
+            // Picker binds through a custom Binding so that the Picker
+            // still works with non-optional `Division` values, even
+            // though `UserProfile.division` is stored as optional (see
+            // UserProfile.swift for why). The getter coalesces nil to
+            // `.mensOpen`; the setter writes the new value straight
+            // back to the optional storage.
+            Picker("Division", selection: Binding(
+                get: { profile.resolvedDivision },
+                set: { profile.resolvedDivision = $0 }
+            )) {
                 ForEach(Division.allCases) { division in
                     Text(division.displayName).tag(division)
                 }
@@ -67,7 +71,7 @@ struct SettingsView: View {
             // Open/Pro split know what changes — we're not hiding the
             // rep-count effect behind a setting name.
             footnote(
-                "Wall balls default to \(profile.division.wallBallCount) reps for \(profile.division.displayName)."
+                "Wall balls default to \(profile.resolvedDivision.wallBallCount) reps for \(profile.resolvedDivision.displayName)."
             )
             .listRowBackground(Color.surface)
         } header: {

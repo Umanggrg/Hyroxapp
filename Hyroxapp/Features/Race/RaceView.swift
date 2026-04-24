@@ -29,8 +29,11 @@ struct RaceView: View {
     @Query(sort: [SortDescriptor(\UserProfile.createdAt, order: .forward)])
     private var profiles: [UserProfile]
 
+    // Safe accessor — `resolvedDivision` coalesces the optional-stored
+    // division to `.mensOpen` for rows that predate the field. Reading
+    // `profile.division` directly would crash on old rows post-migration.
     private var division: Division {
-        profiles.first?.division ?? .mensOpen
+        profiles.first?.resolvedDivision ?? .mensOpen
     }
 
     // Drives the "cancel race" confirmation alert. Kept in the view because
@@ -71,6 +74,21 @@ struct RaceView: View {
             // Bind first so the subsequent fetch has a context to query.
             viewModel.bindModelContext(modelContext)
             viewModel.checkForResumableRace()
+            // Push initial state so the watch is in sync on launch,
+            // even if no race action has happened yet.
+            publishWatchState()
+        }
+        // Fires when the user starts a new race, taps Done after finish,
+        // or abandons mid-race — any transition in/out of an active-or-
+        // finished race. Covers the "race began" and "race reset" cases.
+        .onChange(of: viewModel.hasStarted) { _, _ in
+            publishWatchState()
+        }
+        // Fires on every station advance (0 → 1 → ... → 16). When the
+        // final advance transitions the engine to `.finished`, this still
+        // fires because the count increments as part of the advance.
+        .onChange(of: viewModel.completedSegmentsCount) { _, _ in
+            publishWatchState()
         }
         // Keep the screen awake for the duration of an active race.
         // CLAUDE.md §6: the display must not dim mid-workout. Toggled off
@@ -226,6 +244,70 @@ struct RaceView: View {
             }
             .accessibilityLabel("View completed splits")
         }
+    }
+
+    // MARK: - Watch sync
+
+    // Build a snapshot of the current race + user profile state and push
+    // it to the watch companion. Called on view appear and on every
+    // meaningful viewModel state change (see `.onChange` modifiers
+    // above). Skips on platforms where WatchConnectivity isn't available
+    // (macOS-native builds).
+    //
+    // Deriving the snapshot here rather than inside `RaceViewModel` keeps
+    // the view model free of cross-cutting sync concerns — it stays the
+    // single source of race truth, and the orchestrating view layer
+    // handles the "what other surfaces need to know" plumbing.
+    private func publishWatchState() {
+        #if canImport(WatchConnectivity)
+        let phase: RaceStateSnapshot.Phase
+        let startedAt: Date?
+        let segmentStartedAt: Date?
+        let endedAt: Date?
+
+        switch viewModel.engine.state {
+        case .notStarted:
+            phase = .notStarted
+            startedAt = nil
+            segmentStartedAt = nil
+            endedAt = nil
+        case .inProgress(let raceStart, let segStart, _):
+            phase = .inProgress
+            startedAt = raceStart
+            segmentStartedAt = segStart
+            endedAt = nil
+        case .finished(let raceStart, let raceEnd, _):
+            phase = .finished
+            startedAt = raceStart
+            segmentStartedAt = nil
+            endedAt = raceEnd
+        }
+
+        // `currentStation` is nil once the race has finished (no next
+        // station to point at). Fall back to the last station's index
+        // (`totalSegments - 1`) so the watch still shows Wall Balls
+        // on its finished state.
+        let stationIndex: Int = {
+            if let station = viewModel.currentStation {
+                return station.rawValue
+            } else {
+                return max(0, viewModel.totalSegments - 1)
+            }
+        }()
+
+        let snapshot = RaceStateSnapshot(
+            phase: phase,
+            startedAt: startedAt,
+            currentSegmentStartedAt: segmentStartedAt,
+            currentStationIndex: stationIndex,
+            completedStationsCount: viewModel.completedSegmentsCount,
+            totalStations: viewModel.totalSegments,
+            divisionRaw: division.rawValue,
+            endedAt: endedAt
+        )
+
+        WatchCompanionService.shared.publish(snapshot)
+        #endif
     }
 
     // Intermediate stations get an instant-tap button — no risk in advancing
