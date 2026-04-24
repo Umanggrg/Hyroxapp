@@ -105,12 +105,42 @@ struct EditProfileView: View {
         Section("Profile") {
             TextField("Name", text: $displayName)
                 .listRowBackground(Color.surface)
-            TextField("Handle", text: $handle)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .listRowBackground(Color.surface)
+
+            // Handle gets its own row-group so the live-preview / validation
+            // hint can live inline. `VStack(alignment: .leading, spacing: 4)`
+            // keeps the helper text snug under the field.
+            VStack(alignment: .leading, spacing: 6) {
+                TextField("Handle", text: $handle)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+
+                handleHelper
+            }
+            .listRowBackground(Color.surface)
+
             TextField("Location", text: $location)
                 .listRowBackground(Color.surface)
+        }
+    }
+
+    // Live preview of the saved handle + validation feedback. When empty,
+    // nothing shows (the placeholder is self-explanatory). When non-empty:
+    //   - valid   → green "Will save as @foo"
+    //   - invalid → red explanation of which rule failed
+    @ViewBuilder
+    private var handleHelper: some View {
+        let trimmed = handle.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty {
+            let normalized = Self.normalizedHandle(trimmed)
+            if let error = Self.handleValidationError(for: normalized) {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(Color.warning)
+            } else {
+                Text("Will save as @\(normalized)")
+                    .font(.caption)
+                    .foregroundStyle(Color.success)
+            }
         }
     }
 
@@ -144,20 +174,76 @@ struct EditProfileView: View {
 
     // MARK: - Logic
 
+    // Name has to be non-empty, handle has to normalize to something that
+    // matches the allowed character set + length rules. Used to gate the
+    // Save button so bad data never reaches the SwiftData model.
     private var isValid: Bool {
-        !displayName.trimmingCharacters(in: .whitespaces).isEmpty &&
-        !handle.trimmingCharacters(in: .whitespaces).isEmpty
+        let trimmedName = displayName.trimmingCharacters(in: .whitespaces)
+        guard !trimmedName.isEmpty else { return false }
+
+        let normalized = Self.normalizedHandle(handle)
+        return Self.handleValidationError(for: normalized) == nil
     }
 
     private func save() {
         profile.displayName = displayName.trimmingCharacters(in: .whitespaces)
-        profile.handle = handle.trimmingCharacters(in: .whitespaces)
+        // Always write the normalized form — strips stray @, whitespace,
+        // mixed casing. Ensures the DB-facing handle is a predictable shape
+        // long before Supabase enforces uniqueness on it.
+        profile.handle = Self.normalizedHandle(handle)
         profile.location = location.trimmingCharacters(in: .whitespaces)
         profile.bio = bio.trimmingCharacters(in: .whitespaces)
         profile.avatarData = avatarData
         profile.updatedAt = Date()
         try? modelContext.save()
         dismiss()
+    }
+
+    // MARK: - Handle helpers
+
+    // Allowed handle alphabet: lowercase letters, digits, underscores. Max
+    // length is 20, in line with what most social apps cap usernames at.
+    // Min 3 because anything shorter is painful to disambiguate and makes
+    // uniqueness collisions worse when the cloud lands.
+    private static let handlePattern = /^[a-z0-9_]{3,20}$/
+    private static let handleMaxLength = 20
+    private static let handleMinLength = 3
+
+    // Normalize a raw handle string:
+    //   1. Trim whitespace
+    //   2. Drop a single leading `@` if present (users often type it out
+    //      of habit; the storage form doesn't carry the sigil)
+    //   3. Lowercase
+    // The result isn't guaranteed valid — it just gets us to the canonical
+    // form we'll then validate against the pattern.
+    static func normalizedHandle(_ raw: String) -> String {
+        var s = raw.trimmingCharacters(in: .whitespaces)
+        if s.hasPrefix("@") {
+            s.removeFirst()
+        }
+        return s.lowercased()
+    }
+
+    // Returns a human-readable error message if the normalized handle is
+    // invalid, or nil if it's clean. Kept deliberately short — this text
+    // renders inline under the text field so brevity matters.
+    static func handleValidationError(for normalized: String) -> String? {
+        if normalized.isEmpty {
+            return "Handle is required"
+        }
+        if normalized.count < handleMinLength {
+            return "At least \(handleMinLength) characters"
+        }
+        if normalized.count > handleMaxLength {
+            return "At most \(handleMaxLength) characters"
+        }
+        // Regex literal `/^[a-z0-9_]{3,20}$/` from Swift 5.7+ gives us
+        // compile-checked matching. `.wholeMatch` returns nil when the
+        // input fails the pattern.
+        if (try? handlePattern.wholeMatch(in: normalized)) == nil {
+            return "Letters, numbers, underscore only"
+        }
+        return nil
     }
 
     private func loadPhoto(_ item: PhotosPickerItem) {

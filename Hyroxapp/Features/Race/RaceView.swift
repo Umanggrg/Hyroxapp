@@ -21,9 +21,26 @@ struct RaceView: View {
     // classes — `@StateObject` is only for legacy `ObservableObject`).
     @State private var viewModel = RaceViewModel()
 
+    // The user's profile — single row guaranteed by the ProfileView
+    // bootstrap. We read `.division` from it to show the right wall ball
+    // rep count on the final station. Falls back to `.mensOpen` if the
+    // bootstrap hasn't run yet (first launch, Race tab tapped before
+    // Profile) — harmless default.
+    @Query(sort: [SortDescriptor(\UserProfile.createdAt, order: .forward)])
+    private var profiles: [UserProfile]
+
+    private var division: Division {
+        profiles.first?.division ?? .mensOpen
+    }
+
     // Drives the "cancel race" confirmation alert. Kept in the view because
     // it's pure UI state (modal presentation) with no persistence meaning.
     @State private var showingCancelConfirm = false
+
+    // Drives the mid-race splits peek sheet. Read-only view of completed
+    // splits so the athlete can glance at their pace without abandoning the
+    // race screen.
+    @State private var showingSplits = false
 
     // SwiftUI injects the app's `ModelContext` via the environment. We hand
     // it to the VM on appear so it can insert / update / delete `Race` rows.
@@ -89,7 +106,8 @@ struct RaceView: View {
     private var inProgressView: some View {
         TimelineView(.periodic(from: .now, by: 0.05)) { context in
             VStack(spacing: 0) {
-                HStack {
+                HStack(spacing: 10) {
+                    splitsChipButton
                     Text("Station \(viewModel.completedSegmentsCount + 1) of \(viewModel.totalSegments)")
                         .capsLabelStyle()
                     Spacer()
@@ -113,6 +131,11 @@ struct RaceView: View {
                     .padding(.bottom, 16)
             }
         }
+        #if canImport(UIKit)
+        .sheet(isPresented: $showingSplits) {
+            RaceSplitsSheetView(viewModel: viewModel)
+        }
+        #endif
     }
 
     private var stationHeadline: some View {
@@ -122,7 +145,9 @@ struct RaceView: View {
                     .font(.stationTitle)
                     .foregroundStyle(Color.textPrimary)
                     .multilineTextAlignment(.center)
-                Text(station.target)
+                // Pass the user's division so wall balls renders the
+                // correct rep count (75 for Women's Open, 100 otherwise).
+                Text(station.target(for: division))
                     .font(.metadata)
                     .foregroundStyle(Color.textSecondary)
             }
@@ -174,26 +199,64 @@ struct RaceView: View {
         .accessibilityLabel("Cancel race")
     }
 
-    private var advanceButton: some View {
-        Button {
-            // Fire the haptic before advancing so the buzz confirms the tap
-            // was received even if the next state transition happens to lag
-            // one frame. Final segment gets a distinct success pattern.
-            let isFinalAdvance = viewModel.upcomingStation == nil
-            if isFinalAdvance {
-                Haptics.success()
-            } else {
-                Haptics.impact(.medium)
+    // A chip-style count of completed splits in the header's top-left. Taps
+    // open the splits peek sheet — a low-friction way to glance at pace
+    // without leaving the race screen. Hidden before the first split is
+    // logged; nothing to show there.
+    @ViewBuilder
+    private var splitsChipButton: some View {
+        if viewModel.completedSegmentsCount > 0 {
+            Button {
+                showingSplits = true
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "list.bullet")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("\(viewModel.completedSegmentsCount) Split\(viewModel.completedSegmentsCount == 1 ? "" : "s")")
+                        .font(.caption2.weight(.bold))
+                        .tracking(0.5)
+                        .textCase(.uppercase)
+                }
+                .foregroundStyle(Color.textSecondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule().fill(Color.surface)
+                )
             }
-            viewModel.advance()
-        } label: {
-            Text(viewModel.upcomingStation == nil ? "Finish Race" : "Next Station")
-                .font(.system(size: 24, weight: .bold, design: .rounded))
-                .frame(maxWidth: .infinity)
-                .frame(height: Layout.raceButtonHeight)
-                .background(Color.accent)
-                .foregroundStyle(Color.textPrimary)
-                .clipShape(RoundedRectangle(cornerRadius: Layout.cardCornerRadius))
+            .accessibilityLabel("View completed splits")
+        }
+    }
+
+    // Intermediate stations get an instant-tap button — no risk in advancing
+    // early, you're just moving to the next segment. The final station gets
+    // a hold-to-confirm button because a stray tap there locks the race's
+    // total time with no undo. The branch is pure UI; the view model's
+    // `advance()` contract is identical in both cases.
+    @ViewBuilder
+    private var advanceButton: some View {
+        if viewModel.upcomingStation == nil {
+            HoldToConfirmButton(title: "Hold to Finish") {
+                // `HoldToConfirmButton` fires its own success haptic on
+                // completion — don't double-buzz.
+                viewModel.advance()
+            }
+        } else {
+            Button {
+                // Fire the haptic before advancing so the buzz confirms
+                // the tap was received even if the next state transition
+                // happens to lag one frame.
+                Haptics.impact(.medium)
+                viewModel.advance()
+            } label: {
+                Text("Next Station")
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: Layout.raceButtonHeight)
+                    .background(Color.accent)
+                    .foregroundStyle(Color.textPrimary)
+                    .clipShape(RoundedRectangle(cornerRadius: Layout.cardCornerRadius))
+            }
         }
     }
 }

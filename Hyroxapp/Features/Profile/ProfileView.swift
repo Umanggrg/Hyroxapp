@@ -23,6 +23,7 @@ struct ProfileView: View {
     ) private var races: [Race]
 
     @State private var isEditing = false
+    @State private var isShowingSettings = false
 
     var body: some View {
         NavigationStack {
@@ -32,7 +33,7 @@ struct ProfileView: View {
                 ScrollView {
                     VStack(spacing: 28) {
                         if let profile = profiles.first {
-                            ProfileHeaderView(profile: profile)
+                            ProfileHeaderView(profile: profile, raceCount: races.count)
                                 .padding(.top, 8)
                         }
 
@@ -40,6 +41,7 @@ struct ProfileView: View {
                             emptyStats
                         } else {
                             StatsGridView(items: aggregates)
+                            recentRacesSection
                         }
                     }
                     .padding(.horizontal, Layout.screenMargin)
@@ -48,8 +50,23 @@ struct ProfileView: View {
             }
             .navigationTitle("Profile")
             .hyroxDarkNavigationBar()
+            .navigationDestination(for: Race.self) { race in
+                RaceDetailView(race: race)
+            }
             .toolbar {
                 #if !os(macOS)
+                // Settings gear goes on the leading edge, Edit on the
+                // trailing edge — mirrors the conventional iOS pattern
+                // (Back/Cancel on left, confirm/action on right).
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        isShowingSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .disabled(profiles.first == nil)
+                    .accessibilityLabel("Settings")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Edit") { isEditing = true }
                         .disabled(profiles.first == nil)
@@ -64,7 +81,39 @@ struct ProfileView: View {
                         .preferredColorScheme(.dark)
                 }
             }
+            .sheet(isPresented: $isShowingSettings) {
+                if let profile = profiles.first {
+                    SettingsView(profile: profile)
+                }
+            }
             #endif
+        }
+    }
+
+    // Most-recent finished races. Capped at 3 for a tight Strava-style
+    // profile layout — if the user wants more, they use the History tab.
+    private var recentRaces: [Race] {
+        Array(races.prefix(3))
+    }
+
+    // Section displayed below the stats grid. Hidden entirely when no
+    // finished races (the empty state above already covers that case).
+    private var recentRacesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Recent Races")
+                    .capsLabelStyle()
+                Spacer()
+            }
+
+            ForEach(recentRaces) { race in
+                NavigationLink(value: race) {
+                    // Use the full list for PB evaluation — not just the 3
+                    // we're showing — so the badge is accurate.
+                    RaceCardView(race: race, allRaces: races)
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 

@@ -6,10 +6,6 @@
 	objectVersion = 77;
 	objects = {
 
-/* Begin PBXBuildFile section */
-		5FDF83FE2F9AA00E0099C6D1 /* CLAUDE-2.md in Resources */ = {isa = PBXBuildFile; fileRef = 5FDF83FD2F9AA00E0099C6D1 /* CLAUDE-2.md */; };
-/* End PBXBuildFile section */
-
 /* Begin PBXContainerItemProxy section */
 		5FDF83D32F9A9B1C0099C6D1 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -31,12 +27,25 @@
 		5FDF83C52F9A9B160099C6D1 /* Hyroxapp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Hyroxapp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5FDF83D22F9A9B1C0099C6D1 /* HyroxappTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HyroxappTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		5FDF83DC2F9A9B1C0099C6D1 /* HyroxappUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HyroxappUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		5FDF83FD2F9AA00E0099C6D1 /* CLAUDE-2.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "CLAUDE-2.md"; sourceTree = "<group>"; };
+		D8BC4D412F9B13B2004472F3 /* HyroxappWatch Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "HyroxappWatch Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		D846B5952F9B21B10022C5ED /* Exceptions for "Hyroxapp" folder in "HyroxappWatch Watch App" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Shared/Theme.swift,
+			);
+			target = D8BC4D402F9B13B2004472F3 /* HyroxappWatch Watch App */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		5FDF83C72F9A9B160099C6D1 /* Hyroxapp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				D846B5952F9B21B10022C5ED /* Exceptions for "Hyroxapp" folder in "HyroxappWatch Watch App" target */,
+			);
 			path = Hyroxapp;
 			sourceTree = "<group>";
 		};
@@ -48,6 +57,11 @@
 		5FDF83DF2F9A9B1C0099C6D1 /* HyroxappUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = HyroxappUITests;
+			sourceTree = "<group>";
+		};
+		D8BC4D422F9B13B2004472F3 /* HyroxappWatch Watch App */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "HyroxappWatch Watch App";
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -74,6 +88,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D8BC4D3E2F9B13B2004472F3 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -83,7 +104,7 @@
 				5FDF83C72F9A9B160099C6D1 /* Hyroxapp */,
 				5FDF83D52F9A9B1C0099C6D1 /* HyroxappTests */,
 				5FDF83DF2F9A9B1C0099C6D1 /* HyroxappUITests */,
-				5FDF83FD2F9AA00E0099C6D1 /* CLAUDE-2.md */,
+				D8BC4D422F9B13B2004472F3 /* HyroxappWatch Watch App */,
 				5FDF83C62F9A9B160099C6D1 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -94,6 +115,7 @@
 				5FDF83C52F9A9B160099C6D1 /* Hyroxapp.app */,
 				5FDF83D22F9A9B1C0099C6D1 /* HyroxappTests.xctest */,
 				5FDF83DC2F9A9B1C0099C6D1 /* HyroxappUITests.xctest */,
+				D8BC4D412F9B13B2004472F3 /* HyroxappWatch Watch App.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -169,6 +191,28 @@
 			productReference = 5FDF83DC2F9A9B1C0099C6D1 /* HyroxappUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		D8BC4D402F9B13B2004472F3 /* HyroxappWatch Watch App */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D8BC4D492F9B13B3004472F3 /* Build configuration list for PBXNativeTarget "HyroxappWatch Watch App" */;
+			buildPhases = (
+				D8BC4D3D2F9B13B2004472F3 /* Sources */,
+				D8BC4D3E2F9B13B2004472F3 /* Frameworks */,
+				D8BC4D3F2F9B13B2004472F3 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				D8BC4D422F9B13B2004472F3 /* HyroxappWatch Watch App */,
+			);
+			name = "HyroxappWatch Watch App";
+			packageProductDependencies = (
+			);
+			productName = "HyroxappWatch Watch App";
+			productReference = D8BC4D412F9B13B2004472F3 /* HyroxappWatch Watch App.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -176,7 +220,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2630;
+				LastSwiftUpdateCheck = 2640;
 				LastUpgradeCheck = 2630;
 				TargetAttributes = {
 					5FDF83C42F9A9B160099C6D1 = {
@@ -189,6 +233,9 @@
 					5FDF83DB2F9A9B1C0099C6D1 = {
 						CreatedOnToolsVersion = 26.3;
 						TestTargetID = 5FDF83C42F9A9B160099C6D1;
+					};
+					D8BC4D402F9B13B2004472F3 = {
+						CreatedOnToolsVersion = 26.4.1;
 					};
 				};
 			};
@@ -209,6 +256,7 @@
 				5FDF83C42F9A9B160099C6D1 /* Hyroxapp */,
 				5FDF83D12F9A9B1C0099C6D1 /* HyroxappTests */,
 				5FDF83DB2F9A9B1C0099C6D1 /* HyroxappUITests */,
+				D8BC4D402F9B13B2004472F3 /* HyroxappWatch Watch App */,
 			);
 		};
 /* End PBXProject section */
@@ -218,7 +266,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				5FDF83FE2F9AA00E0099C6D1 /* CLAUDE-2.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -230,6 +277,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		5FDF83DA2F9A9B1C0099C6D1 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D8BC4D3F2F9B13B2004472F3 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -254,6 +308,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		5FDF83D82F9A9B1C0099C6D1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D8BC4D3D2F9B13B2004472F3 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -395,12 +456,16 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Hyroxapp/Hyroxapp.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3VFDXQ78W5;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Hyroxapp reads workout data to display your HYROX races alongside your other Health activity.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Hyroxapp writes completed HYROX races to Apple Health so they appear alongside your other workouts.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -416,7 +481,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.apple.map.Hyroxapp;
+				PRODUCT_BUNDLE_IDENTIFIER = com.umang.hyroxapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
@@ -437,12 +502,16 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Hyroxapp/Hyroxapp.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3VFDXQ78W5;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Hyroxapp reads workout data to display your HYROX races alongside your other Health activity.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Hyroxapp writes completed HYROX races to Apple Health so they appear alongside your other workouts.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -458,7 +527,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.apple.map.Hyroxapp;
+				PRODUCT_BUNDLE_IDENTIFIER = com.umang.hyroxapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
@@ -484,7 +553,7 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.apple.map.HyroxappTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.umang.hyroxapp.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -509,7 +578,7 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.apple.map.HyroxappTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.umang.hyroxapp.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -533,7 +602,7 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.apple.map.HyroxappUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.umang.hyroxapp.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -557,7 +626,7 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.apple.map.HyroxappUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.umang.hyroxapp.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -569,6 +638,73 @@
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				TEST_TARGET_NAME = Hyroxapp;
 				XROS_DEPLOYMENT_TARGET = 26.2;
+			};
+			name = Release;
+		};
+		D8BC4D4A2F9B13B3004472F3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3VFDXQ78W5;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = HyroxappWatch;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.umang.hyroxapp;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.umang.hyroxapp.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.4;
+			};
+			name = Debug;
+		};
+		D8BC4D4B2F9B13B3004472F3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3VFDXQ78W5;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = HyroxappWatch;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.umang.hyroxapp;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.umang.hyroxapp.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 26.4;
 			};
 			name = Release;
 		};
@@ -607,6 +743,15 @@
 			buildConfigurations = (
 				5FDF83ED2F9A9B1C0099C6D1 /* Debug */,
 				5FDF83EE2F9A9B1C0099C6D1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D8BC4D492F9B13B3004472F3 /* Build configuration list for PBXNativeTarget "HyroxappWatch Watch App" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D8BC4D4A2F9B13B3004472F3 /* Debug */,
+				D8BC4D4B2F9B13B3004472F3 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -57,6 +57,10 @@ enum Station: Int, CaseIterable, Identifiable, Codable, Hashable, Sendable {
     }
 
     // Target/required work, shown as a subtitle under the station name.
+    // This zero-arg form is division-unaware — wall balls renders a
+    // placeholder "75 / 100 reps". Most call sites should prefer
+    // `target(for:)` and pass the user's division so wall balls shows
+    // the correct rep count for the athlete.
     var target: String {
         switch self {
         case .run1, .run2, .run3, .run4, .run5, .run6, .run7, .run8:
@@ -69,6 +73,22 @@ enum Station: Int, CaseIterable, Identifiable, Codable, Hashable, Sendable {
         case .farmersCarry:      return "200 m"
         case .sandbagLunges:     return "100 m"
         case .wallBalls:         return "75 / 100 reps"
+        }
+    }
+
+    // Division-aware target: identical to `target` except wall balls
+    // renders the exact rep count for the given division (e.g. "75 reps"
+    // for Women's Open, "100 reps" for everything else). Other stations
+    // ignore the parameter — they don't vary by division today — but the
+    // parameter stays on the method signature so future rule differences
+    // (e.g. sandbag weight-by-division displayed in the subtitle) can
+    // slot in without renaming.
+    func target(for division: Division) -> String {
+        switch self {
+        case .wallBalls:
+            return "\(division.wallBallCount) reps"
+        default:
+            return target
         }
     }
 

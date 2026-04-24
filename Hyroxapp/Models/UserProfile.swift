@@ -30,6 +30,17 @@ final class UserProfile {
     // whole profile travels with the model (and later syncs) as one unit.
     var avatarData: Data?
 
+    // Competitive HYROX division. Determines the wall ball rep count in
+    // the race screen and (eventually) sled / sandbag weight defaults.
+    // Defaults to `.mensOpen` on first install for existing rows that
+    // predate this field — users can change it from Settings.
+    //
+    // Stored as a raw String via SwiftData's default handling of
+    // RawRepresentable enums. Adding new cases later is a safe additive
+    // change; the field has a default so lightweight migration populates
+    // existing rows with `.mensOpen`.
+    var division: Division = Division.mensOpen
+
     var createdAt: Date
     var updatedAt: Date
 
@@ -40,6 +51,7 @@ final class UserProfile {
         location: String = "",
         bio: String = "",
         avatarData: Data? = nil,
+        division: Division = .mensOpen,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -49,6 +61,7 @@ final class UserProfile {
         self.location = location
         self.bio = bio
         self.avatarData = avatarData
+        self.division = division
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -61,7 +74,8 @@ final class UserProfile {
             displayName: "Athlete",
             handle: "@athlete",
             location: "",
-            bio: "HYROX athlete in training."
+            bio: "HYROX athlete in training.",
+            division: .mensOpen
         )
     }
 }

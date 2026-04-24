@@ -4,12 +4,16 @@ import SwiftUI
 import UIKit
 #endif
 
-// The top portion of the Profile screen: avatar + name + handle + bio.
-// Takes a `UserProfile` model and renders its fields directly — replaces
-// v0.1's hardcoded placeholders. When Supabase auth ships in v1+, the
-// same view reads from a synced profile record, no changes here.
+// The top portion of the Profile screen: avatar + name + handle + bio +
+// a Strava-style social stats row (Races live, Followers / Following as
+// placeholders). Takes a `UserProfile` model and the finished-race count;
+// the race count lives a level up in `ProfileView` where the `@Query` fires,
+// so we accept it as a param rather than re-querying here. When Supabase
+// auth + the follow graph ship, the two placeholder cells get real values
+// wired from a remote profile record — the view shape is already in place.
 struct ProfileHeaderView: View {
     let profile: UserProfile
+    let raceCount: Int
 
     var body: some View {
         VStack(spacing: 14) {
@@ -17,6 +21,7 @@ struct ProfileHeaderView: View {
             name
             subtitle
             bioLine
+            socialStats
         }
         .frame(maxWidth: .infinity)
     }
@@ -90,5 +95,17 @@ struct ProfileHeaderView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 8)
         }
+    }
+
+    // Three-cell social-stats row. Only "Races" is real in v1; the two
+    // follow-graph cells render as placeholders so the user sees where
+    // the social layer is going without us fabricating numbers.
+    private var socialStats: some View {
+        SocialStatsRow(stats: [
+            .init(label: "Races", value: "\(raceCount)"),
+            .init(label: "Followers", value: "—", isPlaceholder: true),
+            .init(label: "Following", value: "—", isPlaceholder: true)
+        ])
+        .padding(.top, 4)
     }
 }

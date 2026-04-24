@@ -199,9 +199,18 @@ final class RaceViewModel {
     // Fire-and-forget push of the just-finished race to Apple Health. The
     // first call per install triggers the iOS authorization sheet; later
     // calls are silent. Failures (permission denied, HealthKit unavailable
-    // on this device, missing entitlement, etc.) are swallowed — the race
-    // is already saved locally and shown in History, so HealthKit is
-    // additive not essential.
+    // on this device, etc.) are swallowed — the race is already saved
+    // locally and shown in History, so HealthKit is additive not essential.
+    //
+    // Prerequisites (all in place as of the entitlements + Info.plist
+    // wiring commit):
+    //   - HealthKit capability on the main app target
+    //     (Hyroxapp/Hyroxapp.entitlements)
+    //   - NSHealthShareUsageDescription + NSHealthUpdateUsageDescription
+    //     strings declared as INFOPLIST_KEY_* build settings
+    // Without these, calling `requestAuthorization` crashes the app
+    // unrecoverably — not an error we can catch. Keep them in sync if you
+    // ever revisit the signing / Info.plist setup.
     private func saveFinishedRaceToHealthKit() {
         #if canImport(HealthKit)
         guard let race = activeRace else { return }
