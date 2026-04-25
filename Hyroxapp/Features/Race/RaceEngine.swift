@@ -29,6 +29,47 @@ struct RaceEngine: Sendable {
             splits: [Split]
         )
 
+        // Paused — race is mid-segment but the timer is frozen.
+        // `pausedAt` snapshots the instant of pause so elapsed and
+        // currentSegmentElapsed both freeze at "what they were when
+        // I tapped Pause."
+        //
+        // Resume math: shift `startedAt` and `currentSegmentStartedAt`
+        // forward by `(resumeNow - pausedAt)`. This "moves the race's
+        // start origin into the future" so the existing elapsed-time
+        // formula (`now - startedAt`) keeps working without scattered
+        // "subtract pause duration" guards. Splits already captured
+        // don't need adjustment — their endedAt is fixed history.
+        case paused(
+            startedAt: Date,
+            currentSegmentStartedAt: Date,
+            splits: [Split],
+            pausedAt: Date
+        )
+
+        // Roxzone — between segments. The previous segment is
+        // closed (its split is in `splits`), the next segment
+        // hasn't started yet, and the athlete is in transition
+        // (walking from run finish to sled, picking up gear,
+        // setting up). The HYROX-specific metric.
+        //
+        // Race time keeps ticking against `startedAt` — the
+        // overall timer is unchanged. `roxzoneStartedAt` records
+        // when this transition began (= when the previous
+        // segment ended) so the next-segment-start can compute
+        // the roxzone duration and attach it to the upcoming
+        // split.
+        //
+        // Only entered from .inProgress when the user explicitly
+        // taps "End [segment]" with roxzone tracking enabled.
+        // The single-tap advance path stays in .inProgress and
+        // never enters this state.
+        case inRoxzone(
+            startedAt: Date,
+            splits: [Split],
+            roxzoneStartedAt: Date
+        )
+
         case finished(
             startedAt: Date,
             endedAt: Date,
@@ -44,6 +85,16 @@ struct RaceEngine: Sendable {
     let sequence: [Station]
 
     private(set) var state: State
+
+    // Stash for the roxzone duration of the segment currently in
+    // progress. Set by `startNextSegment` after a roxzone closes
+    // and consumed when the next segment's split is created via
+    // `advance` or `endSegment`. Cleared back to nil after the
+    // attachment so a one-tap segment that follows wouldn't get
+    // the prior roxzone re-applied. Persistence layer mirrors
+    // this on Race so a force-killed mid-segment race resumes
+    // with the correct roxzone attribution.
+    var pendingRoxzoneSeconds: TimeInterval?
 
     // MARK: - Init
 
@@ -62,25 +113,44 @@ struct RaceEngine: Sendable {
     // MARK: - Derived state (read-only)
 
     // The station the athlete is currently working on, or `nil` if the race
-    // isn't in progress.
+    // isn't in progress (or paused — the same station the athlete will
+    // resume to). When in roxzone, this is the station the athlete is
+    // about to start (the next segment, transitioning into).
     var currentStation: Station? {
-        guard case .inProgress(_, _, let splits) = state else { return nil }
-        return sequence[safe: splits.count]
+        switch state {
+        case .inProgress(_, _, let splits), .paused(_, _, let splits, _):
+            return sequence[safe: splits.count]
+        case .inRoxzone(_, let splits, _):
+            // After a segment ends and we enter roxzone, splits.count
+            // points to the next segment. That's the one being
+            // transitioned into.
+            return sequence[safe: splits.count]
+        default:
+            return nil
+        }
     }
 
     // The station queued up after the current one — for "Up next: ..." UI.
-    // `nil` on the final segment or when not in progress.
+    // `nil` on the final segment or when not in progress / paused.
     var upcomingStation: Station? {
-        guard case .inProgress(_, _, let splits) = state else { return nil }
-        return sequence[safe: splits.count + 1]
+        switch state {
+        case .inProgress(_, _, let splits), .paused(_, _, let splits, _):
+            return sequence[safe: splits.count + 1]
+        case .inRoxzone(_, let splits, _):
+            return sequence[safe: splits.count + 1]
+        default:
+            return nil
+        }
     }
 
     // Completed splits so far (in race order).
     var splits: [Split] {
         switch state {
-        case .notStarted:                    return []
-        case .inProgress(_, _, let splits):  return splits
-        case .finished(_, _, let splits):    return splits
+        case .notStarted:                       return []
+        case .inProgress(_, _, let splits):     return splits
+        case .paused(_, _, let splits, _):      return splits
+        case .inRoxzone(_, let splits, _):      return splits
+        case .finished(_, _, let splits):       return splits
         }
     }
 
@@ -89,13 +159,35 @@ struct RaceEngine: Sendable {
         return false
     }
 
+    // True while paused. UI uses this to swap the Pause button for a
+    // Resume button, dim the screen, freeze the live HR poll, etc.
+    var isPaused: Bool {
+        if case .paused = state { return true }
+        return false
+    }
+
+    // True while in roxzone (between segments). UI shows a
+    // distinct overlay + "Tap to start [next station]" CTA.
+    var isInRoxzone: Bool {
+        if case .inRoxzone = state { return true }
+        return false
+    }
+
     // Total elapsed race time evaluated at `now`. Returns 0 before start.
     // Once finished, returns the frozen final time (independent of `now`).
+    // While paused, returns the elapsed at the moment of pause —
+    // freezing the timer display visually. While in roxzone, the
+    // overall timer keeps ticking — race time hasn't stopped just
+    // because the athlete is between segments.
     func elapsed(at now: Date) -> TimeInterval {
         switch state {
         case .notStarted:
             return 0
         case .inProgress(let startedAt, _, _):
+            return now.timeIntervalSince(startedAt)
+        case .paused(let startedAt, _, _, let pausedAt):
+            return pausedAt.timeIntervalSince(startedAt)
+        case .inRoxzone(let startedAt, _, _):
             return now.timeIntervalSince(startedAt)
         case .finished(let startedAt, let endedAt, _):
             return endedAt.timeIntervalSince(startedAt)
@@ -103,10 +195,27 @@ struct RaceEngine: Sendable {
     }
 
     // Elapsed time for the *current* (unfinished) segment, evaluated at `now`.
-    // Returns 0 if not in progress.
+    // Returns 0 if not in progress or in roxzone (no active segment).
+    // Paused freezes at the pause instant.
     func currentSegmentElapsed(at now: Date) -> TimeInterval {
-        guard case .inProgress(_, let segmentStart, _) = state else { return 0 }
-        return now.timeIntervalSince(segmentStart)
+        switch state {
+        case .inProgress(_, let segmentStart, _):
+            return now.timeIntervalSince(segmentStart)
+        case .paused(_, let segmentStart, _, let pausedAt):
+            return pausedAt.timeIntervalSince(segmentStart)
+        default:
+            return 0
+        }
+    }
+
+    // Elapsed time INSIDE the current roxzone, evaluated at `now`.
+    // Returns 0 when not in roxzone. Drives the live "you've been
+    // in transition for 12s" countup on the in-roxzone overlay.
+    func currentRoxzoneElapsed(at now: Date) -> TimeInterval {
+        if case .inRoxzone(_, _, let roxzoneStart) = state {
+            return now.timeIntervalSince(roxzoneStart)
+        }
+        return 0
     }
 
     // MARK: - Events (mutating)
@@ -124,17 +233,27 @@ struct RaceEngine: Sendable {
     // Close out the current segment and move to the next. If this was the
     // final segment, transitions to `.finished`. No-op unless a race is in
     // progress.
+    //
+    // Roxzone attachment: if `pendingRoxzoneSeconds` is set (the
+    // last transition closed via startNextSegment), it gets
+    // attached to the just-completed split's `roxzoneSeconds`.
+    // Then cleared. Single-tap-mode races never set this so this
+    // is a no-op for them.
     mutating func advance(at now: Date) {
         guard case .inProgress(let startedAt, let segmentStart, var splits) = state else { return }
 
         let index = splits.count
         guard index < sequence.count else { return }
 
-        let completed = Split(
+        var completed = Split(
             station: sequence[index],
             startedAt: segmentStart,
             endedAt: now
         )
+        if let roxzone = pendingRoxzoneSeconds {
+            completed = completed.withRoxzone(seconds: roxzone)
+            pendingRoxzoneSeconds = nil
+        }
         splits.append(completed)
 
         if splits.count >= sequence.count {
@@ -154,6 +273,102 @@ struct RaceEngine: Sendable {
         state = .notStarted
     }
 
+    // End the current segment and enter Roxzone. Two-tap-advance
+    // path: closes the just-finished segment with a Split entry,
+    // transitions to .inRoxzone where the transition timer counts
+    // up until startNextSegment is called.
+    //
+    // From any non-inProgress state this is a no-op. Doesn't
+    // finish the race even on the final segment — the user must
+    // explicitly start (and then end) the final station after the
+    // last roxzone, OR call `advance` directly on the final
+    // segment to skip the wrap-up roxzone.
+    //
+    // Race time keeps running through the roxzone — this isn't
+    // a pause, it's a transition that's part of the total race.
+    mutating func endSegment(at now: Date) {
+        guard case .inProgress(let startedAt, let segmentStart, var splits) = state else { return }
+
+        let index = splits.count
+        guard index < sequence.count else { return }
+
+        var completed = Split(
+            station: sequence[index],
+            startedAt: segmentStart,
+            endedAt: now
+        )
+        if let roxzone = pendingRoxzoneSeconds {
+            completed = completed.withRoxzone(seconds: roxzone)
+            pendingRoxzoneSeconds = nil
+        }
+        splits.append(completed)
+
+        // If that was the FINAL segment, we go straight to
+        // .finished — there's no segment after to transition
+        // into, so no roxzone makes sense.
+        if splits.count >= sequence.count {
+            state = .finished(startedAt: startedAt, endedAt: now, splits: splits)
+        } else {
+            state = .inRoxzone(
+                startedAt: startedAt,
+                splits: splits,
+                roxzoneStartedAt: now
+            )
+        }
+    }
+
+    // Begin the next segment after a roxzone. Computes the
+    // roxzone duration (now - roxzoneStartedAt), stashes it on
+    // the engine via `pendingRoxzoneSeconds`, and transitions
+    // back to .inProgress with the next segment as the active
+    // one. The pendingRoxzoneSeconds value is consumed when
+    // that segment closes (via endSegment or advance), at which
+    // point it's attached to the segment's Split.
+    //
+    // From any non-inRoxzone state this is a no-op.
+    mutating func startNextSegment(at now: Date) {
+        guard case .inRoxzone(let startedAt, let splits, let roxzoneStart) = state else { return }
+        let duration = now.timeIntervalSince(roxzoneStart)
+        pendingRoxzoneSeconds = duration
+        state = .inProgress(
+            startedAt: startedAt,
+            currentSegmentStartedAt: now,
+            splits: splits
+        )
+    }
+
+    // Pause an in-progress race. Captures `now` as `pausedAt`. From
+    // any other state this is a no-op — pausing a not-yet-started or
+    // already-finished race has no semantic meaning.
+    mutating func pause(at now: Date) {
+        guard case .inProgress(let startedAt, let segmentStart, let splits) = state else { return }
+        state = .paused(
+            startedAt: startedAt,
+            currentSegmentStartedAt: segmentStart,
+            splits: splits,
+            pausedAt: now
+        )
+    }
+
+    // Resume from paused. Computes pause duration and shifts both
+    // start timestamps forward by that amount so the existing
+    // `now - startedAt` formula keeps producing the correct elapsed
+    // time without further adjustments. From any non-paused state
+    // this is a no-op.
+    //
+    // Long pauses are fine — if the user paused, force-killed the
+    // app, and resumed three days later, the math still works:
+    // resumeDelta is just much larger.
+    mutating func resume(at now: Date) {
+        guard case .paused(let startedAt, let segmentStart, let splits, let pausedAt) = state else { return }
+        let pauseDuration = now.timeIntervalSince(pausedAt)
+        state = .inProgress(
+            startedAt: startedAt.addingTimeInterval(pauseDuration),
+            currentSegmentStartedAt: segmentStart.addingTimeInterval(pauseDuration),
+            splits: splits
+        )
+    }
+
     // Attach segment-window statistics (HR avg/max + active calories)
     // to the split at the given index. Used from RaceViewModel after
     // a parallel batch of HealthKit queries returns — the advance
@@ -169,6 +384,80 @@ struct RaceEngine: Sendable {
     // calories", "have calories but no HR", or just one of the four
     // values is supported. The Split's `withSegmentStats` builder
     // forwards each value through unchanged.
+    // Patch the manual-entry station stats (weight / reps / RPE)
+    // on the split at `index`. Mirrors `setSegmentStats` for the
+    // user-driven fields. Each parameter uses the double-optional
+    // pattern from `Split.withStationStats`: passing `.some(nil)`
+    // explicitly clears the field, omitting the parameter
+    // (defaulted to nil-as-Optional<Optional<...>>) leaves it
+    // unchanged.
+    //
+    // Safe to call from any state that has splits; no-op otherwise
+    // or when the index is out of range.
+    mutating func setStationStats(
+        weightKg: Double?? = nil,
+        repsCompleted: Int?? = nil,
+        rpe: Int?? = nil,
+        atSplitIndex index: Int
+    ) {
+        switch state {
+        case .notStarted:
+            return
+        case .inProgress(let startedAt, let segmentStart, var splits):
+            guard splits.indices.contains(index) else { return }
+            splits[index] = splits[index].withStationStats(
+                weightKg: weightKg,
+                repsCompleted: repsCompleted,
+                rpe: rpe
+            )
+            state = .inProgress(
+                startedAt: startedAt,
+                currentSegmentStartedAt: segmentStart,
+                splits: splits
+            )
+        case .paused(let startedAt, let segmentStart, var splits, let pausedAt):
+            guard splits.indices.contains(index) else { return }
+            splits[index] = splits[index].withStationStats(
+                weightKg: weightKg,
+                repsCompleted: repsCompleted,
+                rpe: rpe
+            )
+            state = .paused(
+                startedAt: startedAt,
+                currentSegmentStartedAt: segmentStart,
+                splits: splits,
+                pausedAt: pausedAt
+            )
+        case .inRoxzone(let startedAt, var splits, let roxzoneStart):
+            // Edits while in roxzone target a previous (already-
+            // closed) split — the just-finished one. Patch
+            // through, preserve the roxzone state.
+            guard splits.indices.contains(index) else { return }
+            splits[index] = splits[index].withStationStats(
+                weightKg: weightKg,
+                repsCompleted: repsCompleted,
+                rpe: rpe
+            )
+            state = .inRoxzone(
+                startedAt: startedAt,
+                splits: splits,
+                roxzoneStartedAt: roxzoneStart
+            )
+        case .finished(let startedAt, let endedAt, var splits):
+            guard splits.indices.contains(index) else { return }
+            splits[index] = splits[index].withStationStats(
+                weightKg: weightKg,
+                repsCompleted: repsCompleted,
+                rpe: rpe
+            )
+            state = .finished(
+                startedAt: startedAt,
+                endedAt: endedAt,
+                splits: splits
+            )
+        }
+    }
+
     mutating func setSegmentStats(
         heartRateAvg: Double?,
         heartRateMax: Double?,
@@ -189,6 +478,38 @@ struct RaceEngine: Sendable {
                 startedAt: startedAt,
                 currentSegmentStartedAt: segmentStart,
                 splits: splits
+            )
+        case .paused(let startedAt, let segmentStart, var splits, let pausedAt):
+            // HealthKit query results can land while the race is
+            // paused (the parallel batch from the prior advance was
+            // still in flight). Patch through unchanged — pausing
+            // doesn't invalidate already-completed splits' stats.
+            guard splits.indices.contains(index) else { return }
+            splits[index] = splits[index].withSegmentStats(
+                heartRateAvg: heartRateAvg,
+                heartRateMax: heartRateMax,
+                activeCalories: activeCalories
+            )
+            state = .paused(
+                startedAt: startedAt,
+                currentSegmentStartedAt: segmentStart,
+                splits: splits,
+                pausedAt: pausedAt
+            )
+        case .inRoxzone(let startedAt, var splits, let roxzoneStart):
+            // Same rationale as paused — the parallel HealthKit
+            // batch from the just-completed segment may resolve
+            // while the user is in roxzone. Patch through.
+            guard splits.indices.contains(index) else { return }
+            splits[index] = splits[index].withSegmentStats(
+                heartRateAvg: heartRateAvg,
+                heartRateMax: heartRateMax,
+                activeCalories: activeCalories
+            )
+            state = .inRoxzone(
+                startedAt: startedAt,
+                splits: splits,
+                roxzoneStartedAt: roxzoneStart
             )
         case .finished(let startedAt, let endedAt, var splits):
             guard splits.indices.contains(index) else { return }

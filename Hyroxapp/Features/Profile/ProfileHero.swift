@@ -1,0 +1,226 @@
+import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
+
+// v2 redesign hero header for Profile. Replaces the v1
+// ProfileHeaderView (which still exists, kept for any prior
+// callers / previews). The new hero treats the top of Profile
+// as a moment, not a header — coral spotlight backdrop, large
+// avatar with accent ring, name in display weight, single
+// stand-out PB number underneath.
+//
+// Anatomy:
+//   • Subtle radial coral glow (via HeroBackdrop's logic
+//     applied locally, since this needs its own bounded shape)
+//   • 112pt avatar circle with coral ring + soft drop shadow
+//   • Display-weight name (28pt heavy rounded)
+//   • Handle + division pill row
+//   • Below: 4 stat tiles in a row — Races / PB / Avg / Streak.
+//     PB is rendered in the bigger 32pt accent treatment to
+//     anchor as the headline number; the other three are
+//     supporting in 22pt textPrimary. Real hierarchy, not
+//     four equal tiles.
+//
+// Renders inside its own padded container so it can sit at the
+// top of a ScrollView with edge-to-edge backdrop while the
+// inner content stays comfortably padded.
+//
+// Guarded `#if canImport(UIKit)` for UIImage avatar support.
+#if canImport(UIKit)
+struct ProfileHero: View {
+
+    let profile: UserProfile
+    let raceCount: Int
+    let pbDisplay: String
+    let avgDisplay: String
+    let streakDays: Int
+
+    var body: some View {
+        ZStack {
+            // Top half coral wash — bleeds full width via
+            // ignoresSafeArea on the parent ScrollView. Subtle so
+            // name + avatar still pop.
+            backdropLayer
+
+            VStack(spacing: 14) {
+                avatar
+                    .padding(.top, 24)
+
+                nameAndHandle
+
+                divisionPill
+
+                statsRow
+                    .padding(.top, 6)
+                    .padding(.horizontal, 4)
+            }
+            .padding(.bottom, 20)
+        }
+    }
+
+    // Top-anchored radial glow that fades into the page. Looks
+    // like a stadium spotlight on the avatar without coloring
+    // the whole header coral.
+    private var backdropLayer: some View {
+        GeometryReader { geo in
+            ZStack {
+                RadialGradient(
+                    colors: [
+                        Color.accent.opacity(0.18),
+                        Color.clear
+                    ],
+                    center: UnitPoint(x: 0.5, y: 0.25),
+                    startRadius: 0,
+                    endRadius: max(geo.size.width, 320) * 0.7
+                )
+                .blendMode(.screen)
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+        }
+        .allowsHitTesting(false)
+    }
+
+    private var avatar: some View {
+        Group {
+            if let data = profile.avatarData, let uiImage = UIImage(data: data) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                ZStack {
+                    Circle().fill(Color.accent.opacity(0.18))
+                    Text(initial)
+                        .font(.system(size: 44, weight: .heavy, design: .rounded))
+                        .foregroundStyle(Color.accent)
+                }
+            }
+        }
+        .frame(width: 112, height: 112)
+        .clipShape(Circle())
+        .overlay(
+            Circle()
+                .stroke(Color.accent.opacity(0.55), lineWidth: 2.5)
+        )
+        .shadow(color: Color.black.opacity(0.5), radius: 16, x: 0, y: 8)
+        .shadow(color: Color.accent.opacity(0.25), radius: 24, x: 0, y: 0)
+    }
+
+    private var initial: String {
+        String(profile.displayName.prefix(1)).uppercased()
+    }
+
+    private var nameAndHandle: some View {
+        VStack(spacing: 4) {
+            Text(profile.displayName)
+                .font(.system(size: 28, weight: .heavy, design: .rounded))
+                .foregroundStyle(Color.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .padding(.horizontal, 16)
+
+            if !profile.handle.isEmpty {
+                Text("@\(profile.handle)")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(Color.textSecondary)
+            }
+        }
+    }
+
+    // Division pill — small caps wordmark with coral border. Same
+    // treatment used by the share-card athlete footer so the
+    // identity reads consistently across surfaces.
+    private var divisionPill: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "person.fill")
+                .font(.caption2.weight(.bold))
+            Text(profile.resolvedDivision.displayName)
+                .font(.caption.weight(.heavy))
+                .tracking(0.4)
+                .textCase(.uppercase)
+        }
+        .foregroundStyle(Color.accent)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            Capsule()
+                .fill(Color.accent.opacity(0.12))
+                .overlay(
+                    Capsule()
+                        .stroke(Color.accent.opacity(0.35), lineWidth: 1)
+                )
+        )
+    }
+
+    // 4-tile stat row with REAL hierarchy: PB is the hero (32pt
+    // accent), the other three sit secondary. This is the
+    // information-hierarchy fix for v1's flat four-equal-tiles
+    // approach — there IS a most-important number for an
+    // athlete's profile, and it's their PB.
+    private var statsRow: some View {
+        HStack(spacing: 0) {
+            statTile(
+                value: "\(raceCount)",
+                label: "RACES",
+                isHero: false
+            )
+            divider
+            statTile(
+                value: pbDisplay,
+                label: "PB",
+                isHero: true
+            )
+            divider
+            statTile(
+                value: avgDisplay,
+                label: "AVG",
+                isHero: false
+            )
+            divider
+            statTile(
+                value: "\(streakDays)",
+                label: "STREAK",
+                isHero: false
+            )
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.surface.opacity(0.85))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.divider.opacity(0.6), lineWidth: 1)
+                )
+        )
+        .padding(.horizontal, Layout.screenMargin)
+    }
+
+    private var divider: some View {
+        Rectangle()
+            .fill(Color.divider)
+            .frame(width: 1, height: 28)
+    }
+
+    private func statTile(value: String, label: String, isHero: Bool) -> some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(
+                    isHero
+                        ? .system(size: 28, weight: .heavy, design: .rounded)
+                        : .system(size: 18, weight: .bold, design: .rounded)
+                )
+                .monospacedDigit()
+                .foregroundStyle(isHero ? Color.accent : Color.textPrimary)
+                .minimumScaleFactor(0.6)
+                .lineLimit(1)
+
+            Text(label)
+                .font(.system(size: 9, weight: .heavy))
+                .tracking(0.7)
+                .foregroundStyle(Color.textSecondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+#endif

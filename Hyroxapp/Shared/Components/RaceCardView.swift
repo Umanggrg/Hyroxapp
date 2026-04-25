@@ -24,29 +24,92 @@ struct RaceCardView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            header
-            hero
-            supportingStats
-            if isPB {
-                pbBadge
+        VStack(alignment: .leading, spacing: 0) {
+            // Photo (when present) sits flush at the top of the card
+            // with no padding so it reads as a true hero image —
+            // exactly the way Strava's activity cards anchor on the
+            // route map. Without a photo, this branch is skipped and
+            // the card renders compact, identical to before.
+            #if canImport(UIKit)
+            if let data = race.photoData, let image = UIImage(data: data) {
+                photoHero(image: image)
             }
+            #endif
+
+            VStack(alignment: .leading, spacing: 14) {
+                header
+                hero
+                supportingStats
+                if isPB {
+                    pbBadge
+                }
+            }
+            .padding(Layout.cardPadding)
         }
-        .padding(Layout.cardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
                 .fill(Color.surface)
         )
+        // Clip the entire card so the photo's top corners follow the
+        // card's rounded shape; without this the image overflows the
+        // background's rounded rectangle on the top edge.
+        .clipShape(RoundedRectangle(cornerRadius: Layout.cardCornerRadius))
     }
+
+    // MARK: - Photo hero (top banner when race has a photo)
+
+    #if canImport(UIKit)
+    private func photoHero(image: UIImage) -> some View {
+        Image(uiImage: image)
+            .resizable()
+            .aspectRatio(contentMode: .fill)
+            .frame(maxWidth: .infinity)
+            .frame(height: 180)
+            .clipped()
+            // Subtle gradient fade at the bottom so a continuation
+            // into the card body doesn't read as a hard edge — this
+            // gradient is what makes the image feel like part of the
+            // card rather than a stamped-on rectangle.
+            .overlay(alignment: .bottom) {
+                LinearGradient(
+                    colors: [
+                        Color.surface.opacity(0),
+                        Color.surface.opacity(0.5)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 40)
+            }
+    }
+    #endif
 
     // MARK: - Sections
 
     private var header: some View {
         HStack {
-            Text("HYROX Race")
-                .font(.cardTitle)
-                .foregroundStyle(Color.textPrimary)
+            // Show user-set title when present; fall back to the
+            // generic "HYROX Race" label otherwise. Two-line stack
+            // when a custom name exists so the kind indicator
+            // ("HYROX RACE" caps) stays visible — same pattern
+            // Strava uses for activities with a custom title.
+            VStack(alignment: .leading, spacing: 2) {
+                if !race.name.isEmpty {
+                    Text("HYROX RACE")
+                        .font(.caption2.weight(.bold))
+                        .tracking(0.6)
+                        .foregroundStyle(Color.textTertiary)
+                    Text(race.name)
+                        .font(.cardTitle)
+                        .foregroundStyle(Color.textPrimary)
+                        .lineLimit(2)
+                } else {
+                    Text("HYROX Race")
+                        .font(.cardTitle)
+                        .foregroundStyle(Color.textPrimary)
+                }
+            }
             Spacer()
             Text(race.startedAt.formatted(.relative(presentation: .named)))
                 .font(.metadata)
@@ -55,13 +118,15 @@ struct RaceCardView: View {
     }
 
     private var hero: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(RaceStats.totalTime(race))
-                .font(.heroStat)
+                .font(.system(size: 48, weight: .heavy, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(Color.textPrimary)
-            Text("Total Time")
-                .capsLabelStyle()
+            Text("TOTAL TIME")
+                .font(.system(size: 9, weight: .heavy))
+                .tracking(1.0)
+                .foregroundStyle(Color.textSecondary)
         }
     }
 
@@ -85,11 +150,14 @@ struct RaceCardView: View {
     private func statTile(value: String, label: String) -> some View {
         VStack(spacing: 4) {
             Text(value)
-                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .font(.system(size: 18, weight: .heavy, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(Color.textPrimary)
-            Text(label)
-                .font(.caption2)
+                .minimumScaleFactor(0.7)
+                .lineLimit(1)
+            Text(label.uppercased())
+                .font(.system(size: 9, weight: .heavy))
+                .tracking(0.6)
                 .foregroundStyle(Color.textSecondary)
         }
         .frame(maxWidth: .infinity)

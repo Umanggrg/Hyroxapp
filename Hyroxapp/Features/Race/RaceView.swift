@@ -45,6 +45,13 @@ struct RaceView: View {
     // race screen.
     @State private var showingSplits = false
 
+    // Tracks the most recent zone we've fired a verbal cue for, so we
+    // only announce on UPWARD entries (Z2 → Z3, Z3 → Z4, etc.) and
+    // suppress noisy flutters back into lower zones. Reset to nil on
+    // race end / abandon so a subsequent race re-announces from
+    // scratch. Nil before the first HR sample arrives.
+    @State private var lastAnnouncedZone: HRZone?
+
     // SwiftUI injects the app's `ModelContext` via the environment. We hand
     // it to the VM on appear so it can insert / update / delete `Race` rows.
     @Environment(\.modelContext) private var modelContext
@@ -60,15 +67,56 @@ struct RaceView: View {
                         onResume: viewModel.resumePending,
                         onDiscard: viewModel.discardPending
                     )
+                    .padding(.horizontal, Layout.screenMargin)
                 } else if !viewModel.hasStarted {
+                    // RaceStartView owns its own padding so the hero
+                    // backdrop can bleed full-width.
                     RaceStartView(viewModel: viewModel)
                 } else if viewModel.isFinished {
+                    // Same — RaceSummaryView controls its own bleed
+                    // so the finish-moment backdrop reaches the edges.
                     RaceSummaryView(viewModel: viewModel)
+                } else if viewModel.isInRoxzone {
+                    // Two-tap-advance mode: between segments the
+                    // user lands here. Big "Start [next station]"
+                    // button + countup transition timer.
+                    inRoxzoneView
+                        .padding(.horizontal, Layout.screenMargin)
                 } else {
                     inProgressView
+                        .padding(.horizontal, Layout.screenMargin)
                 }
             }
-            .padding(.horizontal, Layout.screenMargin)
+
+            // Countdown overlay — full-screen, sits above the
+            // start screen so the athlete sees a clean 3 → 2 → 1
+            // → GO ritual before the race timer takes over. Tap
+            // anywhere to skip straight to the race. Bound to
+            // viewModel.countdownValue so cancellation (race
+            // abandoned, view dismissed) clears the overlay.
+            if let value = viewModel.countdownValue {
+                countdownOverlay(value: value)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: viewModel.countdownValue)
+        // Per-tick side effects for the countdown — voice cue +
+        // haptic. Fires exactly once per integer change. The voice
+        // cue speaks the number ("3", "2", "1", "GO"); the haptic
+        // pattern uses medium impact for 3/2/1 and a heavier
+        // notification on GO so the start of the race is
+        // physically felt.
+        .onChange(of: viewModel.countdownValue) { _, newValue in
+            guard let newValue else { return }
+            handleCountdownTick(newValue)
+        }
+        // Mid-race HR-zone monitor. Each time a new HR sample
+        // arrives, classify it and fire a "Zone X" cue if the
+        // athlete just crossed UPWARD into Z3+. Suppresses
+        // downward flutters and Z1/Z2 entries (athletes don't
+        // need a "Zone 1, recovery" reminder mid-race).
+        .onChange(of: viewModel.currentHeartRateBPM) { _, newBpm in
+            handleHeartRateZoneChange(newBpm)
         }
         .onAppear {
             // Bind first so the subsequent fetch has a context to query.
@@ -127,10 +175,18 @@ struct RaceView: View {
         // CLAUDE.md §6: the display must not dim mid-workout. Toggled off
         // again on finish, abandonment, or view-dismiss so we don't burn the
         // user's battery outside of a race.
+        //
+        // Also resets the HR zone-announcement tracker on race end —
+        // without this, a subsequent race would suppress its own
+        // first Z3+ entry because the previous race's final zone was
+        // still in @State.
         .onChange(of: viewModel.isRacing) { _, isRacing in
             #if canImport(UIKit)
             UIApplication.shared.isIdleTimerDisabled = isRacing
             #endif
+            if !isRacing {
+                lastAnnouncedZone = nil
+            }
         }
         .onDisappear {
             #if canImport(UIKit)
@@ -172,6 +228,7 @@ struct RaceView: View {
                     // cancel button so the four header controls read
                     // as "status · pace · HR · cancel" left to right.
                     liveHeartRateChip
+                    pauseResumeButton
                     cancelButton
                 }
                 .padding(.top, 8)
@@ -227,10 +284,38 @@ struct RaceView: View {
         let isOverTarget = (target.map { elapsed > $0 }) ?? false
 
         return VStack(spacing: 6) {
+            // PAUSED indicator on top — small caps-style ribbon that
+            // makes the frozen-timer state unmistakable. Hidden while
+            // running, otherwise it's the most prominent thing in the
+            // column.
+            if viewModel.isPaused {
+                HStack(spacing: 6) {
+                    Image(systemName: "pause.fill")
+                        .font(.caption.weight(.bold))
+                    Text("PAUSED")
+                        .font(.caption.weight(.heavy))
+                        .tracking(1.0)
+                }
+                .foregroundStyle(Color.warning)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule()
+                        .fill(Color.warning.opacity(0.15))
+                )
+            }
+
             Text(RaceStats.format(elapsed))
                 .font(.raceTimer)
                 .monospacedDigit()
-                .foregroundStyle(isOverTarget ? Color.warning : Color.textPrimary)
+                // Paused dims the timer to textTertiary so the freeze
+                // is visually obvious — the cue stacks with the
+                // PAUSED ribbon above for redundant signaling.
+                .foregroundStyle(
+                    viewModel.isPaused
+                        ? Color.textTertiary
+                        : (isOverTarget ? Color.warning : Color.textPrimary)
+                )
 
             Text("segment \(RaceStats.format(viewModel.currentSegmentElapsed(at: now)))")
                 .font(.metadata)
@@ -253,14 +338,31 @@ struct RaceView: View {
     @ViewBuilder
     private var nextStationPreview: some View {
         if let upcoming = viewModel.upcomingStation {
-            Text("Up next · \(upcoming.displayName)")
-                .capsLabelStyle()
-                .padding(.bottom, 12)
+            VStack(spacing: 4) {
+                Text("UP NEXT")
+                    .font(.caption2.weight(.heavy))
+                    .tracking(1.0)
+                    .foregroundStyle(Color.textTertiary)
+                Text(upcoming.displayName)
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.textSecondary)
+            }
+            .padding(.bottom, 16)
         } else {
-            Text("Final station")
-                .capsLabelStyle()
-                .foregroundStyle(Color.accent)
-                .padding(.bottom, 12)
+            // Final station — heightened treatment so the moment
+            // before the finish reads as significant. Coral text
+            // with a subtle pulse-by-presence (we don't animate
+            // here, just elevate the typography).
+            VStack(spacing: 4) {
+                Image(systemName: "flag.checkered.2.crossed")
+                    .font(.callout.weight(.heavy))
+                    .foregroundStyle(Color.accent)
+                Text("FINAL STATION")
+                    .font(.caption.weight(.heavy))
+                    .tracking(1.4)
+                    .foregroundStyle(Color.accent)
+            }
+            .padding(.bottom, 16)
         }
     }
 
@@ -278,51 +380,76 @@ struct RaceView: View {
     //   • "-X:XX behind" (warning) when slower than expected.
     @ViewBuilder
     private func paceChip(now: Date) -> some View {
-        if let target = viewModel.activeRace?.targetDuration {
-            let actual = viewModel.elapsed(at: now)
-            let expected = RaceStats.naiveExpectedElapsed(
-                segmentsCompleted: viewModel.completedSegmentsCount,
-                totalSegments: viewModel.totalSegments,
-                target: target
-            )
-            let delta = RaceStats.paceDelta(
-                actualElapsed: actual,
-                expectedElapsed: expected
-            )
-            let absDelta = Swift.abs(delta)
-            let onPace = absDelta < 15
-            let label: String
-            let color: Color
-            if onPace {
-                label = "on pace"
-                color = Color.textSecondary
-            } else if delta < 0 {
-                // Negative delta = ahead of pace (actual < expected)
-                label = "\(RaceStats.format(absDelta)) ahead"
-                color = Color.success
-            } else {
-                label = "\(RaceStats.format(absDelta)) behind"
-                color = Color.warning
-            }
-
+        if let state = paceChipState(now: now) {
             HStack(spacing: 4) {
-                Image(systemName: onPace
-                      ? "equal.circle.fill"
-                      : (delta < 0 ? "arrow.up.right" : "arrow.down.right"))
+                Image(systemName: state.icon)
                     .font(.system(size: 10, weight: .semibold))
-                Text(label)
+                Text(state.label)
                     .font(.caption2.weight(.bold))
                     .tracking(0.3)
                     .textCase(.uppercase)
                     .monospacedDigit()
             }
-            .foregroundStyle(color)
+            .foregroundStyle(state.color)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(
                 Capsule().fill(Color.surface)
             )
-            .accessibilityLabel("Pace: \(label)")
+            .accessibilityLabel("Pace: \(state.label)")
+        }
+    }
+
+    // Snapshot of what to render in the pace chip — computed
+    // outside the @ViewBuilder so the body of paceChip stays a
+    // pure view expression. @ViewBuilder closures don't allow
+    // multi-statement assignment blocks inside `if let ...` —
+    // returning a small struct from this helper keeps the View
+    // composition trivial.
+    private struct PaceChipState {
+        let label: String
+        let color: Color
+        let icon: String
+    }
+
+    private func paceChipState(now: Date) -> PaceChipState? {
+        guard let target = viewModel.activeRace?.targetDuration else {
+            return nil
+        }
+        let actual = viewModel.elapsed(at: now)
+        let expected = RaceStats.naiveExpectedElapsed(
+            segmentsCompleted: viewModel.completedSegmentsCount,
+            totalSegments: viewModel.totalSegments,
+            target: target
+        )
+        let delta = RaceStats.paceDelta(
+            actualElapsed: actual,
+            expectedElapsed: expected
+        )
+        let absDelta = Swift.abs(delta)
+
+        // 15-second dead zone keeps the chip from flickering between
+        // ahead/behind on every tick when the athlete is right on
+        // the line.
+        if absDelta < 15 {
+            return PaceChipState(
+                label: "on pace",
+                color: Color.textSecondary,
+                icon: "equal.circle.fill"
+            )
+        } else if delta < 0 {
+            // Negative = actual elapsed is less than expected = ahead.
+            return PaceChipState(
+                label: "\(RaceStats.format(absDelta)) ahead",
+                color: Color.success,
+                icon: "arrow.up.right"
+            )
+        } else {
+            return PaceChipState(
+                label: "\(RaceStats.format(absDelta)) behind",
+                color: Color.warning,
+                icon: "arrow.down.right"
+            )
         }
     }
 
@@ -336,24 +463,121 @@ struct RaceView: View {
     @ViewBuilder
     private var liveHeartRateChip: some View {
         if let bpm = viewModel.currentHeartRateBPM {
+            // Compute zone live from current HR + the athlete's max
+            // HR setting. Tints the entire chip in the zone color so
+            // the athlete can pace by zone color at a glance, not
+            // just by BPM number — much faster to read mid-sprint.
+            let zone = HRZone.zone(for: bpm, maxBPM: maxHeartRate)
+
             HStack(spacing: 4) {
                 Image(systemName: "heart.fill")
                     .font(.system(size: 10, weight: .semibold))
                 Text("\(Int(bpm.rounded()))")
                     .font(.caption2.weight(.bold))
                     .monospacedDigit()
-                Text("bpm")
-                    .font(.caption2)
-                    .tracking(0.3)
+                // Zone label appears as a small "Z3" suffix so the
+                // athlete sees both the raw number and the zone in
+                // one glance. Strava-watch-face style.
+                Text("Z\(zone.rawValue)")
+                    .font(.caption2.weight(.heavy))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(
+                        Capsule()
+                            .fill(zone.color.opacity(0.25))
+                    )
             }
-            .foregroundStyle(Color.accent)
+            .foregroundStyle(zone.color)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(
                 Capsule().fill(Color.surface)
             )
-            .accessibilityLabel("Current heart rate \(Int(bpm.rounded())) beats per minute")
+            .accessibilityLabel("Current heart rate \(Int(bpm.rounded())) beats per minute, \(zone.displayName)")
         }
+    }
+
+    // The athlete's configured max HR — drives zone classification on
+    // the live HR chip. Falls back to a sensible 190 default when no
+    // profile is bootstrapped yet (defensive — the bootstrap should
+    // always have run by the time the user starts a race).
+    private var maxHeartRate: Int {
+        profiles.first?.maxHeartRate ?? 190
+    }
+
+    // Full-screen pre-race countdown overlay. Massive number,
+    // animated transition between values, tap anywhere to skip.
+    // 0 renders as "GO" (the final beat before the race screen
+    // takes over). Voice cues + haptics fire from the
+    // `.onChange(of: viewModel.countdownValue)` side-effect
+    // attached at the body level so they play exactly once per
+    // tick.
+    private func countdownOverlay(value: Int) -> some View {
+        ZStack {
+            // Solid blackout — covers the start screen behind so
+            // there's no visual competition with the giant number.
+            Color.background
+                .ignoresSafeArea()
+
+            VStack(spacing: 12) {
+                Text(value > 0 ? "\(value)" : "GO")
+                    .font(.system(
+                        size: value > 0 ? 220 : 160,
+                        weight: .black,
+                        design: .rounded
+                    ))
+                    .monospacedDigit()
+                    .foregroundStyle(value > 0 ? Color.textPrimary : Color.accent)
+                    // Spring scale-in per tick — value-keyed so
+                    // each new number gets its own animation,
+                    // making the count read as a rhythm rather
+                    // than a static replacement.
+                    .id(value)
+                    .transition(
+                        .scale(scale: 0.5).combined(with: .opacity)
+                    )
+
+                Text("Tap to skip")
+                    .font(.caption.weight(.semibold))
+                    .tracking(0.6)
+                    .foregroundStyle(Color.textTertiary)
+                    .padding(.top, 80)
+            }
+        }
+        .contentShape(Rectangle())  // make whole area tappable
+        .onTapGesture {
+            viewModel.skipCountdown(targetDuration: viewModel.activeRace?.targetDuration)
+            Haptics.impact(.heavy)
+        }
+        .animation(.spring(response: 0.35, dampingFraction: 0.6), value: value)
+    }
+
+    // Pause / Resume toggle. Shows a pause glyph while the race is
+    // running, swaps to a play glyph when paused. Tapping freezes
+    // (or resumes) the timer, the engine handles the elapsed-time
+    // math via timestamp shifts so splits already captured are
+    // unaffected. Useful for real-world interruptions — phone call,
+    // someone hogging the sled, an unplanned break — that previously
+    // forced an athlete to abandon and lose the race.
+    private var pauseResumeButton: some View {
+        Button {
+            if viewModel.isPaused {
+                viewModel.resumeRace()
+                Haptics.success()
+            } else {
+                viewModel.pauseRace()
+                Haptics.warning()
+            }
+        } label: {
+            Image(systemName: viewModel.isPaused ? "play.fill" : "pause.fill")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(viewModel.isPaused ? Color.success : Color.textSecondary)
+                .frame(width: 32, height: 32)
+                .background(
+                    Circle().fill(Color.surface)
+                )
+        }
+        .accessibilityLabel(viewModel.isPaused ? "Resume race" : "Pause race")
     }
 
     // Small X in the top-right of the in-progress header. Confirmation alert
@@ -429,6 +653,73 @@ struct RaceView: View {
         }
     }
 
+    // Mid-race zone-entry handler. Fires when the live HR poll
+    // returns a new sample. We classify the sample, compare against
+    // `lastAnnouncedZone`, and announce ONLY when the new zone is
+    // strictly higher AND is Z3 or above. Lower-zone entries
+    // (recovery, aerobic) are suppressed because mid-race they
+    // create noise — the athlete doesn't need a "Zone 1, recovery"
+    // reminder when they're trying to push.
+    //
+    // Even when the announcement is suppressed (audio cues off or
+    // zone too low), we still update `lastAnnouncedZone` so a
+    // subsequent UPWARD crossing through the suppressed zone
+    // doesn't re-fire spuriously.
+    private func handleHeartRateZoneChange(_ bpm: Double?) {
+        guard let bpm else {
+            // HR poll cleared — race ended, profile not authorized,
+            // or simply between samples. Don't reset state here;
+            // the isRacing handler does that on race end. Mid-race
+            // we want a missing sample to be a no-op rather than a
+            // reset that re-announces on the next sample.
+            return
+        }
+
+        let zone = HRZone.zone(for: bpm, maxBPM: maxHeartRate)
+        let previous = lastAnnouncedZone ?? .z1
+
+        let isUpward = zone.rawValue > previous.rawValue
+        let isInteresting = zone.rawValue >= HRZone.z3.rawValue
+
+        if isUpward && isInteresting {
+            if profiles.first?.audioCuesEnabled ?? true {
+                VoiceCueService.shared.announceZoneEntry(zone)
+            }
+            // Light haptic alongside the voice — same idea as
+            // station-transition cues. Subtle confirmation that the
+            // app noticed the zone change even when audio is off.
+            Haptics.impact(.light)
+        }
+
+        // Always update the tracker, even when no announcement
+        // fired. Re-entering a higher zone after a dip (Z4 → Z3 →
+        // Z4) DOES re-fire because the second Z3→Z4 transition is
+        // still "upward" relative to the just-updated Z3. That's
+        // intentional: re-entering threshold mid-race is worth
+        // calling out again — it means the athlete pushed back.
+        lastAnnouncedZone = zone
+    }
+
+    // Per-tick handler for the pre-race countdown. Fires a haptic
+    // (heavier on GO than on the digits) and a voice cue ("3", "2",
+    // "1", "Go"). Voice gated on the audio-cues setting; haptic
+    // always fires because it's silent and reinforces the rhythm
+    // even when the phone is muted.
+    private func handleCountdownTick(_ value: Int) {
+        // Haptic: medium for digits, heavy for the GO beat.
+        if value == 0 {
+            Haptics.success()
+        } else {
+            Haptics.impact(.medium)
+        }
+
+        // Voice: gated on the same audioCuesEnabled flag the rest
+        // of the race screen uses, so users who train without
+        // verbal cues stay silent through the countdown too.
+        guard profiles.first?.audioCuesEnabled ?? true else { return }
+        VoiceCueService.shared.announceCountdownTick(value)
+    }
+
     // MARK: - HealthKit
 
     // Kick off a one-time HealthKit authorization request. Fired from
@@ -495,6 +786,28 @@ struct RaceView: View {
             startedAt = raceStart
             segmentStartedAt = segStart
             endedAt = nil
+        case .paused(let raceStart, let segStart, _, _):
+            // Watch sync currently has no .paused phase, so map
+            // pause to .inProgress and let the watch keep ticking
+            // visually. The phone is the authoritative timer; on
+            // resume we publish a fresh snapshot with shifted
+            // timestamps and the watch catches up. A proper
+            // .paused-aware snapshot phase is tracked in the §13
+            // backlog as a v2 polish.
+            phase = .inProgress
+            startedAt = raceStart
+            segmentStartedAt = segStart
+            endedAt = nil
+        case .inRoxzone(let raceStart, _, let roxStart):
+            // Watch sync similarly has no .inRoxzone phase.
+            // Treat as inProgress for the watch — overall race
+            // time keeps ticking, and the watch surface's
+            // segment timer will reset when the next segment
+            // starts on the phone. Same v2-polish caveat.
+            phase = .inProgress
+            startedAt = raceStart
+            segmentStartedAt = roxStart
+            endedAt = nil
         case .finished(let raceStart, let raceEnd, _):
             phase = .finished
             startedAt = raceStart
@@ -542,21 +855,130 @@ struct RaceView: View {
                 // completion — don't double-buzz.
                 viewModel.advance()
             }
+            // Disable while paused — the timer is frozen so advancing
+            // would close the segment with a stale split duration.
+            // Tap pause-to-resume first.
+            .disabled(viewModel.isPaused)
+            .opacity(viewModel.isPaused ? 0.4 : 1.0)
         } else {
+            // Roxzone-mode: button reads "End [station]" and routes
+            // through endSegmentRace so the engine enters .inRoxzone
+            // (where startNextSegment-Race takes over).
+            //
+            // Single-tap mode: button reads "Next Station" and calls
+            // advance() directly, preserving the v1 behavior.
+            let useRoxzone = (profiles.first?.roxzoneEnabled ?? false)
             Button {
-                // Fire the haptic before advancing so the buzz confirms
-                // the tap was received even if the next state transition
-                // happens to lag one frame.
                 Haptics.impact(.medium)
-                viewModel.advance()
+                if useRoxzone {
+                    viewModel.endSegmentRace()
+                } else {
+                    viewModel.advance()
+                }
             } label: {
-                Text("Next Station")
+                Text(useRoxzone ? "End Station" : "Next Station")
                     .font(.system(size: 24, weight: .bold, design: .rounded))
                     .frame(maxWidth: .infinity)
                     .frame(height: Layout.raceButtonHeight)
                     .background(Color.accent)
                     .foregroundStyle(Color.textPrimary)
                     .clipShape(RoundedRectangle(cornerRadius: Layout.cardCornerRadius))
+            }
+            .disabled(viewModel.isPaused)
+            .opacity(viewModel.isPaused ? 0.4 : 1.0)
+        }
+    }
+
+    // MARK: - Roxzone view
+
+    // Shown when the engine is in `.inRoxzone` between segments.
+    // Big countup transition timer + "Start [next]" CTA. Same
+    // header chips as the in-progress view so the athlete still
+    // sees overall race time, HR, pace, etc.
+    private var inRoxzoneView: some View {
+        TimelineView(.periodic(from: .now, by: 0.1)) { context in
+            VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    splitsChipButton
+                    Text("Station \(viewModel.completedSegmentsCount + 1) of \(viewModel.totalSegments)")
+                        .capsLabelStyle()
+                    Spacer()
+                    paceChip(now: context.date)
+                    liveHeartRateChip
+                    pauseResumeButton
+                    cancelButton
+                }
+                .padding(.top, 8)
+
+                Spacer()
+
+                // Hero block — "IN ROXZONE" caps wordmark in
+                // warning orange, big countup transition timer
+                // below it, then the next-station prompt.
+                VStack(spacing: 12) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.right.circle.fill")
+                            .font(.caption.weight(.heavy))
+                        Text("IN ROXZONE")
+                            .font(.caption.weight(.heavy))
+                            .tracking(2.0)
+                    }
+                    .foregroundStyle(Color.warning)
+
+                    Text(RaceStats.format(viewModel.currentRoxzoneElapsed(at: context.date)))
+                        .font(.system(size: 76, weight: .heavy, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(Color.warning)
+                        .shadow(color: Color.warning.opacity(0.35), radius: 18, x: 0, y: 0)
+
+                    Text("TRANSITION TIME")
+                        .font(.caption2.weight(.heavy))
+                        .tracking(1.4)
+                        .foregroundStyle(Color.textSecondary)
+
+                    if let upcoming = viewModel.currentStation {
+                        Text("Up next · \(upcoming.displayName)")
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(Color.textPrimary)
+                            .padding(.top, 12)
+                    }
+                }
+
+                Spacer()
+
+                // Primary CTA — start the next segment. Same
+                // gradient + glow language as RaceStartView's
+                // primary so the action reads as "you're
+                // starting work again."
+                Button {
+                    Haptics.impact(.heavy)
+                    viewModel.startNextSegmentRace()
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 20, weight: .heavy))
+                        Text("Start \(viewModel.currentStation?.displayName ?? "Next")")
+                            .font(.system(size: 22, weight: .heavy, design: .rounded))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                    }
+                    .foregroundStyle(Color.textPrimary)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: Layout.raceButtonHeight)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.accent, Color.accent.opacity(0.85)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .shadow(color: Color.accent.opacity(0.4), radius: 18, x: 0, y: 0)
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.isPaused)
+                .opacity(viewModel.isPaused ? 0.4 : 1.0)
+                .padding(.bottom, 16)
             }
         }
     }

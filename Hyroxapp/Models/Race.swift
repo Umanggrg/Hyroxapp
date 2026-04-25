@@ -66,6 +66,57 @@ final class Race {
     // on another. Profile-level default is a future enhancement.
     var targetDuration: TimeInterval?
 
+    // Optional human-given title for the race ("Tuesday morning race",
+    // "First sub-1:30 attempt", "Brick session with Praanshu"). Empty
+    // string falls back to the auto-generated date heading at every
+    // display site, so untitled races still render fine. Foreshadows
+    // the social feed where titles are how Strava activities get
+    // character. Same SwiftData additive-schema-safe pattern as
+    // `notes` — empty default lets pre-existing rows migrate cleanly.
+    var name: String = ""
+
+    // Set to the moment of pause when the race is paused, nil
+    // otherwise. Persisting the pause time means a paused race
+    // survives backgrounding / force-kill: on relaunch we read
+    // `engineState` and bring the engine back as `.paused`, ready
+    // to be resumed by the athlete with the original elapsed-time
+    // math intact. Same SwiftData additive-default pattern as
+    // `notes` / `name`; pre-existing rows decode cleanly with nil.
+    var pausedAt: Date?
+
+    // Optional photo attached to this race — gym selfie, workout
+    // shot, post-race PR snap. Stored as compressed JPEG bytes
+    // (~0.7 quality on save) the same way UserProfile stores
+    // avatars, so the whole race travels with its photo as one
+    // unit through SwiftData (and later cloud sync). When present,
+    // the photo becomes the hero banner on RaceCardView and the
+    // shareable race card — the most direct foreshadow of the
+    // social feed where photos drive engagement.
+    //
+    // Migration-safe nil default — pre-existing race rows decode
+    // cleanly without a photo, same as `notes` / `name`.
+    @Attribute(.externalStorage) var photoData: Data?
+
+    // Roxzone-mode persistence. When non-nil, the race is
+    // currently in Roxzone state — the previous segment closed
+    // at this timestamp and the athlete is in transition to the
+    // next segment. Cleared when the next segment starts (its
+    // duration is captured into `pendingRoxzoneSeconds` for the
+    // engine to attach to the upcoming split).
+    //
+    // Survives force-kill: on relaunch, `engineState` reads this
+    // and reconstitutes the engine in `.inRoxzone` so the
+    // athlete picks up exactly where they left off.
+    var roxzoneStartedAt: Date?
+
+    // Roxzone duration to attach to the next-completed split.
+    // Set after the user starts a segment from .inRoxzone via
+    // `startNextSegment(at:)` — the engine stashes the duration
+    // here, then consumes it on the next advance/endSegment.
+    // Survives force-kill so a kill mid-segment-after-roxzone
+    // doesn't lose the transition time.
+    var pendingRoxzoneSeconds: TimeInterval?
+
     init(
         id: UUID = UUID(),
         startedAt: Date,
@@ -76,7 +127,10 @@ final class Race {
         mode: RaceMode = .solo,
         createdAt: Date = Date(),
         notes: String = "",
-        targetDuration: TimeInterval? = nil
+        targetDuration: TimeInterval? = nil,
+        name: String = "",
+        pausedAt: Date? = nil,
+        photoData: Data? = nil
     ) {
         self.id = id
         self.startedAt = startedAt
@@ -88,6 +142,9 @@ final class Race {
         self.createdAt = createdAt
         self.notes = notes
         self.targetDuration = targetDuration
+        self.name = name
+        self.pausedAt = pausedAt
+        self.photoData = photoData
     }
 
     // MARK: - Derived
@@ -119,7 +176,31 @@ final class Race {
                 splits: splits
             )
         }
+        // Roxzone has its OWN no-current-segment shape: the
+        // previous segment is closed (in `splits`), the next
+        // hasn't started, and `roxzoneStartedAt` records the
+        // transition's start. Resolved before the in-progress
+        // path because it has no `currentSegmentStartedAt`.
+        if let roxStart = roxzoneStartedAt, currentSegmentStartedAt == nil {
+            return .inRoxzone(
+                startedAt: startedAt,
+                splits: splits,
+                roxzoneStartedAt: roxStart
+            )
+        }
         if let segStart = currentSegmentStartedAt {
+            // Paused state takes precedence over inProgress when both
+            // currentSegmentStartedAt and pausedAt are set. The engine
+            // state machine resolves cleanly back to .inProgress once
+            // the athlete taps Resume.
+            if let pausedAt {
+                return .paused(
+                    startedAt: startedAt,
+                    currentSegmentStartedAt: segStart,
+                    splits: splits,
+                    pausedAt: pausedAt
+                )
+            }
             return .inProgress(
                 startedAt: startedAt,
                 currentSegmentStartedAt: segStart,

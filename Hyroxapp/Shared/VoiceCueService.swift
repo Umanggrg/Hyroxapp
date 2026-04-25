@@ -56,6 +56,43 @@ final class VoiceCueService {
         speak("Race complete")
     }
 
+    // Per-tick announcement during the pre-race countdown. Numeric
+    // values 3 / 2 / 1 are spoken as digits; 0 maps to "Go" so the
+    // start of the race has its own distinct verbal cue. Anything
+    // outside that range is silently ignored — defensive against
+    // future tick-range changes.
+    func announceCountdownTick(_ value: Int) {
+        switch value {
+        case 1...10:
+            speak("\(value)")
+        case 0:
+            speak("Go")
+        default:
+            return
+        }
+    }
+
+    // Coach-style mid-race zone-entry cue. Announces "Zone 3, tempo"
+    // / "Zone 4, threshold" / "Zone 5, max" so the athlete gets
+    // verbal pacing feedback without looking at the phone. The
+    // qualifier matches the HRZone display name's second word —
+    // skipping "recovery" / "aerobic" because Z1/Z2 entries are
+    // suppressed by the caller anyway.
+    func announceZoneEntry(_ zone: HRZone) {
+        let qualifier: String
+        switch zone {
+        case .z3: qualifier = "tempo"
+        case .z4: qualifier = "threshold"
+        case .z5: qualifier = "max"
+        default:  qualifier = ""
+        }
+        if qualifier.isEmpty {
+            speak("Zone \(zone.rawValue)")
+        } else {
+            speak("Zone \(zone.rawValue), \(qualifier)")
+        }
+    }
+
     // Cancel any pending utterance immediately. Used when the user
     // leaves the race screen mid-announcement, abandons a race, or
     // toggles the cue setting off mid-race — we don't want a

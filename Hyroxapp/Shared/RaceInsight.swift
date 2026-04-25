@@ -54,6 +54,15 @@ enum InsightGenerator {
         if let hrInsight = hrPeakInsight(for: race) {
             out.append(hrInsight)
         }
+        // Compromised-running insight runs BEFORE the simpler
+        // fatigue insight because it's HYROX-specific and
+        // actionable ("which station compromised you?"). The
+        // simpler fatigue check still fires when no specific
+        // station stands out — they coexist as overlapping
+        // signals at different granularities.
+        if let compromisedInsight = compromisedRunningInsight(for: race) {
+            out.append(compromisedInsight)
+        }
         if let fatigueInsight = runFatigueInsight(for: race) {
             out.append(fatigueInsight)
         }
@@ -118,6 +127,34 @@ enum InsightGenerator {
             text: text,
             symbol: "heart.fill",
             color: .accent
+        )
+    }
+
+    // MARK: - Compromised running
+
+    // HYROX-specific narrative: which station hurt your engine
+    // recovery the most? Pulls from `RaceStats.biggestCompromisedRun`
+    // which already does the math. Only fires when the worst
+    // run is meaningfully slower than baseline (>= 12%) — small
+    // slowdowns are noise, not actionable feedback.
+    //
+    // Phrased as a coaching diagnosis ("Sled Pull cost you...")
+    // rather than a statistic ("Run 6 was 22% slower"). Both
+    // facts are true; the diagnosis is what the athlete can act
+    // on in next week's training.
+    private static func compromisedRunningInsight(for race: Race) -> RaceInsight? {
+        guard let biggest = RaceStats.biggestCompromisedRun(for: race),
+              let preceding = biggest.precedingStation,
+              biggest.percentSlower >= 12.0
+        else { return nil }
+
+        let percent = Int(biggest.percentSlower.rounded())
+        let text = "\(preceding.displayName) compromised your engine — Run \(biggest.runIndex) was \(percent)% slower."
+
+        return RaceInsight(
+            text: text,
+            symbol: "arrow.down.right.circle.fill",
+            color: .warning
         )
     }
 

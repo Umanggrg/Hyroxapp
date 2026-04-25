@@ -69,6 +69,36 @@ final class UserProfile {
     // on next read.
     var audioCuesEnabled: Bool = true
 
+    // Whether the race screen plays a 3-2-1-GO countdown before
+    // the timer actually starts. On by default — gives the
+    // athlete a moment to drop the phone, take a breath, and
+    // start the race deliberately rather than the timer
+    // ticking the instant they tap "Start Race." Off for users
+    // who'd rather just begin instantly. Migration-safe via
+    // SwiftData default-value lightweight migration.
+    var countdownEnabled: Bool = true
+
+    // Master toggle for local notifications (today: only the
+    // streak-protection reminder; future: weekly digest, race
+    // anniversaries, etc.). Off by default — opt-in respects the
+    // user's "don't ping me unless I asked" baseline. Permission
+    // is requested contextually when the user first flips this
+    // on in Settings, not on launch.
+    var notificationsEnabled: Bool = false
+
+    // Roxzone tracking — captures the transition time between
+    // segment-end and next-segment-start as a separate metric.
+    // Off by default because it's an advanced HYROX-specific
+    // feature: changes the in-race advance flow from one-tap to
+    // two-tap (end segment → enter roxzone → start next).
+    // Athletes who care about transition discipline turn it on;
+    // athletes who don't, never know it exists.
+    //
+    // The metric the HYROX community calls "Roxzone time" — the
+    // total time spent in transition, separate from work time.
+    // No other fitness app surfaces this.
+    var roxzoneEnabled: Bool = false
+
     // Maximum heart rate (bpm) used to classify HR zones on race
     // detail. Default 190 is a reasonable starting point for most
     // HYROX-age athletes; the "220 minus age" rule-of-thumb gives
@@ -78,6 +108,15 @@ final class UserProfile {
     // (HealthKit reports per-second integer bpm samples). Default
     // makes this migration-safe for existing rows.
     var maxHeartRate: Int = 190
+
+    // First-launch onboarding completion flag. False on a fresh
+    // install (and on rows from before the wizard shipped, via
+    // SwiftData's default-value lightweight migration), true once
+    // the athlete has walked through the wizard. Drives the
+    // wizard sheet on app entry — `bootstrapIfNeeded` creates a
+    // default profile on first run, the wizard then walks the user
+    // through populating it before they touch the rest of the app.
+    var hasCompletedOnboarding: Bool = false
 
     var createdAt: Date
     var updatedAt: Date
@@ -91,7 +130,11 @@ final class UserProfile {
         avatarData: Data? = nil,
         division: Division? = Division.mensOpen,
         audioCuesEnabled: Bool = true,
+        countdownEnabled: Bool = true,
+        notificationsEnabled: Bool = false,
+        roxzoneEnabled: Bool = false,
         maxHeartRate: Int = 190,
+        hasCompletedOnboarding: Bool = false,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -103,7 +146,11 @@ final class UserProfile {
         self.avatarData = avatarData
         self.division = division
         self.audioCuesEnabled = audioCuesEnabled
+        self.countdownEnabled = countdownEnabled
+        self.notificationsEnabled = notificationsEnabled
+        self.roxzoneEnabled = roxzoneEnabled
         self.maxHeartRate = maxHeartRate
+        self.hasCompletedOnboarding = hasCompletedOnboarding
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

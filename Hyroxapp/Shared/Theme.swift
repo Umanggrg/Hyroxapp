@@ -44,14 +44,23 @@ extension Color {
 // MARK: - Typography
 
 extension Font {
-    // Giant always-visible race timer. Pair with `.monospacedDigit()`.
-    static let raceTimer = Font.system(size: 72, weight: .bold, design: .rounded)
+    // Hero display — for screens that need to feel like a moment.
+    // Used by the race-summary "FINISHED" treatment, monthly recap
+    // hero, year-in-review hero. 88pt rounded heavy. Pair with
+    // monospacedDigit() when displaying numerics.
+    static let displayHero = Font.system(size: 88, weight: .heavy, design: .rounded)
+
+    // Giant always-visible race timer. Bumped from 72pt → 96pt for
+    // the v2 redesign — at arm's length, mid-sprint, in bright
+    // light, every extra pt of size matters. Pair with
+    // `.monospacedDigit()`.
+    static let raceTimer = Font.system(size: 96, weight: .heavy, design: .rounded)
 
     // Hero stat on cards, e.g. a race's total time. Pair with `.monospacedDigit()`.
     static let heroStat = Font.system(size: 44, weight: .bold, design: .rounded)
 
     // Active station name on the race screen.
-    static let stationTitle = Font.largeTitle.weight(.bold)
+    static let stationTitle = Font.system(size: 36, weight: .heavy, design: .rounded)
 
     // Section headers (outside cards).
     static let sectionHeader = Font.title2.weight(.semibold)
@@ -96,6 +105,67 @@ enum Motion {
     // Default spring for state transitions — subtle, not bouncy.
     // Respects Reduce Motion automatically when applied via `.animation`.
     static let standardSpring: Animation = .spring(response: 0.4, dampingFraction: 0.8)
+
+    // Snappier spring for primary CTAs and tab transitions — faster
+    // response time so taps feel instant. Slightly less damped so
+    // there's a tiny visual settle that confirms the action.
+    static let snappySpring: Animation = .spring(response: 0.28, dampingFraction: 0.75)
+
+    // Loose spring for hero animations — number count-ups, race
+    // finish moment, badge unlocks. More follow-through, more
+    // emotional. Reach for this when the moment deserves it.
+    static let heroSpring: Animation = .spring(response: 0.55, dampingFraction: 0.7)
+
+    // Soft ease for ambient changes — breathing glows, idle
+    // pulse on the race-day countdown, low-frequency loops. Pair
+    // with `.repeatForever(autoreverses: true)`.
+    static let ambient: Animation = .easeInOut(duration: 2.4)
+}
+
+// MARK: - Depth (layered shadows for surface hierarchy)
+
+// Card hierarchy isn't just about background color — depth via
+// shadow tells the eye what's interactive vs ambient. Three tiers:
+//   • subtle: default cards, barely lifted
+//   • elevated: hero / primary cards (race start CTA, recap banner)
+//   • dramatic: floating overlays (countdown, finish moment)
+//
+// All shadows tinted slightly cool so they don't muddy the dark
+// theme; tinted black at low opacity preserves the deep-black feel.
+enum Depth {
+    static func subtle() -> some View {
+        Color.clear
+            .shadow(color: Color.black.opacity(0.4), radius: 4, x: 0, y: 2)
+    }
+
+    // Stack via .background(...) on the card.
+    struct ElevatedShadow: ViewModifier {
+        func body(content: Content) -> some View {
+            content
+                .shadow(color: Color.black.opacity(0.5), radius: 12, x: 0, y: 6)
+        }
+    }
+
+    struct DramaticShadow: ViewModifier {
+        func body(content: Content) -> some View {
+            content
+                .shadow(color: Color.black.opacity(0.6), radius: 24, x: 0, y: 12)
+                .shadow(color: Color.accent.opacity(0.15), radius: 32, x: 0, y: 0)
+        }
+    }
+}
+
+extension View {
+    // Apply elevated card shadow — for hero / primary cards.
+    func elevatedDepth() -> some View {
+        modifier(Depth.ElevatedShadow())
+    }
+
+    // Apply dramatic shadow + coral glow — for race-defining
+    // moments (countdown overlay, finish hero, share buttons).
+    func dramaticDepth() -> some View {
+        modifier(Depth.DramaticShadow())
+    }
 }
 
 // MARK: - Caps Label Modifier

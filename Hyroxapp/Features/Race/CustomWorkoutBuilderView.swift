@@ -163,20 +163,59 @@ struct CustomWorkoutBuilderView: View {
     // MARK: - States
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
-            Spacer()
-            Image(systemName: "square.stack.3d.up")
-                .font(.system(size: 40, weight: .light))
-                .foregroundStyle(Color.textTertiary)
-            Text("Build your workout")
-                .font(.sectionHeader)
-                .foregroundStyle(Color.textPrimary)
-            Text("Pick the stations you want in the order you want them. Repeat stations as many times as you like.")
-                .font(.body)
-                .foregroundStyle(Color.textSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-            Spacer()
+        ZStack {
+            // Brand fingerprint watermark anchors the empty
+            // state in the same visual language as the History
+            // empty state — recurring 16-bar signature ties the
+            // app together.
+            VStack {
+                Spacer()
+                FingerprintWatermark()
+                    .frame(height: 90)
+                    .opacity(0.04)
+                    .padding(.horizontal, 40)
+                    .padding(.bottom, 80)
+            }
+
+            VStack(spacing: 14) {
+                Spacer()
+
+                // Hero icon in coral-tinted circle, matching the
+                // onboarding hero treatment so the visual
+                // grammar reads as "you're in a builder" not
+                // "blank screen."
+                ZStack {
+                    Circle()
+                        .fill(Color.accent.opacity(0.14))
+                        .frame(width: 80, height: 80)
+                    Circle()
+                        .stroke(Color.accent.opacity(0.35), lineWidth: 1.5)
+                        .frame(width: 80, height: 80)
+                    Image(systemName: "square.stack.3d.up.fill")
+                        .font(.system(size: 32, weight: .bold))
+                        .foregroundStyle(Color.accent)
+                }
+                .shadow(color: Color.accent.opacity(0.25), radius: 18, x: 0, y: 0)
+                .padding(.bottom, 4)
+
+                Text("Build your workout")
+                    .font(.system(size: 22, weight: .heavy, design: .rounded))
+                    .foregroundStyle(Color.textPrimary)
+
+                Text("Pick the stations you want in the order you want them. Repeat as many times as you like — strength days, brick sessions, half-HYROX, your call.")
+                    .font(.callout)
+                    .foregroundStyle(Color.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+
+                Text("Tap + to add your first station")
+                    .font(.caption.weight(.heavy))
+                    .tracking(0.6)
+                    .foregroundStyle(Color.accent)
+                    .padding(.top, 8)
+
+                Spacer()
+            }
         }
     }
 
@@ -242,20 +281,53 @@ struct CustomWorkoutBuilderView: View {
     }
 
     private var startButton: some View {
-        Button {
+        let isReady = !sequence.isEmpty
+        return Button {
             let built = sequence
             dismiss()
             onStart(built)
         } label: {
-            Text(sequence.isEmpty ? "Add a Station to Start" : "Start Workout")
-                .font(.system(size: 20, weight: .bold, design: .rounded))
-                .frame(maxWidth: .infinity)
-                .frame(height: Layout.raceButtonHeight)
-                .background(sequence.isEmpty ? Color.accentDim : Color.accent)
-                .foregroundStyle(Color.textPrimary)
-                .clipShape(RoundedRectangle(cornerRadius: Layout.cardCornerRadius))
+            HStack(spacing: 10) {
+                Image(systemName: "flag.checkered")
+                    .font(.system(size: 18, weight: .heavy))
+                Text(isReady ? "Start Workout" : "Add a Station to Start")
+                    .font(.system(size: 22, weight: .heavy, design: .rounded))
+            }
+            .foregroundStyle(Color.textPrimary)
+            .frame(maxWidth: .infinity)
+            .frame(height: Layout.raceButtonHeight)
+            .background(
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(
+                            isReady
+                                ? LinearGradient(
+                                    colors: [Color.accent, Color.accent.opacity(0.85)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                                : LinearGradient(
+                                    colors: [Color.surfaceElevated, Color.surfaceElevated],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                        )
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                        .blendMode(.overlay)
+                }
+            )
+            .shadow(
+                color: isReady ? Color.accent.opacity(0.35) : Color.clear,
+                radius: 18,
+                x: 0,
+                y: 0
+            )
+            .shadow(color: Color.black.opacity(0.4), radius: 8, x: 0, y: 4)
+            .opacity(isReady ? 1.0 : 0.55)
         }
-        .disabled(sequence.isEmpty)
+        .buttonStyle(.plain)
+        .disabled(!isReady)
     }
 }
 

@@ -157,6 +157,53 @@ enum RaceStats {
         return split.duration - prior
     }
 
+    // MARK: - HYROX Performance Score (per-pillar rollups)
+
+    // "Theoretical best HYROX" total time for a given pillar — sum
+    // of the athlete's all-time best split for every station in
+    // that pillar. For .engine, multiplies the best 1km run time
+    // by 8 to represent all eight run slots in an actual race.
+    //
+    // Returns nil when the athlete has no completion data for ANY
+    // station in the pillar. Returns a partial sum (with the rest
+    // of the stations using nil → skipped) when some are covered
+    // and others aren't. Callers can pair with `pillarStationsCovered`
+    // to know how complete the score is.
+    static func pillarTheoreticalBest(
+        _ pillar: HyroxPillar,
+        among races: [Race]
+    ) -> TimeInterval? {
+        let bests = pillar.stations.compactMap { station -> TimeInterval? in
+            guard let split = allTimeBest(for: station, among: races) else {
+                return nil
+            }
+            // For the engine pillar, the canonical .run1 entry
+            // represents one 1km run — multiply by 8 to capture
+            // all the runs in a HYROX. Non-run stations score
+            // their single split.
+            return station.kind == .run
+                ? split.duration * 8
+                : split.duration
+        }
+        guard !bests.isEmpty else { return nil }
+        return bests.reduce(0, +)
+    }
+
+    // How many of the pillar's stations have ever been completed
+    // by the athlete in a finished race. Used by the Performance
+    // Score view to render "X of Y stations" subtitle so partial
+    // scores don't look like reliable totals.
+    static func pillarStationsCovered(
+        _ pillar: HyroxPillar,
+        among races: [Race]
+    ) -> (covered: Int, total: Int) {
+        let total = pillar.stations.count
+        let covered = pillar.stations.filter { station in
+            allTimeBest(for: station, among: races) != nil
+        }.count
+        return (covered, total)
+    }
+
     // All-time fastest split for a given canonical station type across
     // every finished race the athlete has logged. Used by the Personal
     // Bests panel on Profile — one row per station type, all-time best
@@ -182,6 +229,257 @@ enum RaceStats {
             }
 
         return candidates.min(by: { $0.duration < $1.duration })
+    }
+
+    // Per-station trend data for `StationDetailView`'s history chart.
+    // Walks every finished race, picks each split that matches the
+    // requested station type (collapsing all run cases together the
+    // same way `allTimeBest` does), and returns one (date, duration)
+    // tuple per attempt sorted oldest → newest.
+    //
+    // Race-level grouping note: a single full HYROX race has 8 runs.
+    // For a run-station chart we'd return all 8 attempts per race.
+    // For a workout station (Sled Push, Wall Balls, etc.) we get
+    // exactly one per race. Both are useful — the chart just renders
+    // every dot in chronological order.
+    //
+    // Date used for the x-axis is the race's `endedAt` so the dot
+    // lands at "when this race finished," which is what the athlete
+    // remembers ("the race I did last Tuesday"). Falls back to
+    // `startedAt` defensively.
+    // Result type for `stationTrendDirection`. Carries enough info
+    // for the Performance Overload callout to render a sentence
+    // ("Sled Pull is trending 12% faster"): the direction, the
+    // absolute % delta, and the station type (so the caller can map
+    // back to a display name without holding extra state).
+    enum TrendDirection: Sendable, Equatable {
+        case improving(percentChange: Double)  // negative duration delta = faster
+        case declining(percentChange: Double)  // positive duration delta = slower
+        case plateau                            // change within the noise threshold
+
+        var isMeaningful: Bool {
+            switch self {
+            case .improving, .declining: return true
+            case .plateau:               return false
+            }
+        }
+    }
+
+    // Detect a meaningful trend in an athlete's last N attempts at a
+    // station type. Splits the window in half (early vs late), takes
+    // the average duration of each half, and returns the percent
+    // change. Anything inside ±3% counts as plateau — the noise of
+    // any single race outweighs that, so calling it a "trend" would
+    // be misleading.
+    //
+    // Why split-and-compare over linear regression: with windows of
+    // 4–8 attempts (typical for an athlete with 2–4 races' worth of
+    // data per workout-station type), simple averages are more
+    // robust to a single outlier race. A single bad sled push
+    // shouldn't flip the trend direction; halves-of-the-window
+    // averages it out.
+    //
+    // Returns `.plateau` when there's not enough history (< 4
+    // attempts) — too few data points to call a trend honestly.
+    static func stationTrendDirection(
+        for stationType: Station,
+        among all: [Race],
+        windowSize: Int = 6,
+        plateauThresholdPercent: Double = 3.0
+    ) -> TrendDirection {
+        let trend = stationTrend(for: stationType, among: all)
+        // Take the most recent `windowSize` attempts. If we don't
+        // have at least 4, bail — the result wouldn't be meaningful.
+        let recent = Array(trend.suffix(windowSize))
+        guard recent.count >= 4 else { return .plateau }
+
+        // Split the window in half; average each half. Faster = lower
+        // duration, so a percentage decrease (late < early) means
+        // improvement.
+        let mid = recent.count / 2
+        let earlyAvg = average(recent[0..<mid].map(\.duration))
+        let lateAvg = average(recent[mid..<recent.count].map(\.duration))
+        guard earlyAvg > 0 else { return .plateau }
+
+        let percentChange = ((lateAvg - earlyAvg) / earlyAvg) * 100.0
+
+        if abs(percentChange) < plateauThresholdPercent {
+            return .plateau
+        }
+        return percentChange < 0
+            ? .improving(percentChange: abs(percentChange))
+            : .declining(percentChange: abs(percentChange))
+    }
+
+    // Tiny helper; pulled out so `stationTrendDirection` reads
+    // cleanly. Returns 0 for an empty slice rather than crashing.
+    private static func average(_ values: [TimeInterval]) -> TimeInterval {
+        guard !values.isEmpty else { return 0 }
+        return values.reduce(0, +) / Double(values.count)
+    }
+
+    // Per-run breakdown for compromised-running analysis. Each
+    // entry pairs a 1km run split with the workout station that
+    // PRECEDED it (the station that just compromised the
+    // athlete's engine), plus the run's slowdown vs the baseline
+    // (Run 1).
+    //
+    // The HYROX-specific insight: Run 1 is fresh legs, every
+    // subsequent run is degraded by the station before it. The
+    // biggest slowdown identifies which station is hurting your
+    // engine recovery most — a metric no other fitness app
+    // surfaces. "Sled Pull cost you 22% run pace" is actionable
+    // training intelligence.
+    //
+    // Run 1 has no preceding station (it's the first segment) so
+    // its `precedingStation` is nil and `percentSlower` is 0
+    // (baseline against itself). Custom workouts that don't
+    // start with a run, or have non-alternating sequences, will
+    // produce empty/short results — gracefully handled by the
+    // chart's data-availability gate.
+    struct CompromisedRunData: Sendable, Equatable {
+        let runIndex: Int             // 1-based: Run 1, Run 2, ...
+        let split: Split              // the run split itself
+        let precedingStation: Station?  // workout that just preceded; nil for Run 1
+        let percentSlower: Double     // vs Run 1 baseline; 0 for Run 1, positive for slower
+    }
+
+    // Build the compromised-running breakdown for a race. Walks
+    // the race's splits in order; for each run-kind split, pairs
+    // it with the workout-kind split immediately before. Returns
+    // empty when no run splits exist (custom workout with no
+    // runs).
+    static func compromisedRunData(for race: Race) -> [CompromisedRunData] {
+        let splits = race.splits
+
+        // Walk splits in order, accumulating runs with their
+        // preceding workout. The race always alternates run/
+        // workout/run/workout in the canonical sequence; for
+        // custom workouts the pattern may differ, but we just
+        // pair "most recent workout before this run" which
+        // generalizes correctly.
+        var lastWorkout: Station?
+        var runs: [(Int, Split, Station?)] = []
+        for split in splits {
+            switch split.station.kind {
+            case .workout:
+                lastWorkout = split.station
+            case .run:
+                runs.append((runs.count + 1, split, lastWorkout))
+            }
+        }
+
+        guard let baseline = runs.first?.1.duration, baseline > 0 else {
+            return []
+        }
+
+        return runs.map { runIndex, split, preceding in
+            let percentSlower = ((split.duration - baseline) / baseline) * 100.0
+            return CompromisedRunData(
+                runIndex: runIndex,
+                split: split,
+                precedingStation: preceding,
+                percentSlower: percentSlower
+            )
+        }
+    }
+
+    // Identifies the run with the largest slowdown vs baseline,
+    // along with the station that preceded it. Returns nil when
+    // no runs slowed (only Run 1 in the data) or when there are
+    // fewer than 2 runs. Used by the chart callout and the
+    // narrative insight.
+    static func biggestCompromisedRun(for race: Race) -> CompromisedRunData? {
+        let data = compromisedRunData(for: race)
+        // Skip the baseline (Run 1, percentSlower = 0) and find
+        // the slowest. If multiple tie, the LATER run wins
+        // (more typical "fade" pattern; latest run is more
+        // meaningful for narrative purposes).
+        return data
+            .dropFirst()
+            .max { $0.percentSlower < $1.percentSlower }
+    }
+
+    // Cross-race aggregation result: for each workout station that
+    // precedes a run, the average % slowdown that station causes
+    // on the following run, averaged across all races where the
+    // station appeared. The KILLER insight no other app surfaces:
+    // "across your last 5 races, Sandbag Lunges costs an avg 18%
+    // run pace — that's your weakest engine recovery."
+    //
+    // Keyed by station (the workout that precedes the affected
+    // run). Sample count is exposed so the UI can dim/disclose
+    // entries with low confidence (1-2 race sample is noisy).
+    struct StationImpact: Sendable, Equatable, Hashable {
+        let station: Station          // the workout station that compromises the next run
+        let avgPercentSlower: Double  // unsigned mean of percent-slower across races
+        let sampleCount: Int          // number of races contributing to this average
+    }
+
+    // Compute per-station engine-impact averages across the
+    // athlete's finished races. For every workout station that
+    // preceded a run in any finished race, average that run's
+    // percent-slowdown vs that race's Run 1 baseline.
+    //
+    // Returns a list sorted descending by avgPercentSlower —
+    // biggest impact first, which matches what the visualization
+    // wants to show prominently.
+    //
+    // Stations that never appeared as a preceding workout in any
+    // race (custom workouts without that station, fresh history)
+    // are simply absent from the result. The view layer renders
+    // the present subset rather than fixed-list-with-zeros so
+    // the data shape adapts to varied training.
+    //
+    // Wall Balls is intentionally absent — it's the final station,
+    // no run follows it in the canonical sequence.
+    static func crossRaceCompromisedAnalysis(
+        among races: [Race]
+    ) -> [StationImpact] {
+        let finished = races.filter { $0.isFinished }
+
+        // Build (station -> [percentSlower]) by walking each race's
+        // compromised-run data and bucketing each non-baseline run
+        // by its preceding station.
+        var bucketed: [Station: [Double]] = [:]
+        for race in finished {
+            let data = compromisedRunData(for: race)
+            for entry in data.dropFirst() {  // skip Run 1 baseline (percentSlower = 0)
+                guard let station = entry.precedingStation else { continue }
+                bucketed[station, default: []].append(entry.percentSlower)
+            }
+        }
+
+        return bucketed
+            .map { station, values in
+                let avg = values.reduce(0, +) / Double(values.count)
+                return StationImpact(
+                    station: station,
+                    avgPercentSlower: avg,
+                    sampleCount: values.count
+                )
+            }
+            .sorted { $0.avgPercentSlower > $1.avgPercentSlower }
+    }
+
+    static func stationTrend(
+        for stationType: Station,
+        among all: [Race]
+    ) -> [(date: Date, duration: TimeInterval, split: Split)] {
+        all
+            .filter { $0.isFinished }
+            .flatMap { race -> [(Date, TimeInterval, Split)] in
+                let raceDate = race.endedAt ?? race.startedAt
+                return race.splits
+                    .filter { split in
+                        stationType.kind == .run
+                            ? split.station.kind == .run
+                            : split.station == stationType
+                    }
+                    .map { (raceDate, $0.duration, $0) }
+            }
+            .sorted { $0.0 < $1.0 }
+            .map { (date: $0.0, duration: $0.1, split: $0.2) }
     }
 
     #endif  // !os(watchOS)

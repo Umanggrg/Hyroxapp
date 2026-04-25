@@ -22,8 +22,60 @@ struct ProfileView: View {
         sort: [SortDescriptor(\Race.createdAt, order: .reverse)]
     ) private var races: [Race]
 
+    // Templates power the `customCrafter` badge criterion ("save
+    // three or more custom workouts"). Sort isn't important here —
+    // the badge check is just a count.
+    @Query(sort: [SortDescriptor(\WorkoutTemplate.createdAt, order: .forward)])
+    private var templates: [WorkoutTemplate]
+
+    // All race events, sorted by date ascending. SwiftData's
+    // #Predicate macro doesn't allow global function calls like
+    // Date() inside the filter body — it expands at compile time
+    // and can only reference captured constants. So we fetch all
+    // events here and filter to "upcoming" in the computed
+    // property below using a runtime Date().
+    @Query(sort: [SortDescriptor(\RaceEvent.date, order: .forward)])
+    private var allRaceEvents: [RaceEvent]
+
+    // Future-dated race events. The Profile banner pulls
+    // `upcomingEvents.first` for the headline countdown — we
+    // surface only one event at a time in v1 even when multiple
+    // exist, so the user has a single anchor to train against.
+    // Boundary is startOfDay so the day-of-event still counts as
+    // "upcoming" until midnight, not just until the saved hour.
+    private var upcomingEvents: [RaceEvent] {
+        let today = Calendar.current.startOfDay(for: Date())
+        return allRaceEvents.filter { $0.date >= today }
+    }
+
     @State private var isEditing = false
     @State private var isShowingSettings = false
+
+    // Drives the RaceEventEditSheet — non-nil with an event to
+    // edit (or .create for the new-event path). Wrapped in an
+    // optional with two cases via the small enum below so the
+    // same sheet supports both create and edit paths from the
+    // banner without needing two separate boolean flags.
+    @State private var eventEditingMode: EventEditMode?
+
+    private enum EventEditMode: Identifiable {
+        case create
+        case edit(RaceEvent)
+
+        var id: String {
+            switch self {
+            case .create: return "create"
+            case .edit(let event): return event.id.uuidString
+            }
+        }
+    }
+
+    // Cached render of the profile share card. Same `.onAppear`
+    // bake pattern used elsewhere — ImageRenderer is non-trivial,
+    // so we generate the image once and reuse for the lifetime of
+    // the view. Re-rendered when the underlying race count changes
+    // (most common reason the card content shifts).
+    @State private var profileShareImage: RaceShareImage?
 
     var body: some View {
         NavigationStack {
@@ -31,35 +83,43 @@ struct ProfileView: View {
                 Color.background.ignoresSafeArea()
 
                 ScrollView {
-                    VStack(spacing: 28) {
+                    // v2 redesign: 6 grouped sections with strong
+                    // visual breaks instead of the v1 flat 12-card
+                    // stack. Each group's gating predicates are
+                    // unchanged — empty groups skip their header
+                    // entirely so a fresh user doesn't see a wall
+                    // of empty section labels.
+                    LazyVStack(spacing: 28, pinnedViews: []) {
                         if let profile = profiles.first {
-                            ProfileHeaderView(profile: profile, raceCount: races.count)
-                                .padding(.top, 8)
+                            ProfileHero(
+                                profile: profile,
+                                raceCount: races.count,
+                                pbDisplay: heroPBDisplay,
+                                avgDisplay: heroAvgDisplay,
+                                streakDays: heroStreakDays
+                            )
                         }
 
                         if races.isEmpty {
-                            emptyStats
-                        } else {
-                            StatsGridView(items: aggregates)
-                            // All-time PBs per station type sit between
-                            // the aggregate stats grid and the recent
-                            // races feed — answers "what's my best Sled
-                            // Push / 1km Run / Wall Balls?" at a glance,
-                            // adjacent to the high-level metrics.
-                            StationPersonalBestsView(races: races)
-                            // Performance trends chart only shows up
-                            // once there's enough data for a real
-                            // trendline (3+ finished races). Without
-                            // this gate, the section would render an
-                            // awkward 1- or 2-dot chart that doesn't
-                            // tell the athlete anything.
-                            if PerformanceTrendsView.hasEnoughData(in: races) {
-                                trendsSection
+                            // Fresh install: just race-event banner
+                            // (so the user can pin their goal) plus
+                            // the empty-stats inviter. No section
+                            // headers needed yet.
+                            VStack(spacing: 16) {
+                                raceEventBanner
+                                emptyStats
                             }
-                            recentRacesSection
+                            .padding(.horizontal, Layout.screenMargin)
+                        } else {
+                            nextUpSection
+                            summarySection
+                            performanceSection
+                            trainingSection
+                            personalBestsSection
+                            achievementsGroupSection
+                            recentSection
                         }
                     }
-                    .padding(.horizontal, Layout.screenMargin)
                     .padding(.bottom, Layout.screenMargin)
                 }
             }
@@ -67,6 +127,16 @@ struct ProfileView: View {
             .hyroxDarkNavigationBar()
             .navigationDestination(for: Race.self) { race in
                 RaceDetailView(race: race)
+            }
+            // MonthlyRecap is a value-type Hashable struct, so it
+            // works directly as a navigation value. The destination
+            // pushes the full recap screen + share button.
+            .navigationDestination(for: MonthlyRecap.self) { recap in
+                MonthlyRecapView(recap: recap)
+            }
+            // Yearly companion — same Hashable struct pattern.
+            .navigationDestination(for: YearlyRecap.self) { recap in
+                YearlyRecapView(recap: recap)
             }
             .toolbar {
                 #if !os(macOS)
@@ -86,9 +156,43 @@ struct ProfileView: View {
                     Button("Edit") { isEditing = true }
                         .disabled(profiles.first == nil)
                 }
+                // Share button — story-aspect athlete card export.
+                // Hidden until the cached image is ready (renderer
+                // is async on appear). Sits to the LEFT of Edit
+                // because in iOS toolbars trailing items render
+                // right-to-left in declaration order, and we want
+                // Edit closest to the right edge as the primary
+                // text action.
+                if let item = profileShareImage {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        ShareLink(
+                            item: item,
+                            preview: SharePreview(
+                                "HYROX Athlete",
+                                image: Image(uiImage: item.image)
+                            )
+                        ) {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                        .accessibilityLabel("Share profile")
+                    }
+                }
                 #endif
             }
-            .onAppear(perform: bootstrapIfNeeded)
+            .onAppear {
+                bootstrapIfNeeded()
+                prepareProfileShareImage()
+            }
+            // Re-bake the card when the race count changes — that's
+            // the most common reason the card content shifts. We
+            // could also key on profile fields (name, division)
+            // but those rarely change at runtime; an over-eager
+            // re-render here is cheap (one ImageRenderer pass) so
+            // the slight redundancy isn't a problem.
+            .onChange(of: races.count) { _, _ in
+                profileShareImage = nil
+                prepareProfileShareImage()
+            }
             #if canImport(UIKit)
             .sheet(isPresented: $isEditing) {
                 if let profile = profiles.first {
@@ -101,14 +205,565 @@ struct ProfileView: View {
                     SettingsView(profile: profile)
                 }
             }
+            // RaceEventEditSheet — single sheet handles both
+            // create and edit paths via the EventEditMode case.
+            .sheet(item: $eventEditingMode) { mode in
+                switch mode {
+                case .create:
+                    RaceEventEditSheet(existing: nil)
+                        .preferredColorScheme(.dark)
+                case .edit(let event):
+                    RaceEventEditSheet(existing: event)
+                        .preferredColorScheme(.dark)
+                }
+            }
             #endif
         }
+    }
+
+    // MARK: - v2 grouped sections
+
+    // Each group below wraps related content under a single
+    // ProfileSectionHeader so the page reads as 6 distinct
+    // domains (NEXT UP / SUMMARY / PERFORMANCE / TRAINING /
+    // PERSONAL BESTS / RECENT) rather than a flat 12-card list.
+    // Inner cards keep their existing components — the
+    // restructure is composition only, not new UI per card.
+
+    // NEXT UP — future-facing race anchor + nothing else here.
+    // Single-card section, but it earns its own header because
+    // it answers a different question ("what are you training
+    // for?") than everything below it ("what have you done?").
+    private var nextUpSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ProfileSectionHeader(
+                title: "Next Up",
+                icon: "flag.checkered",
+                accent: true
+            )
+            raceEventBanner
+        }
+        .padding(.horizontal, Layout.screenMargin)
+    }
+
+    // SUMMARY — the recap trio + streak. Backwards-looking
+    // synthesis of where the athlete has been recently.
+    @ViewBuilder
+    private var summarySection: some View {
+        let hasYearly = (YearlyRecapBuilder.mostRecent(from: races) != nil)
+        let hasMonthly = (MonthlyRecap.mostRecent(from: races) != nil)
+        let hasStreak = StreakBannerView.shouldShow(in: races)
+
+        if hasYearly || hasMonthly || hasStreak {
+            VStack(alignment: .leading, spacing: 12) {
+                ProfileSectionHeader(
+                    title: "Summary",
+                    icon: "calendar",
+                    trailing: nil
+                )
+                if let recap = YearlyRecapBuilder.mostRecent(from: races) {
+                    yearlyRecapBanner(recap)
+                }
+                if let recap = MonthlyRecap.mostRecent(from: races) {
+                    monthlyRecapBanner(recap)
+                }
+                if hasStreak {
+                    StreakBannerView(races: races)
+                }
+            }
+            .padding(.horizontal, Layout.screenMargin)
+        }
+    }
+
+    // PERFORMANCE — the headline analytics. HYROX Performance
+    // Score (3 pillars), Race-Ready check (5 stations),
+    // Progressive Overload (sentence-style insights), Engine
+    // Impact (cross-race weakness analysis). All gated on data
+    // sufficiency at the component level.
+    @ViewBuilder
+    private var performanceSection: some View {
+        let hasPerf = HyroxPerformanceScoreView.hasAnyData(in: races)
+        let hasReady = RaceReadyView.shouldShow(in: races)
+        let hasOverload = PerformanceOverloadView.hasMeaningfulTrends(in: races)
+        let hasEngine = EngineImpactView.shouldShow(in: races)
+
+        if hasPerf || hasReady || hasOverload || hasEngine {
+            VStack(alignment: .leading, spacing: 12) {
+                ProfileSectionHeader(
+                    title: "Performance",
+                    icon: "bolt.fill"
+                )
+                if hasPerf {
+                    hyroxScoreSection
+                }
+                if hasReady {
+                    raceReadySection
+                }
+                if hasOverload {
+                    overloadSection
+                }
+                if hasEngine {
+                    engineImpactSection
+                }
+            }
+            .padding(.horizontal, Layout.screenMargin)
+        }
+    }
+
+    // TRAINING — calendar heatmap + trends chart. The "what
+    // does my training pattern look like" view.
+    @ViewBuilder
+    private var trainingSection: some View {
+        let hasTrends = PerformanceTrendsView.hasEnoughData(in: races)
+
+        VStack(alignment: .leading, spacing: 12) {
+            ProfileSectionHeader(
+                title: "Training",
+                icon: "chart.line.uptrend.xyaxis"
+            )
+            TrainingCalendarView(races: races)
+            if hasTrends {
+                trendsSection
+            }
+        }
+        .padding(.horizontal, Layout.screenMargin)
+    }
+
+    // PERSONAL BESTS — single-card section for per-station PBs.
+    // Earns its own header because PBs are an athlete's brag
+    // sheet — the place they look first when a buddy asks
+    // "what's your sled push time?"
+    private var personalBestsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ProfileSectionHeader(
+                title: "Personal Bests",
+                icon: "trophy.fill"
+            )
+            StationPersonalBestsView(races: races)
+        }
+        .padding(.horizontal, Layout.screenMargin)
+    }
+
+    // ACHIEVEMENTS — the badge wall. Hidden until any badge
+    // has been earned so a fresh install doesn't see a row of
+    // grey-locked tiles.
+    @ViewBuilder
+    private var achievementsGroupSection: some View {
+        if BadgesView.hasAnyEarned(races: races, templates: templates) {
+            VStack(alignment: .leading, spacing: 12) {
+                ProfileSectionHeader(
+                    title: "Achievements",
+                    icon: "rosette"
+                )
+                BadgesView(races: races, templates: templates)
+            }
+            .padding(.horizontal, Layout.screenMargin)
+        }
+    }
+
+    // RECENT — the activity feed. Last 3 races as cards.
+    private var recentSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ProfileSectionHeader(
+                title: "Recent Races",
+                icon: "list.bullet.rectangle",
+                trailing: races.count > 3 ? "Last 3 of \(races.count)" : nil
+            )
+            ForEach(recentRaces) { race in
+                NavigationLink(value: race) {
+                    RaceCardView(race: race, allRaces: races)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, Layout.screenMargin)
+    }
+
+    // MARK: - Hero stats (drives ProfileHero tiles)
+
+    // Pre-computed display strings so ProfileHero stays
+    // formatting-agnostic. PB is the hero number; avg + streak
+    // are supporting.
+    private var heroPBDisplay: String {
+        RaceStats.personalBest(races).map(RaceStats.format) ?? "—"
+    }
+
+    private var heroAvgDisplay: String {
+        RaceStats.averageTotal(races).map(RaceStats.format) ?? "—"
+    }
+
+    private var heroStreakDays: Int {
+        RaceStreaks.currentStreak(in: races)
     }
 
     // Most-recent finished races. Capped at 3 for a tight Strava-style
     // profile layout — if the user wants more, they use the History tab.
     private var recentRaces: [Race] {
         Array(races.prefix(3))
+    }
+
+    // HYROX Performance Score section — caps-label header + 3-tile
+    // pillar grid. Sits between the aggregate stats grid and the
+    // per-station Personal Bests so the layout reads top-down from
+    // most-summary (counts/PB total) to most-detailed (per-station
+    // bests).
+    private var hyroxScoreSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("HYROX Performance")
+                    .capsLabelStyle()
+                Spacer()
+            }
+            .padding(.horizontal, 4)
+
+            HyroxPerformanceScoreView(races: races)
+        }
+    }
+
+    // Race-event banner — the future-facing anchor at the top of
+    // Profile. Two visual states:
+    //
+    //   • Populated: coral-bordered card with the event name,
+    //     "T-43 days" countdown, target time, optional location.
+    //     Tap → edit sheet.
+    //   • Empty: muted "Add upcoming race" placeholder. Tap →
+    //     create sheet pre-filled with sensible defaults.
+    //
+    // The empty state intentionally renders even on a fresh
+    // install — getting an athlete to pin their goal race ON DAY
+    // ONE is the whole point. "What are you training for?" is
+    // the first question this app should answer.
+    @ViewBuilder
+    private var raceEventBanner: some View {
+        if let event = upcomingEvents.first {
+            populatedRaceEventCard(event)
+        } else {
+            emptyRaceEventCard
+        }
+    }
+
+    private func populatedRaceEventCard(_ event: RaceEvent) -> some View {
+        Button {
+            eventEditingMode = .edit(event)
+        } label: {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
+                    Image(systemName: "calendar.badge.exclamationmark")
+                        .font(.caption2.weight(.bold))
+                    Text("NEXT RACE")
+                        .font(.caption2.weight(.heavy))
+                        .tracking(0.6)
+                    Spacer()
+                    Image(systemName: "pencil")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.textTertiary)
+                }
+                .foregroundStyle(Color.accent)
+
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(event.name)
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color.textPrimary)
+                            .lineLimit(1)
+                        if !event.location.isEmpty {
+                            Text(event.location)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Color.textSecondary)
+                        }
+                    }
+
+                    Spacer()
+
+                    countdownTile(daysUntil: event.daysUntil)
+                }
+
+                // Bottom metadata row — division + target time.
+                HStack(spacing: 12) {
+                    metadataPill(
+                        icon: "person.fill",
+                        text: event.resolvedDivision.displayName
+                    )
+                    if let target = event.targetDuration {
+                        metadataPill(
+                            icon: "stopwatch.fill",
+                            text: "Target \(RaceStats.format(target))"
+                        )
+                    }
+                    Spacer()
+                }
+            }
+            .padding(Layout.cardPadding)
+            .background(
+                RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                    .fill(Color.accent.opacity(0.12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                            .stroke(Color.accent.opacity(0.4), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // Right-aligned countdown tile in the populated banner.
+    // "T-43" pre-race, "RACE DAY" on the day, "TODAY" same idea.
+    // Past events shouldn't appear here (the @Query filters them
+    // out), but we render "Past" defensively.
+    private func countdownTile(daysUntil: Int) -> some View {
+        VStack(alignment: .trailing, spacing: 0) {
+            if daysUntil > 0 {
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text("T-")
+                        .font(.system(size: 14, weight: .heavy, design: .rounded))
+                        .foregroundStyle(Color.accent)
+                    Text("\(daysUntil)")
+                        .font(.system(size: 36, weight: .black, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(Color.accent)
+                }
+                Text(daysUntil == 1 ? "DAY" : "DAYS")
+                    .font(.caption2.weight(.heavy))
+                    .tracking(0.6)
+                    .foregroundStyle(Color.accent)
+            } else if daysUntil == 0 {
+                Text("RACE")
+                    .font(.system(size: 18, weight: .heavy, design: .rounded))
+                    .foregroundStyle(Color.accent)
+                Text("DAY")
+                    .font(.system(size: 18, weight: .heavy, design: .rounded))
+                    .foregroundStyle(Color.accent)
+            } else {
+                Text("PAST")
+                    .font(.caption.weight(.heavy))
+                    .foregroundStyle(Color.textTertiary)
+            }
+        }
+    }
+
+    // Tight inline pill for division / target time. Same visual
+    // weight as the badges + insight chips elsewhere.
+    private func metadataPill(icon: String, text: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.caption2.weight(.bold))
+            Text(text)
+                .font(.caption2.weight(.semibold))
+        }
+        .foregroundStyle(Color.textSecondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            Capsule()
+                .fill(Color.surface)
+        )
+    }
+
+    // Empty-state placeholder when no upcoming event exists.
+    // Dimmer than the populated card, dashed border to read as
+    // "tap to fill in." The CTA is direct: "Add upcoming race"
+    // rather than something abstract like "Set training goal."
+    private var emptyRaceEventCard: some View {
+        Button {
+            eventEditingMode = .create
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "calendar.badge.plus")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color.textSecondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Add upcoming race")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Color.textPrimary)
+                    Text("Pin a HYROX event to anchor your training")
+                        .font(.caption)
+                        .foregroundStyle(Color.textSecondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.textTertiary)
+            }
+            .padding(Layout.cardPadding)
+            .background(
+                RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                    .fill(Color.surface.opacity(0.5))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                            .strokeBorder(
+                                Color.divider,
+                                style: StrokeStyle(lineWidth: 1, dash: [4, 3])
+                            )
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // Yearly recap banner — broader-window analog of the monthly
+    // banner. Visually distinct (calendar icon + "YEAR IN HYROX"
+    // wordmark, larger year display) so the two banners stack
+    // without feeling redundant. Only renders when there's at
+    // least one race in the current year — a fresh January with
+    // no races yet hides this and falls through to the monthly
+    // banner alone.
+    private func yearlyRecapBanner(_ recap: YearlyRecap) -> some View {
+        NavigationLink(value: recap) {
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "calendar")
+                            .font(.caption2.weight(.bold))
+                        Text("YEAR IN HYROX")
+                            .font(.caption2.weight(.heavy))
+                            .tracking(0.6)
+                    }
+                    .foregroundStyle(Color.accent)
+
+                    Text(recap.displayName)
+                        .font(.system(size: 28, weight: .black, design: .rounded))
+                        .foregroundStyle(Color.textPrimary)
+
+                    HStack(spacing: 6) {
+                        Text("\(recap.raceCount) race\(recap.raceCount == 1 ? "" : "s")")
+                            .font(.caption.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(Color.textSecondary)
+                        Text("·")
+                            .foregroundStyle(Color.textTertiary)
+                        Text("\(recap.monthsActive) of 12 months")
+                            .font(.caption.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(Color.textSecondary)
+                    }
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Color.textTertiary)
+            }
+            .padding(Layout.cardPadding)
+            .background(
+                RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                    .fill(Color.accent.opacity(0.14))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                            .stroke(Color.accent.opacity(0.45), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // Monthly recap banner — celebratory mini-card at the top of
+    // the Profile stats stack. Two-row layout: caps-label "MONTH IN
+    // HYROX" up top, big month name below it, race count + PB count
+    // as a metadata row. Whole card is a NavigationLink to the full
+    // MonthlyRecapView. Coral-tinted background gives it visual
+    // weight versus the surrounding flat-surface cards.
+    private func monthlyRecapBanner(_ recap: MonthlyRecap) -> some View {
+        NavigationLink(value: recap) {
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "rosette")
+                            .font(.caption2.weight(.bold))
+                        Text("MONTH IN HYROX")
+                            .font(.caption2.weight(.heavy))
+                            .tracking(0.6)
+                    }
+                    .foregroundStyle(Color.accent)
+
+                    Text(recap.displayName)
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.textPrimary)
+
+                    HStack(spacing: 6) {
+                        Text("\(recap.raceCount) race\(recap.raceCount == 1 ? "" : "s")")
+                            .font(.caption.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(Color.textSecondary)
+                        if recap.totalTimePBCount > 0 {
+                            Text("·")
+                                .foregroundStyle(Color.textTertiary)
+                            Text("\(recap.totalTimePBCount) PB\(recap.totalTimePBCount == 1 ? "" : "s")")
+                                .font(.caption.weight(.heavy))
+                                .monospacedDigit()
+                                .foregroundStyle(Color.success)
+                        }
+                    }
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Color.textTertiary)
+            }
+            .padding(Layout.cardPadding)
+            .background(
+                RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                    .fill(Color.accent.opacity(0.10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                            .stroke(Color.accent.opacity(0.35), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // Race-ready section — caps-label header is built into the
+    // RaceReadyView itself (along with the "X of N" counter),
+    // so this wrapper is just visibility-gated passthrough that
+    // pulls the division from the live profile.
+    private var raceReadySection: some View {
+        RaceReadyView(
+            races: races,
+            division: profiles.first?.resolvedDivision ?? .mensOpen
+        )
+    }
+
+    // (Old per-card `achievementsSection` wrapper removed; the
+    // v2 redesign's grouped `achievementsGroupSection` above
+    // owns the BadgesView placement under the new
+    // ProfileSectionHeader treatment.)
+
+    // Performance overload section — caps-label header + auto-
+    // generated trend callouts. Same visibility-gated wrapper
+    // pattern as Achievements; the parent already checks
+    // hasMeaningfulTrends so this just adds the section header.
+    private var overloadSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Progressive Overload")
+                    .capsLabelStyle()
+                Spacer()
+            }
+            .padding(.horizontal, 4)
+
+            PerformanceOverloadView(races: races)
+        }
+    }
+
+    // Engine Impact section — caps-label header + EngineImpactView
+    // bars. Visibility gated by parent on `shouldShow(in: races)`
+    // (3+ finished races, at least one multi-sample station). The
+    // wrapper just adds the section header so the layout matches
+    // the rest of Profile's section rhythm.
+    private var engineImpactSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Engine Impact")
+                    .capsLabelStyle()
+                Spacer()
+            }
+            .padding(.horizontal, 4)
+
+            EngineImpactView(races: races)
+        }
     }
 
     // Performance trends section — caps-label header + chart, sandwiched
@@ -129,26 +784,9 @@ struct ProfileView: View {
         }
     }
 
-    // Section displayed below the stats grid. Hidden entirely when no
-    // finished races (the empty state above already covers that case).
-    private var recentRacesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Recent Races")
-                    .capsLabelStyle()
-                Spacer()
-            }
-
-            ForEach(recentRaces) { race in
-                NavigationLink(value: race) {
-                    // Use the full list for PB evaluation — not just the 3
-                    // we're showing — so the badge is accurate.
-                    RaceCardView(race: race, allRaces: races)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
+    // (Old `recentRacesSection` was removed; the v2 redesign's
+    // grouped `recentSection` above replaces it with the new
+    // ProfileSectionHeader treatment + race-count trailing label.)
 
     // First-launch seeding. Runs every time ProfileView appears, but the
     // guard keeps it cheap — insert + save only happens once.
@@ -157,6 +795,36 @@ struct ProfileView: View {
         let profile = UserProfile.makeDefault()
         modelContext.insert(profile)
         try? modelContext.save()
+    }
+
+    // Render the profile share card to a UIImage and stash in
+    // @State for ShareLink. Idempotent — bails if the cached
+    // image already exists or there's no profile yet (fresh
+    // install where bootstrap hasn't completed).
+    private func prepareProfileShareImage() {
+        #if canImport(UIKit) && !os(watchOS)
+        guard profileShareImage == nil,
+              let profile = profiles.first
+        else { return }
+
+        let card = ProfileShareCardView(
+            profile: profile,
+            races: races,
+            templates: templates
+        )
+        .environment(\.colorScheme, .dark)
+
+        let renderer = ImageRenderer(content: card)
+        renderer.scale = 3.0  // 1080×1920 from a 360×640 canvas
+
+        guard let cgImage = renderer.cgImage else { return }
+        let uiImage = UIImage(cgImage: cgImage)
+
+        profileShareImage = RaceShareImage(
+            image: uiImage,
+            filename: "HYROX-Profile-\(profile.handle.isEmpty ? "athlete" : profile.handle).png"
+        )
+        #endif
     }
 
     // The four stats called out in CLAUDE-2.md §4.1: race count, PB, avg

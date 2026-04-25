@@ -38,100 +38,332 @@ struct RaceDetailView: View {
         profiles.first?.maxHeartRate ?? 190
     }
 
+    // Cached renders of the share card — one per format. Same
+    // caching rationale as RaceSummaryView: ImageRenderer is
+    // non-trivial, so we render each once on appear instead of on
+    // every body update.
+    @State private var squareShareImage: RaceShareImage?
+    @State private var storyShareImage: RaceShareImage?
+
+    // Drives the StationStatsSheet for long-press edit on a split
+    // row. Same wrapper pattern as RaceSummaryView.
+    @State private var editingSplitIndex: IdentifiedIndex?
+
     var body: some View {
         ZStack {
-            Color.background.ignoresSafeArea()
+            // Hero backdrop bleeds full-width behind the scroll
+            // content. Standard intensity — this is a review
+            // surface, not a finish moment, so we keep the glow
+            // gentler than RaceSummaryView's intense backdrop.
+            HeroBackdrop(.standard)
 
             ScrollView {
-                VStack(spacing: 20) {
-                    heroCard
-                    // Target outcome readout — shown only when this race
-                    // was started with a finish-time goal. Uses the
-                    // shared TargetOutcomeView so the format matches
-                    // what RaceSummaryView shows immediately post-race.
-                    if let target = race.targetDuration,
-                       let actual = race.totalDuration {
-                        TargetOutcomeView(
-                            targetDuration: target,
-                            actualDuration: actual
-                        )
-                    }
-                    // Auto-generated narrative insights for this race.
-                    // Generator inspects splits, HR, and PB history;
-                    // returns 0–3 noteworthy callouts. Section is
-                    // hidden entirely when nothing applies.
-                    insightsSection
-                    splitsCard
-                    // Only render the HR chart when at least one split
-                    // has captured HR data — old pre-HealthKit races,
-                    // or races done without a Watch, have nothing to
-                    // chart and the empty-bar version would look broken.
-                    if HeartRateChartView.hasAnyHeartRateData(in: race.splits) {
-                        heartRateSection
-                        // Zones share the same gate as the HR chart;
-                        // both depend on per-split avg HR data.
-                        hrZonesSection
-                    }
-                    // Run fatigue needs 2+ runs to render a meaningful
-                    // trend. On a complete race this is always true
-                    // (8 runs); on a partially-completed abandoned race
-                    // we gate for safety.
-                    if RunFatigueChartView.hasFatigueData(in: race.splits) {
-                        runFatigueSection
-                    }
-                    NotesSection(race: race)
+                VStack(spacing: 24) {
+                    detailHeroSection
+                    insightsGroupSection
+                    analysisGroupSection
+                    splitsGroupSection
+                    reflectionGroupSection
                 }
-                .padding(Layout.screenMargin)
+                .padding(.horizontal, Layout.screenMargin)
+                .padding(.bottom, Layout.screenMargin)
+                .padding(.top, 8)
             }
         }
-        .navigationTitle(race.startedAt.formatted(date: .abbreviated, time: .shortened))
+        // Show the user-set title in the nav bar when present;
+        // fall back to the auto date stamp otherwise. Lets athletes
+        // navigate History by their own labels rather than a wall of
+        // identical-looking date strings.
+        .navigationTitle(
+            race.name.isEmpty
+                ? race.startedAt.formatted(date: .abbreviated, time: .shortened)
+                : race.name
+        )
         .hyroxDarkNavigationBar(inline: true)
+        // Tapping any split row pushes a per-station deep dive.
+        // Registered here because RaceDetailView is the surface
+        // where the nav originates; HistoryView / ProfileView
+        // already register Race.self separately for their own
+        // race-detail navigations.
+        .navigationDestination(for: Split.self) { split in
+            StationDetailView(split: split)
+        }
+        .toolbar {
+            #if !os(macOS)
+            // Share menu on the trailing edge — Strava-style affordance
+            // for exporting an old race after the fact (e.g. "I want to
+            // post that PB I set last week"). Tapping opens a native
+            // iOS Menu with two formats — Square (1:1, IG post) and
+            // Story (9:16, IG / Snap / TikTok story). Both render the
+            // same RaceShareCardView so visuals stay consistent.
+            ToolbarItem(placement: .topBarTrailing) {
+                if squareShareImage != nil || storyShareImage != nil {
+                    shareMenu
+                }
+            }
+            #endif
+        }
+        .onAppear(perform: prepareShareImages)
+        // Re-bake the share cards when the photo changes. Same
+        // rationale as RaceSummaryView — the cached images would
+        // otherwise reflect a stale photo state.
+        .onChange(of: race.photoData) { _, _ in
+            squareShareImage = nil
+            storyShareImage = nil
+            prepareShareImages()
+        }
     }
 
-    private var heroCard: some View {
-        VStack(spacing: 6) {
+    // Format-picker Menu in the toolbar. Children are ShareLinks,
+    // each pre-loaded with its rendered image so taps fire the
+    // system share sheet immediately.
+    private var shareMenu: some View {
+        Menu {
+            if let item = squareShareImage {
+                ShareLink(
+                    item: item,
+                    preview: SharePreview(
+                        "HYROX Race",
+                        image: Image(uiImage: item.image)
+                    )
+                ) {
+                    Label(ShareCardFormat.square.menuLabel, systemImage: "square")
+                }
+            }
+            if let item = storyShareImage {
+                ShareLink(
+                    item: item,
+                    preview: SharePreview(
+                        "HYROX Race",
+                        image: Image(uiImage: item.image)
+                    )
+                ) {
+                    Label(ShareCardFormat.story.menuLabel, systemImage: "rectangle.portrait")
+                }
+            }
+        } label: {
+            Image(systemName: "square.and.arrow.up")
+        }
+        .accessibilityLabel("Share race")
+    }
+
+    // Render both formats once and stash in @State for the Menu's
+    // ShareLinks. Idempotent per-format.
+    private func prepareShareImages() {
+        if squareShareImage == nil,
+           let image = RaceShareRenderer.render(
+            race: race,
+            profile: profiles.first,
+            allRaces: allFinishedRaces,
+            format: .square
+           ) {
+            squareShareImage = RaceShareImage(
+                image: image,
+                filename: RaceShareImage.filename(for: race, format: .square)
+            )
+        }
+
+        if storyShareImage == nil,
+           let image = RaceShareRenderer.render(
+            race: race,
+            profile: profiles.first,
+            allRaces: allFinishedRaces,
+            format: .story
+           ) {
+            storyShareImage = RaceShareImage(
+                image: image,
+                filename: RaceShareImage.filename(for: race, format: .story)
+            )
+        }
+    }
+
+    // v2 hero — replaces the bordered card with an open
+    // composition that breathes against the HeroBackdrop.
+    // Shows the date as caps wordmark, total time at displayHero
+    // with coral glow, optional PB ribbon, and calorie subtitle.
+    // Same visual language as RaceSummaryView's finish hero so
+    // the two surfaces feel like one experience.
+    private var detailHeroSection: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "calendar")
+                    .font(.caption2.weight(.heavy))
+                Text(race.startedAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption2.weight(.heavy))
+                    .tracking(1.0)
+                    .textCase(.uppercase)
+                    .monospacedDigit()
+            }
+            .foregroundStyle(Color.textSecondary)
+
+            if isPBRace {
+                pbRibbon
+                    .padding(.bottom, 2)
+            }
+
             Text(RaceStats.totalTime(race))
-                .font(.raceTimer)
+                .font(.displayHero)
                 .monospacedDigit()
                 .foregroundStyle(Color.textPrimary)
-            Text("Total Time")
-                .capsLabelStyle()
-            // Total active calories (HealthKit) — hidden when no
-            // split has calorie data, e.g. races logged before the
-            // feature shipped or sessions done without a Watch.
+                .shadow(color: Color.accent.opacity(0.35), radius: 20, x: 0, y: 0)
+
+            Text("TOTAL TIME")
+                .font(.caption2.weight(.heavy))
+                .tracking(1.4)
+                .foregroundStyle(Color.textSecondary)
+
             if let kcal = RaceStats.totalActiveCalories(race) {
                 Text("\(Int(kcal.rounded())) kcal active")
-                    .font(.footnote)
+                    .font(.footnote.weight(.semibold))
                     .monospacedDigit()
-                    .foregroundStyle(Color.accentDim)
-                    .padding(.top, 2)
+                    .foregroundStyle(Color.accent)
+                    .padding(.top, 6)
+            }
+
+            // Target outcome readout — only shown if a target
+            // was set on this race. Tucks into the hero so the
+            // success/over-target framing reads as part of the
+            // race's identity rather than a separate stat row.
+            if let target = race.targetDuration,
+               let actual = race.totalDuration {
+                TargetOutcomeView(
+                    targetDuration: target,
+                    actualDuration: actual
+                )
+                .padding(.top, 12)
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 24)
-        .padding(.horizontal, Layout.cardPadding)
+        .padding(.vertical, 12)
+    }
+
+    // PB ribbon — same gold treatment used by RaceSummaryView so
+    // the indicator reads consistently across the two surfaces.
+    private var isPBRace: Bool {
+        RaceStats.wasPBWhenSet(race, among: allFinishedRaces)
+    }
+
+    private var pbRibbon: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "rosette")
+                .font(.caption.weight(.bold))
+            Text("PERSONAL BEST")
+                .font(.caption.weight(.heavy))
+                .tracking(1.2)
+        }
+        .foregroundStyle(Color(hex: 0xFFD60A))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
         .background(
-            RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
-                .fill(Color.surface)
+            Capsule()
+                .fill(Color(hex: 0xFFD60A).opacity(0.15))
+                .overlay(
+                    Capsule()
+                        .stroke(Color(hex: 0xFFD60A).opacity(0.4), lineWidth: 1)
+                )
         )
     }
 
-    // Heart rate section shown below splits when HR data exists for
-    // this race. Caps-label header matches the Splits section so the
-    // two sit visually as peers.
+    // INSIGHTS group — narrative callouts (target outcome already
+    // sits in the hero). Hidden entirely when InsightGenerator
+    // returns nothing, so a thin race doesn't show an empty
+    // section header.
+    @ViewBuilder
+    private var insightsGroupSection: some View {
+        let insights = InsightGenerator.generate(
+            for: race,
+            allRaces: allFinishedRaces
+        )
+        if !insights.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                ProfileSectionHeader(
+                    title: "Insights",
+                    icon: "sparkles"
+                )
+                RaceInsightsView(insights: insights)
+            }
+        }
+    }
+
+    // ANALYSIS group — HR chart, HR zones, compromised running.
+    // The data-dense surface that distinguishes this app's race
+    // detail from generic fitness loggers. Each child is gated
+    // on its own data sufficiency.
+    @ViewBuilder
+    private var analysisGroupSection: some View {
+        let hasHR = HeartRateChartView.hasAnyHeartRateData(in: race.splits)
+        let hasCompromised = CompromisedRunningView.hasData(in: race)
+
+        if hasHR || hasCompromised {
+            VStack(alignment: .leading, spacing: 12) {
+                ProfileSectionHeader(
+                    title: "Analysis",
+                    icon: "waveform.path.ecg"
+                )
+                if hasHR {
+                    heartRateSection
+                    hrZonesSection
+                }
+                if hasCompromised {
+                    compromisedRunningSection
+                }
+            }
+        }
+    }
+
+    // SPLITS group — single card but earns its own header
+    // because splits ARE the meat of the race. Tappable rows
+    // already exist for per-station deep dive.
+    private var splitsGroupSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ProfileSectionHeader(
+                title: "Splits",
+                icon: "list.number",
+                trailing: "\(race.splits.count) of \(race.sequence.count)"
+            )
+            splitsCard
+        }
+    }
+
+    // REFLECTION group — photo + title + notes. The athlete's
+    // post-race input. Dropped in last because it's editing UI,
+    // not data display.
+    private var reflectionGroupSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ProfileSectionHeader(
+                title: "Reflection",
+                icon: "square.and.pencil"
+            )
+            #if canImport(UIKit) && !os(watchOS)
+            RacePhotoSection(race: race)
+            #endif
+            TitleSection(race: race)
+            NotesSection(race: race)
+        }
+    }
+
+    // Heart rate section — chart only; the parent group's
+    // ProfileSectionHeader ("Analysis") owns the section label
+    // now, so this internal caps-label was duplicating it.
+    // Sub-cards inside the Analysis group sit at equal weight
+    // visually (HR chart, then HR zones, then compromised
+    // running) — chart cards already carry their own visual
+    // identity via their internal layouts.
     private var heartRateSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Heart Rate").capsLabelStyle()
+        VStack(alignment: .leading, spacing: 6) {
+            Text("HR over time")
+                .font(.caption2.weight(.heavy))
+                .tracking(0.6)
+                .textCase(.uppercase)
+                .foregroundStyle(Color.textTertiary)
                 .padding(.horizontal, 4)
 
             HeartRateChartView(splits: race.splits)
         }
     }
 
-    // Insights section wrapper — caps-label header + insights view.
-    // Whole section is hidden (returns EmptyView) when the generator
-    // produces no callouts for this race; the view doesn't even
-    // render the section header in that case.
+    // Old `insightsSection` — kept here as a no-op stub to keep
+    // any preview / external reference compiling, but actual
+    // rendering moved to `insightsGroupSection` above.
     @ViewBuilder
     private var insightsSection: some View {
         let insights = InsightGenerator.generate(
@@ -153,37 +385,78 @@ struct RaceDetailView: View {
     // matches the other Detail sections; uses the same gate as
     // the HR chart so both appear / hide together.
     private var hrZonesSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Heart Rate Zones").capsLabelStyle()
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Time in zones")
+                .font(.caption2.weight(.heavy))
+                .tracking(0.6)
+                .textCase(.uppercase)
+                .foregroundStyle(Color.textTertiary)
                 .padding(.horizontal, 4)
 
             HRZonesView(splits: race.splits, maxBPM: maxHeartRate)
         }
     }
 
-    // Run fatigue line chart — shows the 8 (or however many) 1km-run
-    // split durations over the course of the race so the athlete can
-    // see at a glance whether later runs slowed down relative to
-    // earlier ones.
-    private var runFatigueSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Run Fatigue").capsLabelStyle()
+    // Compromised running analysis — HYROX-specific framing of
+    // run-pace degradation. Shows which workout station hurt the
+    // athlete's engine the most, with station-attribution
+    // labels under each run point + a coach's-diagnosis callout.
+    private var compromisedRunningSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Compromised running")
+                .font(.caption2.weight(.heavy))
+                .tracking(0.6)
+                .textCase(.uppercase)
+                .foregroundStyle(Color.textTertiary)
                 .padding(.horizontal, 4)
 
-            RunFatigueChartView(splits: race.splits)
+            CompromisedRunningView(race: race)
         }
     }
 
     private var splitsCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Splits").capsLabelStyle()
-                .padding(.horizontal, 4)
+        VStack(alignment: .leading, spacing: 6) {
+            // Hint about the long-press affordance — moves out of
+            // the section header (which is now owned by the
+            // parent `splitsGroupSection`) into a small subtitle
+            // line above the card. Reads as instructions rather
+            // than competing with the section break.
+            HStack {
+                Text("Tap a row for details · long-press to edit")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color.textTertiary)
+                Spacer()
+            }
+            .padding(.horizontal, 4)
 
             VStack(spacing: 0) {
                 // id: \.offset supports custom workouts with repeated
                 // stations — see comment in RaceSummaryView.
                 ForEach(Array(race.splits.enumerated()), id: \.offset) { index, split in
-                    splitRow(index: index + 1, split: split)
+                    // Each row is a NavigationLink to the per-station
+                    // deep dive. `.buttonStyle(.plain)` keeps the row
+                    // visually identical to the read-only version —
+                    // without it SwiftUI would apply default link tint
+                    // to all the text. The nav value is the Split
+                    // itself; StationDetailView re-queries history.
+                    //
+                    // Long-press opens StationStatsSheet for in-place
+                    // edits to weight / reps / RPE. We picked long-
+                    // press so the primary tap (push to detail) stays
+                    // unchanged — the existing affordance is the
+                    // common case.
+                    NavigationLink(value: split) {
+                        splitRow(index: index + 1, split: split)
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button {
+                            editingSplitIndex = IdentifiedIndex(index)
+                        } label: {
+                            Label("Edit weight, reps, RPE", systemImage: "slider.horizontal.3")
+                        }
+                    }
+
                     if index < race.splits.count - 1 {
                         Divider().background(Color.divider)
                     }
@@ -194,6 +467,23 @@ struct RaceDetailView: View {
                 RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
                     .fill(Color.surface)
             )
+        }
+        .sheet(item: $editingSplitIndex) { wrappedIndex in
+            let index = wrappedIndex.value
+            if race.splits.indices.contains(index) {
+                StationStatsSheet(
+                    split: race.splits[index],
+                    division: profiles.first?.resolvedDivision ?? .mensOpen
+                ) { weight, reps, rpe in
+                    var splits = race.splits
+                    splits[index] = splits[index].withStationStats(
+                        weightKg: .some(weight),
+                        repsCompleted: .some(reps),
+                        rpe: .some(rpe)
+                    )
+                    race.splits = splits
+                }
+            }
         }
     }
 
@@ -212,15 +502,29 @@ struct RaceDetailView: View {
                 .foregroundStyle(Color.textTertiary)
                 .frame(width: 24, alignment: .leading)
 
-            Text(split.station.displayName)
-                .font(.body)
-                .foregroundStyle(Color.textPrimary)
-
-            // PB badge — shown only when this split actually broke the
-            // prior best (including "first time ever"). Small, inline,
-            // so it doesn't push the time column around.
-            if isPB {
-                pbBadge
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 8) {
+                    Text(split.station.displayName)
+                        .font(.body)
+                        .foregroundStyle(Color.textPrimary)
+                    // PB badge — shown only when this split actually
+                    // broke the prior best (including "first time
+                    // ever"). Small, inline, so it doesn't push the
+                    // time column around.
+                    if isPB {
+                        pbBadge
+                    }
+                }
+                // Manual-entry station stats — weight / reps / RPE.
+                // Renders only when at least one is set so unlogged
+                // splits stay clean. Same renderer used by
+                // RaceSummaryView so the format matches.
+                if let stats = RaceSummaryView.stationStatsSubtitle(for: split) {
+                    Text(stats)
+                        .font(.caption2)
+                        .monospacedDigit()
+                        .foregroundStyle(Color.accent)
+                }
             }
 
             Spacer()
@@ -251,8 +555,16 @@ struct RaceDetailView: View {
                         .foregroundStyle(delta < 0 ? Color.success : Color.warning)
                 }
             }
+
+            // Chevron — Apple's standard "row is tappable" cue.
+            // Tertiary text color so it's visible but doesn't compete
+            // with the duration / HR data.
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.textTertiary)
         }
         .padding(.vertical, 10)
+        .contentShape(Rectangle())
     }
 
     // Tight inline badge matching the style of the New-PB trophy on
