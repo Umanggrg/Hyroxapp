@@ -58,6 +58,17 @@ final class UserProfile {
         set { division = newValue }
     }
 
+    // Whether to fire voice cues ("Next: Sled Push") on station
+    // transitions during a race. On by default — verbal announcement
+    // is the primary value-add for athletes mid-workout who can't
+    // glance at the screen. Off for users who train with music or
+    // podcasts and don't want spoken interruptions.
+    //
+    // Bool with a default value is migration-safe out of the box for
+    // SwiftData lightweight migration — existing rows pick up `true`
+    // on next read.
+    var audioCuesEnabled: Bool = true
+
     var createdAt: Date
     var updatedAt: Date
 
@@ -69,6 +80,7 @@ final class UserProfile {
         bio: String = "",
         avatarData: Data? = nil,
         division: Division? = Division.mensOpen,
+        audioCuesEnabled: Bool = true,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -79,6 +91,7 @@ final class UserProfile {
         self.bio = bio
         self.avatarData = avatarData
         self.division = division
+        self.audioCuesEnabled = audioCuesEnabled
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

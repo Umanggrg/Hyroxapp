@@ -25,6 +25,7 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 hyroxSection
+                audioCuesSection
                 aboutSection
             }
             .scrollContentBackground(.hidden)
@@ -76,6 +77,25 @@ struct SettingsView: View {
             .listRowBackground(Color.surface)
         } header: {
             Text("HYROX")
+        }
+    }
+
+    // Audio cues toggle — controls whether VoiceCueService fires
+    // spoken station-transition announcements during a race.
+    // Defaults on for new users; bound to UserProfile so the
+    // preference syncs to cloud later (vs. AppStorage which is
+    // device-local).
+    private var audioCuesSection: some View {
+        Section {
+            Toggle("Voice cues", isOn: $profile.audioCuesEnabled)
+                .listRowBackground(Color.surface)
+
+            footnote(
+                "Announces the next station out loud when you advance. Plays over your music — won't interrupt podcasts or playlists."
+            )
+            .listRowBackground(Color.surface)
+        } header: {
+            Text("Audio")
         }
     }
 

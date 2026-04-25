@@ -134,12 +134,14 @@ struct RaceStartView: View {
         }
     }
 
-    // Sheet with a countdown-style duration picker for setting a
-    // finish-time goal. `DatePicker` with `.countDownTimer` is the
-    // native duration picker — hour/minute wheels, standard iOS look,
-    // no custom UI to maintain. Bound via `Binding<Date>` because
-    // that's what DatePicker takes; we convert to/from TimeInterval
-    // at the boundary.
+    // Sheet with a duration picker for setting a finish-time goal.
+    //
+    // Implementation note: SwiftUI's `DatePicker(.hourAndMinute)` is a
+    // TIME-OF-DAY picker (6:45 PM), not a duration picker. Apple
+    // doesn't ship a native countdown-style DatePicker for SwiftUI on
+    // iPhone, so we build a real duration picker with three wheel
+    // Pickers (hours, minutes, seconds) bound to Int state. Save
+    // converts the three components to a TimeInterval.
     //
     // A "Clear target" button at the bottom unsets the goal entirely
     // for athletes who just want to show up and move without a timer
@@ -149,31 +151,54 @@ struct RaceStartView: View {
         @Binding var duration: TimeInterval?
         @Binding var isPresented: Bool
 
-        // DatePicker binds to a Date. We interpret that Date's
-        // `timeIntervalSinceReferenceDate` (offset from a fixed
-        // anchor) as the countdown duration. On open, seed from
-        // the current TimeInterval; on Save, read back.
-        @State private var draftDate: Date = {
-            // Default: 1:30:00 if no duration set, else existing.
-            Date(timeIntervalSinceReferenceDate: 90 * 60)
-        }()
+        // Three separate components so each wheel spins independently.
+        // Upper bound on hours (10) is generous — a 10h HYROX would
+        // be a miracle. Bumping later is a 1-line change if needed.
+        @State private var hours: Int = 1
+        @State private var minutes: Int = 30
+        @State private var seconds: Int = 0
+
+        private let hoursRange = 0..<10
+        private let minutesRange = 0..<60
+        private let secondsRange = 0..<60
 
         var body: some View {
             NavigationStack {
                 ZStack {
                     Color.background.ignoresSafeArea()
 
-                    VStack(spacing: 24) {
-                        DatePicker(
-                            "Target time",
-                            selection: $draftDate,
-                            displayedComponents: [.hourAndMinute]
-                        )
-                        .datePickerStyle(.wheel)
-                        .labelsHidden()
-                        .environment(\.timeZone, TimeZone(secondsFromGMT: 0) ?? .current)
-                        .frame(maxHeight: 220)
-                        .padding(.top, 24)
+                    VStack(spacing: 20) {
+                        // Three wheel pickers side by side. Labels below
+                        // each column identify the unit so the athlete
+                        // reads duration, not clock time, at a glance.
+                        HStack(spacing: 0) {
+                            wheelColumn(
+                                title: "Hours",
+                                selection: $hours,
+                                range: hoursRange
+                            )
+                            wheelColumn(
+                                title: "Minutes",
+                                selection: $minutes,
+                                range: minutesRange
+                            )
+                            wheelColumn(
+                                title: "Seconds",
+                                selection: $seconds,
+                                range: secondsRange
+                            )
+                        }
+                        .frame(maxHeight: 200)
+                        .padding(.top, 16)
+
+                        // Live preview of what the picker currently
+                        // represents — reinforces "this is a duration"
+                        // framing with the MM:SS / H:MM:SS format the
+                        // rest of the app uses.
+                        Text(RaceStats.format(currentTotal))
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(Color.textPrimary)
 
                         Button(role: .destructive) {
                             duration = nil
@@ -201,16 +226,9 @@ struct RaceStartView: View {
                     }
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Save") {
-                            // Extract hours + minutes from the draft
-                            // and convert back to TimeInterval. GMT
-                            // interpretation above ensures the raw
-                            // components are what the wheel showed.
-                            let comps = Calendar(identifier: .gregorian)
-                                .dateComponents(in: TimeZone(secondsFromGMT: 0) ?? .current,
-                                                from: draftDate)
-                            let hours = comps.hour ?? 0
-                            let minutes = comps.minute ?? 0
-                            let total = TimeInterval(hours * 3600 + minutes * 60)
+                            let total = currentTotal
+                            // A duration of 0 is effectively "no target"
+                            // — no athlete sets a 0:00:00 goal.
                             duration = total > 0 ? total : nil
                             isPresented = false
                         }
@@ -218,19 +236,49 @@ struct RaceStartView: View {
                     }
                 }
             }
-            .onAppear {
-                // Seed the wheel with the current duration (or default
-                // 1:30:00 if none set). GMT timezone so the hours we
-                // pass in are what the picker shows — no offset drift.
-                let seconds = duration ?? (90 * 60)
-                var comps = DateComponents()
-                comps.hour = Int(seconds) / 3600
-                comps.minute = (Int(seconds) % 3600) / 60
-                if let tz = TimeZone(secondsFromGMT: 0),
-                   let seeded = Calendar(identifier: .gregorian).date(from: comps) {
-                    _ = tz  // silence unused if all else goes sideways
-                    draftDate = seeded
+            .onAppear(perform: seedFromBinding)
+        }
+
+        // Computed total used both for the live preview text and on
+        // Save. Single source of truth so the preview and the persisted
+        // value can't ever drift.
+        private var currentTotal: TimeInterval {
+            TimeInterval(hours * 3600 + minutes * 60 + seconds)
+        }
+
+        // On first appear, split the incoming duration back out into
+        // three Ints for the wheels. Defaults to 1:30:00 when the
+        // caller hasn't set a target yet — matches the canonical HYROX
+        // finish benchmark.
+        private func seedFromBinding() {
+            let total = Int(duration ?? (90 * 60))
+            hours = total / 3600
+            minutes = (total % 3600) / 60
+            seconds = total % 60
+        }
+
+        // Single column renderer — keeps the three wheels visually
+        // consistent without repeating a stack of modifiers.
+        private func wheelColumn(
+            title: String,
+            selection: Binding<Int>,
+            range: Range<Int>
+        ) -> some View {
+            VStack(spacing: 4) {
+                Picker(title, selection: selection) {
+                    ForEach(range, id: \.self) { value in
+                        Text(String(format: "%02d", value))
+                            .foregroundStyle(Color.textPrimary)
+                            .tag(value)
+                    }
                 }
+                .pickerStyle(.wheel)
+                .labelsHidden()
+                .frame(maxWidth: .infinity)
+
+                Text(title.lowercased())
+                    .font(.caption2)
+                    .foregroundStyle(Color.textSecondary)
             }
         }
     }

@@ -89,6 +89,21 @@ final class WatchCompanionService: NSObject {
     // on the phone side should degrade because the watch isn't listening.
     func publish(_ snapshot: RaceStateSnapshot) {
         let session = WCSession.default
+
+        // Skip silently when the Watch app isn't installed on the
+        // paired Watch. This is the common case for athletes who
+        // haven't installed the companion (or are on a free dev
+        // account where the Watch install path is unreliable, like
+        // we kept hitting in development). Pushing in that state
+        // would call updateApplicationContext repeatedly, fail with
+        // WCErrorCodeWatchAppNotInstalled on every state change, and
+        // spam the console with no-ops. Once the Watch app is
+        // actually installed, paired iOS reports isWatchAppInstalled
+        // == true and publishes start flowing again.
+        guard session.isWatchAppInstalled else {
+            return
+        }
+
         print("[WatchCompanion] publish requested phase=\(snapshot.phase.rawValue) stationIndex=\(snapshot.currentStationIndex) state=\(session.activationState.rawValue) paired=\(session.isPaired) installed=\(session.isWatchAppInstalled)")
 
         // Activation can be in-flight on first launch; pushing before it

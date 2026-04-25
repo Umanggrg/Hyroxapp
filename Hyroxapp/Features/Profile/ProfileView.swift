@@ -41,6 +41,12 @@ struct ProfileView: View {
                             emptyStats
                         } else {
                             StatsGridView(items: aggregates)
+                            // All-time PBs per station type sit between
+                            // the aggregate stats grid and the recent
+                            // races feed — answers "what's my best Sled
+                            // Push / 1km Run / Wall Balls?" at a glance,
+                            // adjacent to the high-level metrics.
+                            StationPersonalBestsView(races: races)
                             recentRacesSection
                         }
                     }

@@ -145,6 +145,33 @@ enum RaceStats {
         return split.duration - prior
     }
 
+    // All-time fastest split for a given canonical station type across
+    // every finished race the athlete has logged. Used by the Personal
+    // Bests panel on Profile — one row per station type, all-time best
+    // duration. Returns nil if the athlete has never completed that
+    // station in any finished race.
+    //
+    // Run handling: the eight run cases (run1...run8) all share the
+    // same `Station.Kind.run` — for the canonical "1km Run" PB we
+    // aggregate across all of them, since the athlete cares about
+    // their fastest 1km regardless of which slot it was in. Other
+    // stations match their exact case (sledPush, wallBalls, etc.).
+    static func allTimeBest(
+        for stationType: Station,
+        among all: [Race]
+    ) -> Split? {
+        let candidates: [Split] = all
+            .filter { $0.isFinished }
+            .flatMap(\.splits)
+            .filter { split in
+                stationType.kind == .run
+                    ? split.station.kind == .run
+                    : split.station == stationType
+            }
+
+        return candidates.min(by: { $0.duration < $1.duration })
+    }
+
     #endif  // !os(watchOS)
 
     // MARK: - Formatting (shared with watchOS)

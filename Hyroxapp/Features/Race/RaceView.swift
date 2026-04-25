@@ -95,18 +95,33 @@ struct RaceView: View {
             #if canImport(WatchConnectivity)
             WatchCompanionService.shared.onAction = nil
             #endif
+            // Cancel any in-flight speech so a stale "next: sled push"
+            // doesn't fire after the user navigates away from Race.
+            VoiceCueService.shared.stop()
         }
         // Fires when the user starts a new race, taps Done after finish,
         // or abandons mid-race — any transition in/out of an active-or-
         // finished race. Covers the "race began" and "race reset" cases.
-        .onChange(of: viewModel.hasStarted) { _, _ in
+        .onChange(of: viewModel.hasStarted) { _, isStarted in
             publishWatchState()
+            // Stop any pending speech when the race ends or is reset
+            // so a stale "next: ski erg" doesn't fire mid-summary.
+            if !isStarted {
+                VoiceCueService.shared.stop()
+            } else {
+                // Race just started — announce the first station so
+                // the athlete hears their cue immediately on Start
+                // (otherwise the first announcement would only fire
+                // when they advance OUT of station 1).
+                announceCurrentStationIfEnabled()
+            }
         }
         // Fires on every station advance (0 → 1 → ... → 16). When the
         // final advance transitions the engine to `.finished`, this still
         // fires because the count increments as part of the advance.
         .onChange(of: viewModel.completedSegmentsCount) { _, _ in
             publishWatchState()
+            announceTransitionIfEnabled()
         }
         // Keep the screen awake for the duration of an active race.
         // CLAUDE.md §6: the display must not dim mid-workout. Toggled off
@@ -147,6 +162,11 @@ struct RaceView: View {
                     Text("Station \(viewModel.completedSegmentsCount + 1) of \(viewModel.totalSegments)")
                         .capsLabelStyle()
                     Spacer()
+                    // Live HR readout — only appears once a sample
+                    // arrives from HealthKit. Positioned next to the
+                    // cancel button so the three header controls read
+                    // as "status · HR · cancel" left to right.
+                    liveHeartRateChip
                     cancelButton
                 }
                 .padding(.top, 8)
@@ -239,6 +259,36 @@ struct RaceView: View {
         }
     }
 
+    // Live HR readout in the in-progress header. Only rendered when
+    // the VM has a value — hidden before the first poll returns, and
+    // hidden entirely when HealthKit is unavailable / auth denied /
+    // no Watch streaming samples.
+    //
+    // Tight pill styling matches the splits chip on the other side
+    // of the header — the two read as peers in weight / hierarchy.
+    @ViewBuilder
+    private var liveHeartRateChip: some View {
+        if let bpm = viewModel.currentHeartRateBPM {
+            HStack(spacing: 4) {
+                Image(systemName: "heart.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                Text("\(Int(bpm.rounded()))")
+                    .font(.caption2.weight(.bold))
+                    .monospacedDigit()
+                Text("bpm")
+                    .font(.caption2)
+                    .tracking(0.3)
+            }
+            .foregroundStyle(Color.accent)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule().fill(Color.surface)
+            )
+            .accessibilityLabel("Current heart rate \(Int(bpm.rounded())) beats per minute")
+        }
+    }
+
     // Small X in the top-right of the in-progress header. Confirmation alert
     // prevents an accidental tap from nuking an in-progress race.
     private var cancelButton: some View {
@@ -282,6 +332,33 @@ struct RaceView: View {
                 )
             }
             .accessibilityLabel("View completed splits")
+        }
+    }
+
+    // MARK: - Voice cues
+
+    // Announce whatever station is currently active, gated on the
+    // user's audio-cues preference. Called on race start so the
+    // first station fires its cue immediately.
+    private func announceCurrentStationIfEnabled() {
+        guard profiles.first?.audioCuesEnabled ?? true else { return }
+        if let station = viewModel.currentStation {
+            VoiceCueService.shared.announceNextStation(station)
+        }
+    }
+
+    // Called on every advance. After the engine moves to the next
+    // station, announce that new station — or, if the engine just
+    // transitioned to `.finished`, announce race completion instead.
+    // The two messages are mutually exclusive: a finished race has
+    // no `currentStation`, and an advanced-but-not-finished race
+    // always has one.
+    private func announceTransitionIfEnabled() {
+        guard profiles.first?.audioCuesEnabled ?? true else { return }
+        if viewModel.isFinished {
+            VoiceCueService.shared.announceFinish()
+        } else if let station = viewModel.currentStation {
+            VoiceCueService.shared.announceNextStation(station)
         }
     }
 

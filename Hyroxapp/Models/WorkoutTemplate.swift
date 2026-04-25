@@ -61,4 +61,88 @@ final class WorkoutTemplate {
     // Count displayed in the picker row — no need to call `.sequence.count`
     // which would re-build the typed array just to count.
     var stationCount: Int { sequenceRaw.count }
+
+    // MARK: - Default templates (first-launch seeding)
+
+    // Three starter workouts inserted on first app launch, when the
+    // athlete has no saved templates yet. Gives them something useful
+    // to load from the Custom Workout Builder right away — better
+    // than landing on an empty picker that requires building from
+    // scratch before the app does anything for them.
+    //
+    // Each one is a real-world HYROX training pattern:
+    //   • Half HYROX — official 8-segment "halfrox" format, 4 runs
+    //     alternating with 4 workouts. Most common scaled-down session.
+    //   • Strength Day — heavy-station focus (sleds, lunges, wall balls)
+    //     with two runs as transitions. ~30 min, lift-day rhythm.
+    //   • Conditioning — cardio-station focus (ski erg, rowing, burpees)
+    //     interleaved with runs. Pure engine work, no heavy weights.
+    //
+    // Sequences chosen to be educational — show the athlete what kinds
+    // of bespoke workouts the builder supports. Users will likely build
+    // their own variants from these starting points.
+    @MainActor
+    static func seedDefaultsIfNeeded(in modelContext: ModelContext) {
+        var descriptor = FetchDescriptor<WorkoutTemplate>()
+        descriptor.fetchLimit = 1
+
+        // Bail if any template already exists. Both "athlete saved one"
+        // and "we seeded once on a previous launch" count — we want
+        // this method to be a one-shot, never replacing user data.
+        guard let existing = try? modelContext.fetch(descriptor), existing.isEmpty else {
+            return
+        }
+
+        let now = Date()
+        let defaults: [WorkoutTemplate] = [
+            // Half HYROX: 4 runs + 4 workouts, official halfrox format.
+            // Run.run1...run4 used because they're the first four run
+            // slots — the engine treats them identically (same .kind),
+            // and Split positional indexing means duplicates are fine.
+            WorkoutTemplate(
+                name: "Half HYROX",
+                sequence: [
+                    .run1, .skiErg,
+                    .run2, .sledPush,
+                    .run3, .sandbagLunges,
+                    .run4, .wallBalls
+                ],
+                createdAt: now,
+                updatedAt: now
+            ),
+            // Strength Day: heavy stations with bookend runs. Ordered
+            // sled-push → sled-pull (paired heavy) → run reset →
+            // sandbag → wall balls (paired posterior chain).
+            WorkoutTemplate(
+                name: "Strength Day",
+                sequence: [
+                    .run1,
+                    .sledPush, .sledPull,
+                    .run2,
+                    .sandbagLunges, .wallBalls
+                ],
+                createdAt: now,
+                updatedAt: now
+            ),
+            // Conditioning: 1km between every cardio station — keeps
+            // HR elevated and mimics race-day flow. Skips the sled
+            // stations and wall balls entirely (pure engine, no grip).
+            WorkoutTemplate(
+                name: "Conditioning",
+                sequence: [
+                    .run1, .skiErg,
+                    .run2, .rowing,
+                    .run3, .burpeeBroadJumps,
+                    .run4, .farmersCarry
+                ],
+                createdAt: now,
+                updatedAt: now
+            )
+        ]
+
+        for template in defaults {
+            modelContext.insert(template)
+        }
+        try? modelContext.save()
+    }
 }

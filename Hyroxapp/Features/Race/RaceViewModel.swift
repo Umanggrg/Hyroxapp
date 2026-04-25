@@ -28,6 +28,29 @@ final class RaceViewModel {
     // a Resume / Discard prompt instead of the pre-race screen.
     private(set) var pendingResume: Race?
 
+    // Live-polled heart rate during an active race. `nil` outside of
+    // an active race, when HealthKit isn't authorized, when no Watch
+    // is streaming samples, or simply between poll ticks before the
+    // first sample arrives. UI reads this and renders a small "165
+    // bpm" chip on the race screen when present.
+    //
+    // Intentionally separate from the per-split `heartRateAvgBPM` /
+    // `heartRateMaxBPM` statistics — this is the LATEST instantaneous
+    // reading, those are historical per-segment aggregates.
+    private(set) var currentHeartRateBPM: Double?
+
+    // Handle to the background polling Task so we can cancel it when
+    // the race finishes, the user abandons, or the Race view
+    // disappears. Nil outside of an active race.
+    private var heartRatePollTask: Task<Void, Never>?
+
+    // How often we refresh current HR during a race. 5s is a good
+    // balance — Watch publishes HR to HealthKit every 5–15s in ambient
+    // mode and more frequently in workout mode, so a 5s poll usually
+    // catches the latest sample shortly after it lands without
+    // hammering HealthKit with redundant queries.
+    private static let heartRatePollInterval: TimeInterval = 5
+
     // MARK: - ModelContext plumbing
 
     // Held as a weak reference to the injected environment context. Assigned
@@ -106,6 +129,9 @@ final class RaceViewModel {
         // so History stays clean and future checkForResumableRace calls
         // don't fish up stale rows.
         purgeOrphanedUnfinishedRaces(excluding: race)
+        // Resume the live-HR polling loop — the user's still racing,
+        // they still want to see their current bpm on screen.
+        startHeartRatePolling()
     }
 
     // User tapped Discard on the launch prompt.
@@ -174,6 +200,10 @@ final class RaceViewModel {
         modelContext?.insert(race)
         activeRace = race
         saveContextSilently()
+        // Kick off the live-HR polling loop. Runs independently of
+        // the per-split HR stats — this feeds the on-screen "current
+        // bpm" readout, not the historical per-station aggregates.
+        startHeartRatePolling()
     }
 
     func advance() {
@@ -254,6 +284,7 @@ final class RaceViewModel {
     func finishSession() {
         engine.reset()
         activeRace = nil
+        stopHeartRatePolling()
     }
 
     // Abandon an in-progress race, removing its persisted row. Not wired into
@@ -265,6 +296,7 @@ final class RaceViewModel {
         }
         engine.reset()
         activeRace = nil
+        stopHeartRatePolling()
     }
 
     // MARK: - Persistence
@@ -300,6 +332,46 @@ final class RaceViewModel {
     // will catch up.
     private func saveContextSilently() {
         try? modelContext?.save()
+    }
+
+    // MARK: - Live HR polling
+
+    // Start a background loop that asks HealthKit for the latest HR
+    // sample every `heartRatePollInterval` seconds, publishing each
+    // reading to `currentHeartRateBPM` on MainActor. Idempotent — if
+    // a loop is already running (e.g. resume called after startRace),
+    // the old one is cancelled first.
+    //
+    // Guarded by `canImport(HealthKit)` so macOS builds compile
+    // without the polling path at all.
+    private func startHeartRatePolling() {
+        #if canImport(HealthKit)
+        stopHeartRatePolling()
+
+        heartRatePollTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            // Loop until cancelled. Task.isCancelled trips on
+            // stopHeartRatePolling() or when the task is GC'd.
+            while !Task.isCancelled {
+                if let bpm = await HealthKitService.shared.currentHeartRate() {
+                    self.currentHeartRateBPM = bpm
+                }
+                // `try? await Task.sleep` — on cancellation, sleep
+                // throws CancellationError which we swallow and the
+                // outer while loop exits cleanly on the next check.
+                try? await Task.sleep(for: .seconds(Self.heartRatePollInterval))
+            }
+        }
+        #endif
+    }
+
+    // Stop the polling loop and clear any stale HR readout. Called on
+    // race finish, abandon, and view-disappear so the task doesn't
+    // outlive the race it was tracking.
+    private func stopHeartRatePolling() {
+        heartRatePollTask?.cancel()
+        heartRatePollTask = nil
+        currentHeartRateBPM = nil
     }
 
     // MARK: - HealthKit
