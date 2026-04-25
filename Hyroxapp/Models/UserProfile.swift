@@ -69,6 +69,16 @@ final class UserProfile {
     // on next read.
     var audioCuesEnabled: Bool = true
 
+    // Maximum heart rate (bpm) used to classify HR zones on race
+    // detail. Default 190 is a reasonable starting point for most
+    // HYROX-age athletes; the "220 minus age" rule-of-thumb gives
+    // a per-user value that the athlete can dial in via Settings.
+    //
+    // Stored as Int because a fractional max HR is meaningless
+    // (HealthKit reports per-second integer bpm samples). Default
+    // makes this migration-safe for existing rows.
+    var maxHeartRate: Int = 190
+
     var createdAt: Date
     var updatedAt: Date
 
@@ -81,6 +91,7 @@ final class UserProfile {
         avatarData: Data? = nil,
         division: Division? = Division.mensOpen,
         audioCuesEnabled: Bool = true,
+        maxHeartRate: Int = 190,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -92,6 +103,7 @@ final class UserProfile {
         self.avatarData = avatarData
         self.division = division
         self.audioCuesEnabled = audioCuesEnabled
+        self.maxHeartRate = maxHeartRate
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

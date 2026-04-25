@@ -27,6 +27,17 @@ struct RaceDetailView: View {
         sort: [SortDescriptor(\Race.createdAt, order: .forward)]
     ) private var allFinishedRaces: [Race]
 
+    // The athlete's profile — read for `maxHeartRate` so the HR
+    // zones chart can classify split avg HRs against the user's
+    // own max. Falls back to 190 (a reasonable default) when the
+    // bootstrap hasn't run yet.
+    @Query(sort: [SortDescriptor(\UserProfile.createdAt, order: .forward)])
+    private var profiles: [UserProfile]
+
+    private var maxHeartRate: Int {
+        profiles.first?.maxHeartRate ?? 190
+    }
+
     var body: some View {
         ZStack {
             Color.background.ignoresSafeArea()
@@ -45,6 +56,11 @@ struct RaceDetailView: View {
                             actualDuration: actual
                         )
                     }
+                    // Auto-generated narrative insights for this race.
+                    // Generator inspects splits, HR, and PB history;
+                    // returns 0–3 noteworthy callouts. Section is
+                    // hidden entirely when nothing applies.
+                    insightsSection
                     splitsCard
                     // Only render the HR chart when at least one split
                     // has captured HR data — old pre-HealthKit races,
@@ -52,6 +68,9 @@ struct RaceDetailView: View {
                     // chart and the empty-bar version would look broken.
                     if HeartRateChartView.hasAnyHeartRateData(in: race.splits) {
                         heartRateSection
+                        // Zones share the same gate as the HR chart;
+                        // both depend on per-split avg HR data.
+                        hrZonesSection
                     }
                     // Run fatigue needs 2+ runs to render a meaningful
                     // trend. On a complete race this is always true
@@ -77,6 +96,16 @@ struct RaceDetailView: View {
                 .foregroundStyle(Color.textPrimary)
             Text("Total Time")
                 .capsLabelStyle()
+            // Total active calories (HealthKit) — hidden when no
+            // split has calorie data, e.g. races logged before the
+            // feature shipped or sessions done without a Watch.
+            if let kcal = RaceStats.totalActiveCalories(race) {
+                Text("\(Int(kcal.rounded())) kcal active")
+                    .font(.footnote)
+                    .monospacedDigit()
+                    .foregroundStyle(Color.accentDim)
+                    .padding(.top, 2)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 24)
@@ -96,6 +125,39 @@ struct RaceDetailView: View {
                 .padding(.horizontal, 4)
 
             HeartRateChartView(splits: race.splits)
+        }
+    }
+
+    // Insights section wrapper — caps-label header + insights view.
+    // Whole section is hidden (returns EmptyView) when the generator
+    // produces no callouts for this race; the view doesn't even
+    // render the section header in that case.
+    @ViewBuilder
+    private var insightsSection: some View {
+        let insights = InsightGenerator.generate(
+            for: race,
+            allRaces: allFinishedRaces
+        )
+        if !insights.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Insights").capsLabelStyle()
+                    .padding(.horizontal, 4)
+                RaceInsightsView(insights: insights)
+            }
+        }
+    }
+
+    // HR Zones stacked bar — classifies each split's avg HR into
+    // a Z1-Z5 bucket (against the athlete's profile maxHeartRate)
+    // and shows total time-in-zone proportions. Caps-label header
+    // matches the other Detail sections; uses the same gate as
+    // the HR chart so both appear / hide together.
+    private var hrZonesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Heart Rate Zones").capsLabelStyle()
+                .padding(.horizontal, 4)
+
+            HRZonesView(splits: race.splits, maxBPM: maxHeartRate)
         }
     }
 

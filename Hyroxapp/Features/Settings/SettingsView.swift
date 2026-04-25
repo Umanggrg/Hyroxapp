@@ -47,9 +47,9 @@ struct SettingsView: View {
 
     // MARK: - Sections
 
-    // The HYROX-specific settings live here. Today: division. When we add
-    // per-station overrides (e.g. custom wall ball count for training) or
-    // audio cues, they slot in here.
+    // The HYROX-specific settings live here. Division + max HR for
+    // zone classification today; per-station overrides and other
+    // race-level prefs would slot in here as the app grows.
     private var hyroxSection: some View {
         Section {
             // Picker binds through a custom Binding so that the Picker
@@ -73,6 +73,27 @@ struct SettingsView: View {
             // rep-count effect behind a setting name.
             footnote(
                 "Wall balls default to \(profile.resolvedDivision.wallBallCount) reps for \(profile.resolvedDivision.displayName)."
+            )
+            .listRowBackground(Color.surface)
+
+            // Max HR stepper — drives the HR zones chart on race
+            // detail. Range 140–220 covers the full plausible band
+            // for HYROX athletes. Stepper feels right (not a slider)
+            // because users typically know their target value to
+            // within ±5 bpm and just want to tap it in.
+            Stepper(value: $profile.maxHeartRate, in: 140...220) {
+                HStack {
+                    Text("Max heart rate")
+                    Spacer()
+                    Text("\(profile.maxHeartRate) bpm")
+                        .monospacedDigit()
+                        .foregroundStyle(Color.textSecondary)
+                }
+            }
+            .listRowBackground(Color.surface)
+
+            footnote(
+                "Used to compute HR zones on race detail. A common rule of thumb is 220 minus your age."
             )
             .listRowBackground(Color.surface)
         } header: {

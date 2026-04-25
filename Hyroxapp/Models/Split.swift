@@ -28,6 +28,13 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
     let endedAt: Date
     let heartRateAvgBPM: Double?
     let heartRateMaxBPM: Double?
+    // Active calories burned during this segment, queried from
+    // HealthKit's `.activeEnergyBurned` cumulative sum over the
+    // segment window. Optional for the same reasons HR is optional:
+    // no Watch on wrist, read auth denied, no samples, or the split
+    // was persisted before this field existed (Codable handles
+    // missing key gracefully).
+    let activeCaloriesKcal: Double?
 
     // `Station.rawValue` is stable and unique within a race, so it doubles as
     // the Identifiable id — no extra UUID needed.
@@ -48,6 +55,7 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
         case endedAt
         case heartRateAvgBPM = "heartRateBPM"
         case heartRateMaxBPM
+        case activeCaloriesKcal
     }
 
     // Convenience initializer preserving the pre-HR API so all existing
@@ -57,25 +65,33 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
         startedAt: Date,
         endedAt: Date,
         heartRateAvgBPM: Double? = nil,
-        heartRateMaxBPM: Double? = nil
+        heartRateMaxBPM: Double? = nil,
+        activeCaloriesKcal: Double? = nil
     ) {
         self.station = station
         self.startedAt = startedAt
         self.endedAt = endedAt
         self.heartRateAvgBPM = heartRateAvgBPM
         self.heartRateMaxBPM = heartRateMaxBPM
+        self.activeCaloriesKcal = activeCaloriesKcal
     }
 
-    // Return a new Split with the given HR statistics attached. Used
-    // after a successful HealthKit query to patch the just-completed
-    // split with both its avg and max HR for the segment window.
-    func withHeartRateStats(avg: Double?, max: Double?) -> Split {
+    // Return a new Split with the given HR + calorie statistics
+    // attached. Used after a successful HealthKit query batch to
+    // patch the just-completed split with all the segment-window
+    // metrics that are HR/HK-derived.
+    func withSegmentStats(
+        heartRateAvg: Double?,
+        heartRateMax: Double?,
+        activeCalories: Double?
+    ) -> Split {
         Split(
             station: station,
             startedAt: startedAt,
             endedAt: endedAt,
-            heartRateAvgBPM: avg,
-            heartRateMaxBPM: max
+            heartRateAvgBPM: heartRateAvg,
+            heartRateMaxBPM: heartRateMax,
+            activeCaloriesKcal: activeCalories
         )
     }
 }

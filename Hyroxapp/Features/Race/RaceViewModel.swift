@@ -222,31 +222,34 @@ final class RaceViewModel {
             saveFinishedRaceToHealthKit()
         }
 
-        // Fire-and-forget: fetch segment-window HR stats from HealthKit
-        // and patch them onto the just-completed split. Runs in the
-        // background so the UI transition to the next station is instant
-        // (no ~100-200ms HealthKit query latency between tap and advance).
-        // If HR isn't available (no Watch, read auth denied, no samples)
-        // the split simply keeps its `nil` values and the UI omits them.
-        attachHeartRateStats(to: newSplitIndex)
+        // Fire-and-forget: fetch segment-window stats from HealthKit
+        // (HR avg/max + active calories, in parallel) and patch them
+        // onto the just-completed split. Runs in the background so
+        // the UI transition to the next station is instant (no
+        // 100–300ms HealthKit query latency between tap and advance).
+        // If no metrics are available the split keeps its nil values
+        // and the UI omits them.
+        attachSegmentStats(to: newSplitIndex)
     }
 
-    // MARK: - HR capture
+    // MARK: - Segment stats capture (HR + calories)
 
-    // Query HealthKit for avg + max HR over the just-completed
-    // segment's time window, and patch the split at `index` with the
-    // result. Re-persists afterwards so the Race row in SwiftData
-    // carries the HR through to History.
+    // Query HealthKit for HR avg/max + active calories over the
+    // just-completed segment's time window, and patch the split at
+    // `index` with the result. The two queries run in parallel via
+    // `async let` to minimize the latency before stats appear on
+    // screen. Re-persists afterwards so the Race row in SwiftData
+    // carries the segment metrics through to History.
     //
     // The segment window is read from the split itself (its startedAt
-    // and endedAt) rather than being passed in — the engine already
-    // has the authoritative timestamps for the segment by the time
-    // this runs, and reading them here keeps the HR capture path
-    // robust to any future changes in how advance is invoked.
+    // and endedAt) rather than passed in — the engine already has the
+    // authoritative timestamps by the time this runs, and reading
+    // them here keeps the capture path robust to any future changes
+    // in how advance is invoked.
     //
     // Guarded `#if canImport(HealthKit)` so macOS builds — which lack
     // HealthKit — compile without the query path at all.
-    private func attachHeartRateStats(to index: Int) {
+    private func attachSegmentStats(to index: Int) {
         #if canImport(HealthKit)
         // Read the segment bounds on the current actor before hopping
         // into the async Task — avoids capturing mutable engine state
@@ -257,20 +260,36 @@ final class RaceViewModel {
         let segmentEnd = split.endedAt
 
         // `@MainActor` on the Task pins the whole closure to MainActor
-        // after the async HealthKit query resumes — safe to mutate the
-        // engine directly without an extra MainActor.run hop.
+        // after the parallel HealthKit queries resume — safe to mutate
+        // the engine directly without an extra MainActor.run hop.
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let stats = await HealthKitService.shared.heartRateStats(
+
+            // Run both HealthKit queries in parallel — HR stats and
+            // calories sum are independent, so awaiting them
+            // sequentially would just double the wall-clock latency.
+            async let heartRate = HealthKitService.shared.heartRateStats(
                 from: segmentStart,
                 to: segmentEnd
             )
-            // Skip the persist round-trip if HealthKit had nothing for
-            // this segment — common for indoor sessions without a Watch.
-            guard stats.avg != nil || stats.max != nil else { return }
-            self.engine.setHeartRateStats(
-                avg: stats.avg,
-                max: stats.max,
+            async let calories = HealthKitService.shared.activeCalories(
+                from: segmentStart,
+                to: segmentEnd
+            )
+            let hr = await heartRate
+            let kcal = await calories
+
+            // Skip the persist round-trip if HealthKit had nothing
+            // for this segment — common for indoor sessions without
+            // a Watch streaming any of these metrics.
+            guard hr.avg != nil || hr.max != nil || kcal != nil else {
+                return
+            }
+
+            self.engine.setSegmentStats(
+                heartRateAvg: hr.avg,
+                heartRateMax: hr.max,
+                activeCalories: kcal,
                 atSplitIndex: index
             )
             self.persistActiveRace()

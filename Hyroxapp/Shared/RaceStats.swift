@@ -44,6 +44,18 @@ enum RaceStats {
         return format(split.duration)
     }
 
+    // Total active calories burned across every segment of this race,
+    // summed from HealthKit per-split values. Returns nil when no
+    // split has any calorie data — typical for races run without a
+    // Watch streaming or before the calorie-capture feature shipped.
+    // Returns 0 only if every split was actually queried and reported
+    // 0 (extremely unlikely outside of a stationary mistake-race).
+    static func totalActiveCalories(_ race: Race) -> Double? {
+        let values = race.splits.compactMap(\.activeCaloriesKcal)
+        guard !values.isEmpty else { return nil }
+        return values.reduce(0, +)
+    }
+
     // MARK: - Cross-race aggregates (for Profile) — phone only
 
     // Fastest total race time across the provided races (nil if none).
@@ -173,6 +185,43 @@ enum RaceStats {
     }
 
     #endif  // !os(watchOS)
+
+    // MARK: - Pacing (mid-race "ahead / behind / on pace")
+
+    // Naive expected elapsed time at the START of the segment after
+    // `segmentsCompleted`. Splits the target finish time evenly across
+    // every segment in the race regardless of station type.
+    //
+    // Why naive: a properly-weighted version (runs get more time
+    // budget than sled push, etc.) needs either historical splits
+    // from the athlete's own past races or community-aggregated
+    // benchmarks — both gated on backend / data CLAUDE.md §13.4.
+    // For now the even-split gives a directional signal that's
+    // useful enough during a workout: "your overall pace is X:XX
+    // ahead/behind your target".
+    //
+    // Returns 0 for the very start of the race (0 segments completed
+    // → 0 expected time elapsed), and `target` at the finish line
+    // (all segments done → target time should have fully elapsed).
+    static func naiveExpectedElapsed(
+        segmentsCompleted: Int,
+        totalSegments: Int,
+        target: TimeInterval
+    ) -> TimeInterval {
+        guard totalSegments > 0 else { return 0 }
+        let fraction = Double(segmentsCompleted) / Double(totalSegments)
+        return target * fraction
+    }
+
+    // Signed pace delta. Negative → athlete is ahead of pace (faster
+    // than expected), positive → behind pace (slower than expected).
+    // The UI layer chooses success/warning coloring from the sign.
+    static func paceDelta(
+        actualElapsed: TimeInterval,
+        expectedElapsed: TimeInterval
+    ) -> TimeInterval {
+        actualElapsed - expectedElapsed
+    }
 
     // MARK: - Formatting (shared with watchOS)
 

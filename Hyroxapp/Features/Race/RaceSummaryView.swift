@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 // Post-race screen: total time hero, all 16 splits, a free-form notes
 // field for "how did this feel?", and a Done button that returns the VM
@@ -11,6 +12,15 @@ import SwiftUI
 // `RaceDetailView` so athletes can reflect and edit after the fact too.
 struct RaceSummaryView: View {
     let viewModel: RaceViewModel
+
+    // All finished races — used to compute the "set N station PBs"
+    // insight, which only makes sense relative to the athlete's
+    // history. Filtered by endedAt so unfinished resumable rows
+    // don't skew the count. Same pattern as RaceDetailView.
+    @Query(
+        filter: #Predicate<Race> { $0.endedAt != nil },
+        sort: [SortDescriptor(\Race.createdAt, order: .forward)]
+    ) private var allFinishedRaces: [Race]
 
     var body: some View {
         // `VStack + ScrollView` layout: scrollable content up top, Done
@@ -34,6 +44,16 @@ struct RaceSummaryView: View {
                         .font(.metadata)
                         .foregroundStyle(Color.textSecondary)
 
+                    // Total active calories from HealthKit across all
+                    // splits. Hidden when no segment had calorie data.
+                    if let race = viewModel.activeRace,
+                       let kcal = RaceStats.totalActiveCalories(race) {
+                        Text("\(Int(kcal.rounded())) kcal active")
+                            .font(.footnote)
+                            .monospacedDigit()
+                            .foregroundStyle(Color.accentDim)
+                    }
+
                     // Target outcome — only shown if the athlete set a
                     // goal. "Goal met" + green delta when beaten,
                     // warning delta when missed. Centralized in
@@ -45,6 +65,29 @@ struct RaceSummaryView: View {
                             actualDuration: viewModel.finalTime
                         )
                         .padding(.top, 4)
+                    }
+
+                    // Auto-generated narrative insights — PBs, HR
+                    // peak, run fatigue. The view skips itself when
+                    // no insights apply (e.g. first race ever, no
+                    // HR data, even pacing). Section header only
+                    // renders when the underlying view has content.
+                    if let race = viewModel.activeRace {
+                        let insights = InsightGenerator.generate(
+                            for: race,
+                            allRaces: allFinishedRaces
+                        )
+                        if !insights.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Text("Insights").capsLabelStyle()
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 4)
+                                RaceInsightsView(insights: insights)
+                            }
+                            .padding(.top, 8)
+                        }
                     }
 
                     splitsCard

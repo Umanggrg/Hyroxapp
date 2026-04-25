@@ -53,13 +53,17 @@ final class HealthKitService {
 
         let typesToShare: Set<HKSampleType> = [HKObjectType.workoutType()]
 
-        // Read: heart rate. Declared on the same `requestAuthorization`
-        // call so users see one consolidated HealthKit prompt rather
-        // than two separate ones. If Apple adds more read types later
-        // (active energy, VO2 max, etc.), append them here.
+        // Read: heart rate + active energy. Declared on the same
+        // `requestAuthorization` call so users see one consolidated
+        // HealthKit prompt rather than separate ones for each type.
+        // If Apple adds more read types later (VO2 max, distance,
+        // etc.), append them here.
         var typesToRead: Set<HKObjectType> = []
         if let hrType = HKObjectType.quantityType(forIdentifier: .heartRate) {
             typesToRead.insert(hrType)
+        }
+        if let energyType = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned) {
+            typesToRead.insert(energyType)
         }
 
         do {
@@ -125,6 +129,47 @@ final class HealthKitService {
                 let avg = stats?.averageQuantity()?.doubleValue(for: bpmUnit)
                 let max = stats?.maximumQuantity()?.doubleValue(for: bpmUnit)
                 continuation.resume(returning: (avg, max))
+            }
+            store.execute(query)
+        }
+    }
+
+    // MARK: - Active calories (segment window)
+
+    // Sum of active energy burned during the given window, in kcal.
+    // Returns nil when HealthKit isn't available, the user hasn't
+    // granted read access, or no calorie samples landed in the
+    // window (typical when no Watch was streaming during the race).
+    //
+    // `.cumulativeSum` aggregates all calorie samples in the window
+    // — the Watch contributes calorie samples roughly every 10–20
+    // seconds during workouts, so over a 2–5 min HYROX station you
+    // typically get a meaningful sum.
+    func activeCalories(
+        from start: Date,
+        to end: Date
+    ) async -> Double? {
+        guard isAvailable else { return nil }
+        guard let energyType = HKObjectType.quantityType(
+            forIdentifier: .activeEnergyBurned
+        ) else { return nil }
+        guard end > start else { return nil }
+
+        let predicate = HKQuery.predicateForSamples(
+            withStart: start,
+            end: end,
+            options: .strictStartDate
+        )
+
+        return await withCheckedContinuation { continuation in
+            let query = HKStatisticsQuery(
+                quantityType: energyType,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum
+            ) { _, stats, _ in
+                let kcalUnit = HKUnit.kilocalorie()
+                let kcal = stats?.sumQuantity()?.doubleValue(for: kcalUnit)
+                continuation.resume(returning: kcal)
             }
             store.execute(query)
         }

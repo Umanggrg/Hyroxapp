@@ -47,6 +47,15 @@ struct ProfileView: View {
                             // Push / 1km Run / Wall Balls?" at a glance,
                             // adjacent to the high-level metrics.
                             StationPersonalBestsView(races: races)
+                            // Performance trends chart only shows up
+                            // once there's enough data for a real
+                            // trendline (3+ finished races). Without
+                            // this gate, the section would render an
+                            // awkward 1- or 2-dot chart that doesn't
+                            // tell the athlete anything.
+                            if PerformanceTrendsView.hasEnoughData(in: races) {
+                                trendsSection
+                            }
                             recentRacesSection
                         }
                     }
@@ -100,6 +109,24 @@ struct ProfileView: View {
     // profile layout — if the user wants more, they use the History tab.
     private var recentRaces: [Race] {
         Array(races.prefix(3))
+    }
+
+    // Performance trends section — caps-label header + chart, sandwiched
+    // between Personal Bests and Recent Races. The chart itself is
+    // gated on race count via PerformanceTrendsView.hasEnoughData; this
+    // wrapper only adds the section header so the layout reads
+    // consistently with the other Profile sections.
+    private var trendsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Trends")
+                    .capsLabelStyle()
+                Spacer()
+            }
+            .padding(.horizontal, 4)
+
+            PerformanceTrendsView(races: races)
+        }
     }
 
     // Section displayed below the stats grid. Hidden entirely when no

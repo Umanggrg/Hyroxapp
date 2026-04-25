@@ -162,10 +162,15 @@ struct RaceView: View {
                     Text("Station \(viewModel.completedSegmentsCount + 1) of \(viewModel.totalSegments)")
                         .capsLabelStyle()
                     Spacer()
+                    // Pace chip — only when a target was set on race
+                    // start. Reads "+1:23 ahead" / "-0:45 behind" /
+                    // "on pace" based on a naive even-split of the
+                    // target across all stations.
+                    paceChip(now: context.date)
                     // Live HR readout — only appears once a sample
                     // arrives from HealthKit. Positioned next to the
-                    // cancel button so the three header controls read
-                    // as "status · HR · cancel" left to right.
+                    // cancel button so the four header controls read
+                    // as "status · pace · HR · cancel" left to right.
                     liveHeartRateChip
                     cancelButton
                 }
@@ -256,6 +261,68 @@ struct RaceView: View {
                 .capsLabelStyle()
                 .foregroundStyle(Color.accent)
                 .padding(.bottom, 12)
+        }
+    }
+
+    // Pace chip in the in-race header. Compares the athlete's actual
+    // elapsed time vs. an even split of their target finish time
+    // across the race's segments. Hidden when no target was set on
+    // race start (the comparison is meaningless without a goal).
+    //
+    // Three visual states based on the signed delta:
+    //   • "on pace" (textSecondary) when within 15s either way —
+    //     a small dead zone keeps the chip from flickering between
+    //     ahead/behind on every tick when the athlete is right on
+    //     the line.
+    //   • "+X:XX ahead" (success green) when faster than expected.
+    //   • "-X:XX behind" (warning) when slower than expected.
+    @ViewBuilder
+    private func paceChip(now: Date) -> some View {
+        if let target = viewModel.activeRace?.targetDuration {
+            let actual = viewModel.elapsed(at: now)
+            let expected = RaceStats.naiveExpectedElapsed(
+                segmentsCompleted: viewModel.completedSegmentsCount,
+                totalSegments: viewModel.totalSegments,
+                target: target
+            )
+            let delta = RaceStats.paceDelta(
+                actualElapsed: actual,
+                expectedElapsed: expected
+            )
+            let absDelta = Swift.abs(delta)
+            let onPace = absDelta < 15
+            let label: String
+            let color: Color
+            if onPace {
+                label = "on pace"
+                color = Color.textSecondary
+            } else if delta < 0 {
+                // Negative delta = ahead of pace (actual < expected)
+                label = "\(RaceStats.format(absDelta)) ahead"
+                color = Color.success
+            } else {
+                label = "\(RaceStats.format(absDelta)) behind"
+                color = Color.warning
+            }
+
+            HStack(spacing: 4) {
+                Image(systemName: onPace
+                      ? "equal.circle.fill"
+                      : (delta < 0 ? "arrow.up.right" : "arrow.down.right"))
+                    .font(.system(size: 10, weight: .semibold))
+                Text(label)
+                    .font(.caption2.weight(.bold))
+                    .tracking(0.3)
+                    .textCase(.uppercase)
+                    .monospacedDigit()
+            }
+            .foregroundStyle(color)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule().fill(Color.surface)
+            )
+            .accessibilityLabel("Pace: \(label)")
         }
     }
 

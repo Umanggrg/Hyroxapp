@@ -154,19 +154,25 @@ struct RaceEngine: Sendable {
         state = .notStarted
     }
 
-    // Attach heart-rate statistics (avg + max over the segment window)
-    // to the split at the given index. Used from RaceViewModel after an
-    // async HealthKit HKStatisticsQuery returns — the advance itself
-    // stays synchronous (the split is appended without HR, then patched
-    // here when HealthKit responds). No-op if the index is out of range
-    // or the engine isn't in a state with splits.
+    // Attach segment-window statistics (HR avg/max + active calories)
+    // to the split at the given index. Used from RaceViewModel after
+    // a parallel batch of HealthKit queries returns — the advance
+    // itself stays synchronous (the split is appended with all stats
+    // nil, then patched here when HealthKit responds). No-op if the
+    // index is out of range or the engine isn't in a state with splits.
     //
     // Safe to call from either `.inProgress` or `.finished` — stats can
     // be attached to the final split of a freshly-finished race exactly
     // as to an intermediate split.
-    mutating func setHeartRateStats(
-        avg: Double?,
-        max: Double?,
+    //
+    // All metrics are optional: any combination of "have HR but no
+    // calories", "have calories but no HR", or just one of the four
+    // values is supported. The Split's `withSegmentStats` builder
+    // forwards each value through unchanged.
+    mutating func setSegmentStats(
+        heartRateAvg: Double?,
+        heartRateMax: Double?,
+        activeCalories: Double?,
         atSplitIndex index: Int
     ) {
         switch state {
@@ -174,7 +180,11 @@ struct RaceEngine: Sendable {
             return
         case .inProgress(let startedAt, let segmentStart, var splits):
             guard splits.indices.contains(index) else { return }
-            splits[index] = splits[index].withHeartRateStats(avg: avg, max: max)
+            splits[index] = splits[index].withSegmentStats(
+                heartRateAvg: heartRateAvg,
+                heartRateMax: heartRateMax,
+                activeCalories: activeCalories
+            )
             state = .inProgress(
                 startedAt: startedAt,
                 currentSegmentStartedAt: segmentStart,
@@ -182,7 +192,11 @@ struct RaceEngine: Sendable {
             )
         case .finished(let startedAt, let endedAt, var splits):
             guard splits.indices.contains(index) else { return }
-            splits[index] = splits[index].withHeartRateStats(avg: avg, max: max)
+            splits[index] = splits[index].withSegmentStats(
+                heartRateAvg: heartRateAvg,
+                heartRateMax: heartRateMax,
+                activeCalories: activeCalories
+            )
             state = .finished(
                 startedAt: startedAt,
                 endedAt: endedAt,
