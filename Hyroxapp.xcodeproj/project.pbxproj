@@ -506,7 +506,10 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
-				INFOPLIST_KEY_NSBonjourServices = "_hyrox-duo._tcp _hyrox-duo._udp";
+				INFOPLIST_KEY_NSBonjourServices = (
+					"_hyrox-duo._tcp",
+					"_hyrox-duo._udp",
+				);
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Hyroxapp reads workout data to display your HYROX races alongside your other Health activity.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Hyroxapp writes completed HYROX races to Apple Health so they appear alongside your other workouts.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Hyroxapp uses your local network to find and connect to a partner's iPhone for Duo races. No data leaves your local Wi-Fi or Bluetooth connection.";
@@ -557,7 +560,10 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
-				INFOPLIST_KEY_NSBonjourServices = "_hyrox-duo._tcp _hyrox-duo._udp";
+				INFOPLIST_KEY_NSBonjourServices = (
+					"_hyrox-duo._tcp",
+					"_hyrox-duo._udp",
+				);
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Hyroxapp reads workout data to display your HYROX races alongside your other Health activity.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Hyroxapp writes completed HYROX races to Apple Health so they appear alongside your other workouts.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Hyroxapp uses your local network to find and connect to a partner's iPhone for Duo races. No data leaves your local Wi-Fi or Bluetooth connection.";
