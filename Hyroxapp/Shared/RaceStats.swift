@@ -605,6 +605,33 @@ enum RaceStats {
 
     #endif  // !os(watchOS)
 
+    // MARK: - Effort score (snapshot-side, shared with watchOS)
+    //
+    // Same intensity-weighted-minutes formula as `effortScore(for:Race)`,
+    // but operates on `[SerializedSplit]` so it works on the Watch and
+    // for the duo guest — neither has access to a SwiftData `Race`. The
+    // host's running snapshot already carries serialized splits + the
+    // host's max HR; consumers reconstruct the score from the snapshot
+    // alone.
+    //
+    // Returns nil under the same conditions as the Race-shaped variant:
+    // no splits with HR data, or maxHR <= 0.
+    static func effortScore(forSplits splits: [SerializedSplit], maxHR: Int) -> Double? {
+        guard maxHR > 0 else { return nil }
+        let maxHRDouble = Double(maxHR)
+
+        let scored = splits.compactMap { split -> Double? in
+            guard let avg = split.heartRateAvgBPM, avg > 0 else { return nil }
+            let intensity = avg / maxHRDouble
+            let duration = split.endedAt.timeIntervalSince(split.startedAt)
+            guard duration > 0 else { return nil }
+            return intensity * (duration / 60)
+        }
+
+        guard !scored.isEmpty else { return nil }
+        return scored.reduce(0, +)
+    }
+
     // MARK: - Pacing (mid-race "ahead / behind / on pace")
 
     // Naive expected elapsed time at the START of the segment after

@@ -48,6 +48,11 @@ final class DuoCoordinator {
     // "Connected to Umang."
     let localDisplayName: String
     let localDivision: Division
+    // Local user's max HR. Threaded through to the host's
+    // snapshot construction so the watch + duo guest can compute
+    // effort scores using the host's true max instead of the
+    // 190 fallback default.
+    let localMaxHeartRate: Int
 
     // Current high-level coordinator state. Views render from this.
     private(set) var state: CoordState = .idle
@@ -65,9 +70,10 @@ final class DuoCoordinator {
     // messages bubble up.
     var onRaceMessage: (@MainActor @Sendable (DuoMessage) -> Void)?
 
-    init(localDisplayName: String, localDivision: Division) {
+    init(localDisplayName: String, localDivision: Division, localMaxHeartRate: Int = 190) {
         self.localDisplayName = localDisplayName
         self.localDivision = localDivision
+        self.localMaxHeartRate = localMaxHeartRate
         self.session = DuoSession(localDisplayName: localDisplayName)
 
         // Subscribe to the session's inbound messages. This is the

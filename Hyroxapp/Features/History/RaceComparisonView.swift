@@ -31,6 +31,12 @@ struct RaceComparisonView: View {
         sort: [SortDescriptor(\Race.createdAt, order: .reverse)]
     ) private var allFinishedRaces: [Race]
 
+    // Local UserProfile drives the effort-score row's max HR
+    // value. Same singleton-via-Query pattern used elsewhere on
+    // iOS — bootstrap guarantees exactly one row.
+    @Query(sort: [SortDescriptor(\UserProfile.createdAt, order: .forward)])
+    private var profiles: [UserProfile]
+
     // Selected race IDs — drives the picker pills + the diff view.
     // Persistent IDs work as @State because they're Hashable and
     // SwiftData round-trips them losslessly.
@@ -253,12 +259,35 @@ struct RaceComparisonView: View {
                 aValue: caloriesString(a),
                 bValue: caloriesString(b)
             )
+            // Effort row — surfaces the HR-time integration alongside
+            // the raw HR and calorie aggregates. When neither race
+            // has HR data, both sides render '—' and the row is
+            // still useful as a visual anchor (presence of the
+            // metric, absence of data).
+            Divider().background(Color.divider)
+            aggregateRow(
+                label: "Effort",
+                aValue: effortString(a),
+                bValue: effortString(b)
+            )
         }
         .padding(Layout.cardPadding)
         .background(
             RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
                 .fill(Color.surface)
         )
+    }
+
+    // Effort score formatted for the comparison row. Reads the
+    // local user's max HR from their UserProfile so the score
+    // matches what the per-race summary line shows. Returns "—"
+    // when the race has no HR data to integrate.
+    private func effortString(_ race: Race) -> String {
+        let maxHR = profiles.first?.maxHeartRate ?? 190
+        guard let score = RaceStats.effortScore(for: race, maxHR: maxHR) else {
+            return "—"
+        }
+        return "\(Int(score.rounded()))"
     }
 
     private func aggregateRow(label: String, aValue: String, bValue: String) -> some View {

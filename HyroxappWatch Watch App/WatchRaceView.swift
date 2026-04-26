@@ -65,16 +65,22 @@ struct WatchRaceView: View {
     private func inProgressView(snapshot: RaceStateSnapshot) -> some View {
         TimelineView(.periodic(from: .now, by: 0.5)) { context in
             VStack(spacing: 6) {
-                // Brand fingerprint progress bar — anchors the screen
-                // with the recurring 16-bar motif and doubles as a
-                // glance-able "where am I in the race" cue without
-                // needing to read text.
-                WatchFingerprintProgress(
-                    completedCount: snapshot.completedStationsCount,
-                    currentIndex: snapshot.currentStationIndex,
-                    totalCount: snapshot.totalStations
-                )
-                .frame(height: 18)
+                // Brand fingerprint progress bar with a pause button
+                // tucked at the trailing edge. The fingerprint
+                // anchors the brand identity; the pause icon gives
+                // a tap-to-pause affordance from the wrist that
+                // mirrors the iPhone's header pause button. Small
+                // (24pt) so it doesn't crowd the fingerprint.
+                HStack(spacing: 6) {
+                    WatchFingerprintProgress(
+                        completedCount: snapshot.completedStationsCount,
+                        currentIndex: snapshot.currentStationIndex,
+                        totalCount: snapshot.totalStations
+                    )
+                    .frame(height: 18)
+
+                    pauseButton
+                }
                 .padding(.horizontal, 4)
 
                 stationHeader(snapshot: snapshot)
@@ -183,10 +189,39 @@ struct WatchRaceView: View {
 
             Spacer(minLength: 2)
 
-            Text("Resume on iPhone")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(Color.textTertiary)
-                .padding(.bottom, 4)
+            // Resume button — wrist parity with the iPhone's
+            // pause/resume gesture. Tap fires `.resume` to the
+            // phone; phone calls viewModel.resumeRace, which
+            // shifts the timer forward by the pause duration so
+            // existing elapsed-time math keeps working. Phone's
+            // broadcast then flips the snapshot phase back to
+            // .inProgress and the watch routes back to its
+            // running view.
+            Button {
+                Haptics.success()
+                WatchRaceClient.shared.send(.resume)
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 13, weight: .heavy))
+                    Text("Resume")
+                        .font(.system(size: 14, weight: .heavy, design: .rounded))
+                }
+                .foregroundStyle(Color.onAccent)
+                .frame(maxWidth: .infinity)
+                .frame(height: 38)
+                .background(
+                    LinearGradient(
+                        colors: [Color.accent, Color.accent.opacity(0.85)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .shadow(color: Color.accent.opacity(0.35), radius: 10, y: 0)
+            }
+            .buttonStyle(.plain)
+            .padding(.bottom, 4)
         }
         .padding(.horizontal, 6)
         .padding(.top, 6)
@@ -368,6 +403,28 @@ struct WatchRaceView: View {
                     }
                     .foregroundStyle(Color.accent)
                 }
+
+                // Effort chip — running HR-time integration across
+                // every completed split with HR data. Mirrors the
+                // post-race "Effort N · HR-time" line iOS shows on
+                // RaceSummaryView, but truncated to fit the wrist:
+                // bolt icon + integer value. Nil for the first
+                // station (no completed splits yet) and for races
+                // run without any HR data — chip simply doesn't
+                // render in those cases.
+                if let effort = RaceStats.effortScore(
+                    forSplits: snapshot.splits,
+                    maxHR: snapshot.maxHeartRate
+                ) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 9, weight: .heavy))
+                        Text("\(Int(effort.rounded()))")
+                            .font(.system(size: 11, weight: .heavy))
+                            .monospacedDigit()
+                    }
+                    .foregroundStyle(Color.warning)
+                }
             }
         }
     }
@@ -477,6 +534,30 @@ struct WatchRaceView: View {
     // the final station, so the Watch's tap on station 16 is a safety
     // risk if mistapped. Worth addressing in a polish pass; for MVP we
     // rely on the user being deliberate with their wrist.
+    // Compact pause button shown in the in-progress header next
+    // to the fingerprint. Sends `.pause` to the phone; phone calls
+    // viewModel.pauseRace, which freezes the engine timer and
+    // broadcasts a .paused snapshot back. Watch then routes to
+    // the pausedView with its Resume button.
+    //
+    // Sized to 24pt so it doesn't crowd the fingerprint. Same
+    // surface treatment as the existing chips so it reads as a
+    // peer of the brand element next to it.
+    private var pauseButton: some View {
+        Button {
+            Haptics.warning()
+            WatchRaceClient.shared.send(.pause)
+        } label: {
+            Image(systemName: "pause.fill")
+                .font(.system(size: 11, weight: .heavy))
+                .foregroundStyle(Color.textSecondary)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(Color.surface))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Pause race")
+    }
+
     private var advanceButton: some View {
         Button {
             Haptics.impact(.medium)

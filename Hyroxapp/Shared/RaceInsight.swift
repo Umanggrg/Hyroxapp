@@ -51,6 +51,14 @@ enum InsightGenerator {
         if let pbInsight = pbCountInsight(for: race, allRaces: allRaces) {
             out.append(pbInsight)
         }
+        // Mode-aware PB callout — fires when this race is the
+        // athlete's fastest *within its mode* (solo or duo). Lives
+        // separately from per-station PBs because total-time PBs
+        // are a different rhythm of celebration: stations rack up
+        // every race, total-time records are rarer.
+        if let modePBInsight = modeAwarePBInsight(for: race, allRaces: allRaces) {
+            out.append(modePBInsight)
+        }
         if let hrInsight = hrPeakInsight(for: race) {
             out.append(hrInsight)
         }
@@ -115,6 +123,56 @@ enum InsightGenerator {
         return RaceInsight(
             text: text,
             symbol: "trophy.fill",
+            color: .success
+        )
+    }
+
+    // MARK: - Mode-aware total-time PB
+
+    // Was this race the fastest total time the athlete has logged
+    // *within its mode*? Solo and duo races aren't directly
+    // comparable — HYROX Doubles splits work between two athletes,
+    // so a duo total of 1:05 is equivalent to a solo of 1:25-ish,
+    // not a record-shattering moment. Mode-segregated PBs preserve
+    // the meaning of each.
+    //
+    // Returns nil unless this race beats every prior finished race
+    // *of the same mode*. The first race in a given mode does NOT
+    // fire the insight — by the time an athlete is racing solo or
+    // duo for the first time, the activity itself is the headline;
+    // a "first ever PB" callout reads as filler.
+    //
+    // Distinct from `RaceStats.wasPBWhenSet` (total-time PB across
+    // all modes) — the existing all-modes PB shows up as the
+    // trophy on the race card; this insight is the
+    // "you cracked your duo PB" coaching note that lives inside
+    // the summary card.
+    private static func modeAwarePBInsight(
+        for race: Race,
+        allRaces: [Race]
+    ) -> RaceInsight? {
+        guard let thisTotal = race.totalDuration else { return nil }
+
+        let priorSameMode = allRaces.filter {
+            $0.createdAt < race.createdAt
+                && $0.isFinished
+                && $0.mode == race.mode
+        }
+        // Need at least one prior in the same mode; otherwise
+        // there's no "PB" to cracker against.
+        guard !priorSameMode.isEmpty else { return nil }
+
+        guard let priorBest = priorSameMode.compactMap(\.totalDuration).min(),
+              thisTotal < priorBest
+        else { return nil }
+
+        let delta = priorBest - thisTotal
+        let label = race.mode == .duo ? "duo" : "solo"
+        let text = "New \(label) personal best — \(RaceStats.format(delta)) faster than your prior best."
+
+        return RaceInsight(
+            text: text,
+            symbol: race.mode == .duo ? "person.2.fill" : "trophy.fill",
             color: .success
         )
     }

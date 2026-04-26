@@ -246,6 +246,12 @@ enum HistoryFilter: Int, CaseIterable, Identifiable, Hashable {
     case pbsOnly
     case customWorkouts
     case withPhoto
+    // Filter races by mode. Solo and duo are conceptually separate
+    // — the athlete may want to see only their solo PBs (without
+    // duo races inflating / contaminating the picture) or only
+    // their duo races (to see partner history at a glance).
+    case soloOnly
+    case duoOnly
 
     var id: Int { rawValue }
 
@@ -256,6 +262,8 @@ enum HistoryFilter: Int, CaseIterable, Identifiable, Hashable {
         case .pbsOnly:         return "PBs Only"
         case .customWorkouts:  return "Custom"
         case .withPhoto:       return "With Photo"
+        case .soloOnly:        return "Solo"
+        case .duoOnly:         return "Duo"
         }
     }
 
@@ -280,6 +288,10 @@ enum HistoryFilter: Int, CaseIterable, Identifiable, Hashable {
             return race.sequenceRaw != Station.raceSequence.map(\.rawValue)
         case .withPhoto:
             return race.photoData != nil
+        case .soloOnly:
+            return race.mode == .solo
+        case .duoOnly:
+            return race.mode == .duo
         }
     }
 }

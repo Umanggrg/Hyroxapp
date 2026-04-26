@@ -93,6 +93,14 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
     // hiding the chip — the absence of HR is itself information.
     let currentHeartRateBPM: Double?
 
+    // Athlete's configured max HR. Shipped with the snapshot so
+    // the Watch (and duo guest) can compute effort scores via
+    // `RaceStats.effortScore` without needing access to
+    // `UserProfile`. Default 190 mirrors the same default
+    // `UserProfile.maxHeartRate` ships with — receivers can
+    // assume a non-zero value.
+    let maxHeartRate: Int
+
     // 0-based index into `Station.raceSequence`. The watch resolves this
     // to a `Station` case and uses `station.displayName` /
     // `station.target(for: division)` for the header + subtitle.
@@ -131,7 +139,8 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         endedAt: Date?,
         pausedAt: Date? = nil,
         splits: [SerializedSplit] = [],
-        currentHeartRateBPM: Double? = nil
+        currentHeartRateBPM: Double? = nil,
+        maxHeartRate: Int = 190
     ) {
         self.phase = phase
         self.startedAt = startedAt
@@ -144,6 +153,7 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         self.pausedAt = pausedAt
         self.splits = splits
         self.currentHeartRateBPM = currentHeartRateBPM
+        self.maxHeartRate = maxHeartRate
     }
 
     // MARK: - Dictionary encoding (WCSession transport)
@@ -162,6 +172,7 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         static let endedAt = "endedAt"
         static let pausedAt = "pausedAt"
         static let currentHeartRateBPM = "currentHeartRateBPM"
+        static let maxHeartRate = "maxHeartRate"
     }
 
     // Build a plist-compatible dictionary suitable for
@@ -174,7 +185,8 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
             Key.currentStationIndex: currentStationIndex,
             Key.completedStationsCount: completedStationsCount,
             Key.totalStations: totalStations,
-            Key.divisionRaw: divisionRaw
+            Key.divisionRaw: divisionRaw,
+            Key.maxHeartRate: maxHeartRate
         ]
         if let startedAt {
             dict[Key.startedAt] = startedAt.timeIntervalSince1970
@@ -243,6 +255,12 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         }
 
         self.currentHeartRateBPM = dictionary[Key.currentHeartRateBPM] as? Double
+
+        // maxHR has a sensible 190 default if missing from older
+        // payloads — matches `UserProfile.maxHeartRate`'s default
+        // so receivers compute meaningful effort scores even
+        // before we re-encode with the new field.
+        self.maxHeartRate = (dictionary[Key.maxHeartRate] as? Int) ?? 190
 
         // Splits aren't carried over the WCSession dictionary path.
         // The watch doesn't render per-split detail; the duo/Codable

@@ -528,9 +528,11 @@ struct RaceStartView: View {
                 let profile = profiles.first
                 let displayName = profile?.displayName.trimmingCharacters(in: .whitespaces) ?? "Athlete"
                 let division = profile?.resolvedDivision ?? .mensOpen
+                let maxHR = profile?.maxHeartRate ?? 190
                 duoCoordinator = DuoCoordinator(
                     localDisplayName: displayName.isEmpty ? "Athlete" : displayName,
-                    localDivision: division
+                    localDivision: division,
+                    localMaxHeartRate: maxHR
                 )
             }
             isPairingPresented = true

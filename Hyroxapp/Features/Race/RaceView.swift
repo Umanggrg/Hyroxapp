@@ -1107,16 +1107,22 @@ struct RaceView: View {
     private func registerWatchActionHandler() {
         #if canImport(WatchConnectivity)
         WatchCompanionService.shared.onAction = { action in
-            // Each case fires the same haptic + viewModel call as
-            // its iPhone-side button, so a wrist tap and a phone
-            // tap feel identical to the athlete. The Watch sends
-            // whichever action matches the current snapshot phase
-            // (advance for in-progress, endSegment / startNextSegment
-            // when roxzone is on, pause/resume mid-race).
             switch action {
             case .advance:
+                // The Watch's snapshot doesn't carry the user's
+                // roxzone-enabled flag, so the phone routes
+                // .advance based on its own engine state:
+                //   • .inRoxzone → startNextSegment (begin work)
+                //   • .inProgress + roxzone on → endSegment (close
+                //     segment, enter roxzone)
+                //   • .inProgress + roxzone off → advance (close
+                //     segment, begin next instantly)
+                //   • other → engine ignores no-op call
+                // Same effect: a wrist tap always advances the race
+                // state correctly without the Watch needing to know
+                // the user's settings.
                 Haptics.impact(.medium)
-                viewModel.advance()
+                routeWatchAdvance()
             case .endSegment:
                 Haptics.impact(.medium)
                 viewModel.endSegmentRace()
@@ -1132,6 +1138,26 @@ struct RaceView: View {
             }
         }
         #endif
+    }
+
+    // Smart routing for the Watch's `.advance` action so a single
+    // wrist button works through the full race state machine
+    // including the roxzone two-step flow. Pulled out as a helper
+    // so the registerWatchActionHandler closure stays small for
+    // Swift's type-checker.
+    private func routeWatchAdvance() {
+        switch viewModel.engine.state {
+        case .inRoxzone:
+            viewModel.startNextSegmentRace()
+        case .inProgress:
+            if profiles.first?.roxzoneEnabled == true {
+                viewModel.endSegmentRace()
+            } else {
+                viewModel.advance()
+            }
+        default:
+            viewModel.advance()
+        }
     }
 
     // Build a snapshot of the current race + user profile state and push
@@ -1152,7 +1178,7 @@ struct RaceView: View {
         // means engine is .notStarted (nothing meaningful to
         // publish); we still send a stub for the watch's idle
         // state so it transitions out of .finished cleanly.
-        if let snapshot = viewModel.makeRaceStateSnapshot(division: division) {
+        if let snapshot = viewModel.makeRaceStateSnapshot(division: division, maxHR: maxHeartRate) {
             WatchCompanionService.shared.publish(snapshot)
         } else {
             // Engine is in .notStarted — synthesize a minimal
@@ -1169,7 +1195,8 @@ struct RaceView: View {
                 totalStations: viewModel.totalSegments,
                 divisionRaw: division.rawValue,
                 endedAt: nil,
-                pausedAt: nil
+                pausedAt: nil,
+                maxHeartRate: maxHeartRate
             )
             WatchCompanionService.shared.publish(snapshot)
         }

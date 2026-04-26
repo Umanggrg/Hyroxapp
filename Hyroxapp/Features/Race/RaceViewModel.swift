@@ -158,12 +158,13 @@ final class RaceViewModel {
     // (WCSession path) and the duo bridge (Multipeer path). Returns
     // nil for `.notStarted` so callers can early-exit.
     //
-    // `division` is passed in rather than read from a stored property
-    // because the VM doesn't own division semantically — that's a
-    // UserProfile concern. Both call sites (RaceView for watch sync,
-    // DuoRaceController for duo broadcast) have the user's division
-    // already and pass it through.
-    func makeRaceStateSnapshot(division: Division) -> RaceStateSnapshot? {
+    // `division` and `maxHR` are passed in rather than read from a
+    // stored property because the VM doesn't own profile state
+    // semantically — that's a UserProfile concern. Both call
+    // sites (RaceView for watch sync, DuoRaceController for duo
+    // broadcast) have the user's profile already and pass them
+    // through.
+    func makeRaceStateSnapshot(division: Division, maxHR: Int = 190) -> RaceStateSnapshot? {
         let phase: RaceStateSnapshot.Phase
         let startedAt: Date?
         let segmentStartedAt: Date?
@@ -225,7 +226,8 @@ final class RaceViewModel {
             endedAt: endedAt,
             pausedAt: pausedAt,
             splits: serializedSplits,
-            currentHeartRateBPM: currentHeartRateBPM
+            currentHeartRateBPM: currentHeartRateBPM,
+            maxHeartRate: maxHR
         )
     }
 

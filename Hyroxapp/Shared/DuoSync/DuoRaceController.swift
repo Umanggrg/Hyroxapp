@@ -193,7 +193,10 @@ final class DuoRaceController {
         // division. The guest sees the host's wall-ball rep count,
         // sled weights, etc. — matches the HYROX Doubles convention
         // where one race = one ruleset.
-        guard let snapshot = vm.makeRaceStateSnapshot(division: coordinator.localDivision) else { return }
+        guard let snapshot = vm.makeRaceStateSnapshot(
+            division: coordinator.localDivision,
+            maxHR: coordinator.localMaxHeartRate
+        ) else { return }
         coordinator.broadcastState(snapshot)
 
         // When the host's race is now .finished, stamp the
