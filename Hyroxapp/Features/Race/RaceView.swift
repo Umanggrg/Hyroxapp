@@ -223,6 +223,34 @@ struct RaceView: View {
             duoController?.broadcastCurrent()
             #endif
         }
+        // HR samples land asynchronously every ~5s during an active
+        // race. They don't change engine.state, so the hook above
+        // doesn't catch them — without this dedicated watcher the
+        // watch + guest would only see HR updates piggybacked on
+        // the next state change, which could be a minute away.
+        // Pushing on every HR change keeps both surfaces fresh.
+        // WCSession's updateApplicationContext deduplicates
+        // identical payloads internally, so a redundant push is
+        // free.
+        .onChange(of: viewModel.currentHeartRateBPM) { _, _ in
+            publishWatchState()
+            #if canImport(MultipeerConnectivity)
+            duoController?.broadcastCurrent()
+            #endif
+        }
+        // Watch the underlying duo session state directly. When it
+        // transitions to .disconnected during an active race, stamp
+        // the active Race with the moment of disconnect via the
+        // helper below. We observe the session (not the
+        // coordinator's higher-level CoordState) because the
+        // session has a clean top-level .disconnected case; the
+        // coordinator wraps it inside .hosting / .joining variants
+        // that would require nested pattern-matching.
+        #if canImport(MultipeerConnectivity)
+        .onChange(of: duoCoordinator?.session.state) { _, newState in
+            handleDuoSessionStateChange(newState)
+        }
+        #endif
         // Keep the screen awake for the duration of an active race.
         // CLAUDE.md §6: the display must not dim mid-workout. Toggled off
         // again on finish, abandonment, or view-dismiss so we don't burn the
@@ -256,15 +284,36 @@ struct RaceView: View {
         }
         // Guest's race screen — full-screen cover routed in when
         // the local user paired as a guest AND a snapshot has
-        // arrived from the host. The `notStarted` exclusion keeps
-        // the cover hidden until the host actually starts; once
-        // the host advances to `.inProgress`, the snapshot's
-        // phase flips and the cover slides up.
-        //
-        // The host never sees this cover — `isGuestRaceActive`
-        // is gated on role == .guest.
+        // arrived from the host. The binding + content live in
+        // separate helpers so the body's modifier chain stays
+        // small enough for Swift's type inferencer.
         #if canImport(MultipeerConnectivity)
-        .fullScreenCover(isPresented: Binding(
+        .fullScreenCover(isPresented: guestRaceCoverBinding) {
+            guestRaceCoverContent
+        }
+        #endif
+    }
+
+    // True once the local user is acting as a guest AND the host
+    // has broadcast at least one running snapshot. Drives the
+    // fullScreenCover binding below.
+    #if canImport(MultipeerConnectivity)
+    private var isGuestRaceActive: Bool {
+        guard let controller = duoController,
+              controller.role == .guest,
+              let snapshot = controller.latestSnapshot
+        else { return false }
+        return snapshot.phase != .notStarted
+    }
+
+    // Custom binding for the fullScreenCover. Pulled into its own
+    // property because Swift's type-checker chokes on `Binding(get:
+    // set:)` literals nested inside a long modifier chain — see
+    // "compiler unable to type-check this expression" failures.
+    // Pulling this out trims the body's expression complexity and
+    // the inferencer resolves everything cleanly.
+    private var guestRaceCoverBinding: Binding<Bool> {
+        Binding(
             get: { isGuestRaceActive },
             set: { newValue in
                 if !newValue {
@@ -277,24 +326,30 @@ struct RaceView: View {
                     selectedMode = .solo
                 }
             }
-        )) {
-            if let controller = duoController {
-                DuoGuestRaceView(controller: controller)
-            }
-        }
-        #endif
+        )
     }
 
-    // True once the local user is acting as a guest AND the host
-    // has broadcast at least one running snapshot. Drives the
-    // fullScreenCover above.
-    #if canImport(MultipeerConnectivity)
-    private var isGuestRaceActive: Bool {
-        guard let controller = duoController,
-              controller.role == .guest,
-              let snapshot = controller.latestSnapshot
-        else { return false }
-        return snapshot.phase != .notStarted
+    @ViewBuilder
+    private var guestRaceCoverContent: some View {
+        if let controller = duoController {
+            DuoGuestRaceView(controller: controller)
+        }
+    }
+
+    // Handler for `.onChange(of: duoCoordinator?.session.state)`.
+    // Stamps `partnerDisconnectedAt` on the active race when the
+    // duo session drops mid-race. Pulled out as a function so the
+    // body's modifier chain stays small enough for Swift's type
+    // inferencer (inline `case` + multi-line `guard` in a
+    // closure-passed-to-onChange tripped it earlier).
+    private func handleDuoSessionStateChange(_ newState: DuoSession.State?) {
+        guard case .disconnected = newState else { return }
+        guard let race = viewModel.activeRace,
+              race.endedAt == nil,
+              race.partnerDisconnectedAt == nil
+        else { return }
+        race.partnerDisconnectedAt = Date()
+        try? race.modelContext?.save()
     }
     #endif
 
@@ -307,6 +362,22 @@ struct RaceView: View {
     private var inProgressView: some View {
         TimelineView(.periodic(from: .now, by: 0.05)) { context in
             VStack(spacing: 0) {
+                #if canImport(MultipeerConnectivity)
+                // Duo connection chip — only when a duo race is
+                // active on the host side. Mirrors the guest's
+                // connectionBanner so both partners see the same
+                // "Duo · with Sarah" / "Disconnected" status at a
+                // glance. Sits above the header row so it gets a
+                // dedicated line — the header is already packed
+                // with splits / station / pace / HR / pause /
+                // cancel.
+                if let controller = duoController, controller.role == .host {
+                    duoConnectionChip(controller: controller)
+                        .padding(.top, 6)
+                        .padding(.bottom, 2)
+                }
+                #endif
+
                 HStack(spacing: 10) {
                     splitsChipButton
                     Text("Station \(viewModel.completedSegmentsCount + 1) of \(viewModel.totalSegments)")
@@ -322,6 +393,14 @@ struct RaceView: View {
                     // cancel button so the four header controls read
                     // as "status · pace · HR · cancel" left to right.
                     liveHeartRateChip
+                    #if canImport(MultipeerConnectivity)
+                    // Partner's HR during a duo race. Sits next to
+                    // the local HR chip so a glance reads "us
+                    // (165) — them (172)". Only renders when a
+                    // duo is active and the partner has streamed a
+                    // sample at least once.
+                    partnerHeartRateChip
+                    #endif
                     pauseResumeButton
                     cancelButton
                 }
@@ -598,6 +677,75 @@ struct RaceView: View {
     private var maxHeartRate: Int {
         profiles.first?.maxHeartRate ?? 190
     }
+
+    #if canImport(MultipeerConnectivity)
+    // Partner's HR readout — visible only during an active duo
+    // race when the partner has actually streamed at least one
+    // sample. Tighter / dimmer styling than the local chip so a
+    // glance hierarchy reads "this is yours, that is theirs."
+    // Same heart icon + bpm but with the partner's name as a
+    // tracking-tight prefix ("Sarah · 172") to disambiguate.
+    @ViewBuilder
+    private var partnerHeartRateChip: some View {
+        if let controller = duoController,
+           let bpm = controller.partnerHeartRateBPM {
+            HStack(spacing: 4) {
+                Image(systemName: "heart")
+                    .font(.system(size: 10, weight: .semibold))
+                Text("\(Int(bpm.rounded()))")
+                    .font(.caption2.weight(.bold))
+                    .monospacedDigit()
+            }
+            .foregroundStyle(Color.accentDim)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule().fill(Color.surface)
+            )
+            .accessibilityLabel("Partner heart rate \(Int(bpm.rounded())) beats per minute")
+        }
+    }
+    #endif
+
+    #if canImport(MultipeerConnectivity)
+    // Status banner shown above the in-race header when a duo
+    // race is active. Mirrors `DuoGuestRaceView.connectionBanner`
+    // shape and tinting so both partners see the same chip
+    // structure — coral when paired, amber-warning if the link
+    // drops mid-race.
+    //
+    // Centered horizontally so it reads as a status anchor for
+    // the screen rather than competing with the per-station
+    // header below.
+    @ViewBuilder
+    private func duoConnectionChip(controller: DuoRaceController) -> some View {
+        HStack {
+            Spacer()
+            HStack(spacing: 6) {
+                Image(systemName: controller.isConnected
+                      ? "person.2.fill"
+                      : "exclamationmark.triangle.fill")
+                    .font(.caption2.weight(.heavy))
+                Text(controller.isConnected
+                     ? "Duo · \(controller.partnerName ?? "partner")"
+                     : "Disconnected")
+                    .font(.caption2.weight(.heavy))
+                    .tracking(0.8)
+                    .textCase(.uppercase)
+            }
+            .foregroundStyle(controller.isConnected ? Color.accent : Color.warning)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(
+                Capsule().fill(
+                    (controller.isConnected ? Color.accent : Color.warning)
+                        .opacity(0.12)
+                )
+            )
+            Spacer()
+        }
+    }
+    #endif
 
     // Full-screen pre-race countdown overlay. Massive number,
     // animated transition between values, tap anywhere to skip.

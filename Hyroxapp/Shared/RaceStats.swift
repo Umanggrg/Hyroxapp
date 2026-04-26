@@ -132,6 +132,51 @@ enum RaceStats {
         return split.duration * ratio
     }
 
+    // MARK: - Effort score (HR-time integration)
+    //
+    // A single interpretable number for "how hard was this race."
+    // Formula per split with avg HR data:
+    //
+    //     segmentScore = (avgHR / maxHR) × (duration / 60)
+    //
+    // Then sum across splits. Reads as "intensity-weighted minutes"
+    // — a 90-minute race at 80% avg HR scores ~72; a 60-minute race
+    // at 95% scores ~57. Higher is harder.
+    //
+    // Returns nil when:
+    //   • the race has no splits with HR data, OR
+    //   • maxHR <= 0 (defensive — caller should pass profile.maxHeartRate)
+    //
+    // Splits without HR are silently skipped — counting them with
+    // zero would underweight a race where HR fell out mid-way (e.g.
+    // Watch slipped). Better to score what we measured.
+    static func effortScore(for race: Race, maxHR: Int) -> Double? {
+        guard maxHR > 0 else { return nil }
+        let maxHRDouble = Double(maxHR)
+
+        let scored = race.splits.compactMap { split -> Double? in
+            guard let avg = split.heartRateAvgBPM, avg > 0 else { return nil }
+            let intensity = avg / maxHRDouble
+            let minutes = split.duration / 60
+            return intensity * minutes
+        }
+
+        guard !scored.isEmpty else { return nil }
+        return scored.reduce(0, +)
+    }
+
+    // Cross-race average effort score — useful for Profile-level
+    // "your typical effort level" callouts. Pass finished races
+    // only; in-progress races get a partial score that would skew
+    // the average.
+    static func averageEffortScore(across races: [Race], maxHR: Int) -> Double? {
+        let scores = races
+            .filter(\.isFinished)
+            .compactMap { effortScore(for: $0, maxHR: maxHR) }
+        guard !scores.isEmpty else { return nil }
+        return scores.reduce(0, +) / Double(scores.count)
+    }
+
     // MARK: - Cross-race aggregates (for Profile) — phone only
 
     // Fastest total race time across the provided races (nil if none).

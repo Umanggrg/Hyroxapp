@@ -34,6 +34,13 @@ struct ContentView: View {
 
     @State private var isShowingOnboarding = false
 
+    // Drives the What's New sheet — true when the launching version
+    // differs from `UserProfile.lastSeenWhatsNewVersion`. Set in
+    // `bootstrap()` after the profile loads; cleared on dismiss
+    // when we also write the version back so the sheet doesn't
+    // re-appear until the next bump.
+    @State private var isShowingWhatsNew = false
+
     // Tracks the currently-selected tab. Quick Actions swap this
     // binding programmatically — tap "View History" on a long-
     // press → app launches → tab flips to .history without the
@@ -123,6 +130,31 @@ struct ContentView: View {
                     .preferredColorScheme(profile.resolvedThemePreference.colorScheme)
             }
         }
+        // What's New sheet — fires once per version bump for
+        // existing users. Dismissing writes the current marketing
+        // version back so it doesn't re-appear until the next
+        // bump.
+        .sheet(
+            isPresented: $isShowingWhatsNew,
+            onDismiss: markWhatsNewSeen
+        ) {
+            if let profile = profiles.first {
+                WhatsNewView()
+                    .preferredColorScheme(profile.resolvedThemePreference.colorScheme)
+            } else {
+                WhatsNewView()
+            }
+        }
+    }
+
+    // Records that the current marketing version's What's New has
+    // been seen, so the sheet doesn't re-appear on the next launch.
+    // Called from the sheet's `onDismiss`. No-op if the profile
+    // doesn't exist (shouldn't happen — bootstrap ensures one).
+    private func markWhatsNewSeen() {
+        guard let profile = profiles.first else { return }
+        profile.lastSeenWhatsNewVersion = WhatsNewView.currentMarketingVersion
+        try? modelContext.save()
     }
 
     // First-launch setup: ensure templates exist, ensure a UserProfile
@@ -165,6 +197,23 @@ struct ContentView: View {
         // nor a completed wizard) → show the wizard.
         if !profile.hasCompletedOnboarding {
             isShowingOnboarding = true
+        } else {
+            // Existing users see the What's New sheet once per
+            // version bump. Skip the sheet for first-time users
+            // (their onboarding wizard already covers the intro);
+            // we mark the current version as seen for them so
+            // they're never surprised by it later either.
+            let current = WhatsNewView.currentMarketingVersion
+            if profile.lastSeenWhatsNewVersion != current {
+                isShowingWhatsNew = true
+            }
+        }
+
+        // Brand-new users skip the sheet but we still record the
+        // version so they don't get the post-onboarding pop later.
+        if !profile.hasCompletedOnboarding {
+            profile.lastSeenWhatsNewVersion = WhatsNewView.currentMarketingVersion
+            try? modelContext.save()
         }
     }
 

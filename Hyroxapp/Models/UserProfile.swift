@@ -139,6 +139,33 @@ final class UserProfile {
         set { themePreferenceRaw = newValue.rawValue }
     }
 
+    // The marketing version (CFBundleShortVersionString) the user
+    // last saw the What's New sheet for. Drives the per-version
+    // gating: ContentView shows the sheet on first launch after
+    // the app's version bumps past whatever's stored here. After
+    // dismiss, ContentView writes the current version back so the
+    // sheet doesn't re-appear until the next bump.
+    //
+    // Optional + nil default keeps SwiftData migration safe for
+    // existing rows. Existing users see the sheet exactly once on
+    // their first launch after this field ships.
+    var lastSeenWhatsNewVersion: String?
+
+    // When on, the run segments (run1..run8) wait for an explicit
+    // "Start Run" tap before their segment timer begins —
+    // mirrors the way Strava lets you stage a run before pressing
+    // Go. Lets the athlete pre-position at the start line, take
+    // a breath, then deliberately start running.
+    //
+    // Off by default — most athletes are happy with the
+    // continuous-tap-advance flow. Turning it on opt-in via
+    // Settings → Race ritual.
+    //
+    // The in-race UI for this slice ships in a follow-up; this
+    // field is added now so the setting persists and the
+    // forthcoming UI has something to bind to.
+    var manualRunStartEnabled: Bool = false
+
     var createdAt: Date
     var updatedAt: Date
 

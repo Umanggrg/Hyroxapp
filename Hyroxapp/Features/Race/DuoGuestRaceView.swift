@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 #if canImport(MultipeerConnectivity)
 
@@ -27,6 +28,14 @@ struct DuoGuestRaceView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.modelContext) private var modelContext
+
+    // True after we've saved a local Race row for this duo race.
+    // Latches so we don't insert duplicates if the host re-emits
+    // a .finished snapshot (broadcast hooks fire on every state
+    // mutation; .finished is terminal but the host could emit
+    // post-finish snapshots if the engine state changes again).
+    @State private var didSaveGuestRace = false
 
     var body: some View {
         ZStack {
@@ -45,6 +54,79 @@ struct DuoGuestRaceView: View {
             }
         }
         .navigationBarBackButtonHidden(true)
+        // When the host's race finishes, the snapshot's phase flips
+        // to .finished. We save a local Race row at that moment so
+        // the guest's History reflects this duo race independently
+        // of the host's. HYROX Doubles credits identical times to
+        // both partners — same convention the live race UI uses.
+        .onChange(of: controller.latestSnapshot?.phase) { _, newPhase in
+            if newPhase == .finished, !didSaveGuestRace {
+                saveGuestRaceIfPossible()
+            }
+        }
+        // Guest also polls HealthKit for its own HR and broadcasts
+        // each sample to the host via `localHeartRate`. Host stores
+        // the value as `partnerHeartRateBPM` and shows it as a
+        // second chip in its in-race header. Cleaned up on
+        // disappear so polling doesn't outlive the race.
+        .onAppear {
+            controller.startHeartRatePollingIfGuest()
+        }
+        .onDisappear {
+            controller.stopHeartRatePolling()
+        }
+    }
+
+    // MARK: - Guest history persistence
+
+    // Build a `Race` row from the host's broadcast `.finished`
+    // snapshot and insert it into local SwiftData. Idempotent via
+    // the `didSaveGuestRace` latch — broadcasts may re-emit the
+    // same .finished state but only the first attempts a save.
+    //
+    // The reconstructed race uses:
+    //   • mode = .duo
+    //   • partner = host's display name
+    //   • startedAt / endedAt from snapshot timestamps
+    //   • sequence derived from the splits (in order)
+    //   • splits round-tripped via SerializedSplit.toSplit()
+    //   • name = "" (default), notes = "" — guest can edit later
+    //
+    // Failures (no snapshot, no end time, no splits) skip silently
+    // and leave the latch unflipped, so a transient bad payload
+    // can be retried on the next snapshot. Real failure modes are
+    // rare; this is defensive.
+    private func saveGuestRaceIfPossible() {
+        guard let snapshot = controller.latestSnapshot,
+              snapshot.phase == .finished,
+              let startedAt = snapshot.startedAt,
+              let endedAt = snapshot.endedAt
+        else { return }
+
+        // Reconstruct real Splits from the wire form. Filter nils
+        // (unknown station rawValue from a forward-compat host).
+        let splits = snapshot.splits.compactMap { $0.toSplit() }
+        guard !splits.isEmpty else { return }
+
+        // Derive the race sequence from the splits — preserves
+        // custom-workout sequences automatically without needing
+        // to ship the raw sequence array separately. For a standard
+        // 16-station HYROX race this matches Station.raceSequence;
+        // for a custom workout it's whatever the host built.
+        let sequence = splits.map(\.station)
+
+        let race = Race(
+            startedAt: startedAt,
+            endedAt: endedAt,
+            splits: splits,
+            sequence: sequence,
+            mode: .duo,
+            partner: controller.partnerName
+        )
+        modelContext.insert(race)
+        try? modelContext.save()
+
+        didSaveGuestRace = true
     }
 
     // MARK: - Branches
@@ -123,7 +205,7 @@ struct DuoGuestRaceView: View {
         let total = snapshot.startedAt.map { now.timeIntervalSince($0) } ?? 0
         let segment = snapshot.currentSegmentStartedAt.map { now.timeIntervalSince($0) } ?? 0
 
-        return VStack(spacing: 4) {
+        return VStack(spacing: 6) {
             Text(RaceStats.format(total))
                 .font(.raceTimer)
                 .monospacedDigit()
@@ -136,10 +218,31 @@ struct DuoGuestRaceView: View {
                     y: 0
                 )
 
-            Text("Segment · \(RaceStats.format(segment))")
-                .font(.callout.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(Color.textSecondary)
+            HStack(spacing: 16) {
+                Text("Segment · \(RaceStats.format(segment))")
+                    .font(.callout.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.textSecondary)
+
+                // Live HR from the host. Beats next to the segment
+                // timer so the eye reads "this is what's happening
+                // right now." Stays consistent with the iOS host's
+                // own HR chip so both partners see the same data
+                // shape.
+                if let hr = snapshot.currentHeartRateBPM {
+                    HStack(spacing: 4) {
+                        Image(systemName: "heart.fill")
+                            .font(.caption.weight(.heavy))
+                        Text("\(Int(hr.rounded()))")
+                            .font(.callout.weight(.heavy))
+                            .monospacedDigit()
+                        Text("bpm")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(Color.textTertiary)
+                    }
+                    .foregroundStyle(Color.accent)
+                }
+            }
         }
     }
 

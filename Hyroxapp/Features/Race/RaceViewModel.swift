@@ -209,6 +209,11 @@ final class RaceViewModel {
             stationIndex = max(0, totalSegments - 1)
         }
 
+        // Serialize the engine's current splits so the duo guest
+        // can reconstruct a Race row when the race finishes.
+        // Watch path doesn't read this; only the duo bridge does.
+        let serializedSplits = engine.splits.map(SerializedSplit.init(from:))
+
         return RaceStateSnapshot(
             phase: phase,
             startedAt: startedAt,
@@ -218,7 +223,9 @@ final class RaceViewModel {
             totalStations: totalSegments,
             divisionRaw: division.rawValue,
             endedAt: endedAt,
-            pausedAt: pausedAt
+            pausedAt: pausedAt,
+            splits: serializedSplits,
+            currentHeartRateBPM: currentHeartRateBPM
         )
     }
 

@@ -241,6 +241,7 @@ final class DuoSession: NSObject {
         case .requestCancel: return "requestCancel"
         case .stateUpdate(let s): return "stateUpdate(\(s.phase.rawValue))"
         case .disconnect: return "disconnect"
+        case .localHeartRate(let bpm): return "localHeartRate(\(bpm.map { Int($0) } ?? 0))"
         }
     }
 }

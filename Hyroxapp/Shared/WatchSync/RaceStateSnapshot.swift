@@ -66,6 +66,33 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
     // `nil` for every other phase.
     let pausedAt: Date?
 
+    // Full per-segment timing data carried with the snapshot.
+    // Used by the duo bridge — when the host's race finishes,
+    // the guest reconstructs a local `Race` row from these splits
+    // so the duo race appears in BOTH partners' Histories
+    // independently (HYROX Doubles convention).
+    //
+    // Watch path doesn't use these — the watch only renders
+    // station-counter / total-time / current-station-name from
+    // the snapshot, no per-split detail. The dictionary
+    // serialization below intentionally omits this field; it
+    // ships only on the Codable path (Multipeer JSON). Default
+    // `[]` keeps existing call sites compiling without explicit
+    // splits — they're new with Duo Tier 1.
+    let splits: [SerializedSplit]
+
+    // Latest heart rate sample, in bpm. iOS host polls HealthKit
+    // every ~5s during an active race; the polled value lives on
+    // `RaceViewModel.currentHeartRateBPM` and gets included here
+    // on each snapshot. Watch + duo guest both display this as a
+    // small chip near the timer.
+    //
+    // `nil` outside an active race, before the first sample
+    // arrives, or when HealthKit isn't authorized. Receivers
+    // render a placeholder ("—") in those cases instead of
+    // hiding the chip — the absence of HR is itself information.
+    let currentHeartRateBPM: Double?
+
     // 0-based index into `Station.raceSequence`. The watch resolves this
     // to a `Station` case and uses `station.displayName` /
     // `station.target(for: division)` for the header + subtitle.
@@ -102,7 +129,9 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         totalStations: Int,
         divisionRaw: String,
         endedAt: Date?,
-        pausedAt: Date? = nil
+        pausedAt: Date? = nil,
+        splits: [SerializedSplit] = [],
+        currentHeartRateBPM: Double? = nil
     ) {
         self.phase = phase
         self.startedAt = startedAt
@@ -113,6 +142,8 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         self.divisionRaw = divisionRaw
         self.endedAt = endedAt
         self.pausedAt = pausedAt
+        self.splits = splits
+        self.currentHeartRateBPM = currentHeartRateBPM
     }
 
     // MARK: - Dictionary encoding (WCSession transport)
@@ -130,6 +161,7 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         static let divisionRaw = "divisionRaw"
         static let endedAt = "endedAt"
         static let pausedAt = "pausedAt"
+        static let currentHeartRateBPM = "currentHeartRateBPM"
     }
 
     // Build a plist-compatible dictionary suitable for
@@ -155,6 +187,9 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         }
         if let pausedAt {
             dict[Key.pausedAt] = pausedAt.timeIntervalSince1970
+        }
+        if let currentHeartRateBPM {
+            dict[Key.currentHeartRateBPM] = currentHeartRateBPM
         }
         return dict
     }
@@ -206,17 +241,31 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         } else {
             self.pausedAt = nil
         }
+
+        self.currentHeartRateBPM = dictionary[Key.currentHeartRateBPM] as? Double
+
+        // Splits aren't carried over the WCSession dictionary path.
+        // The watch doesn't render per-split detail; the duo/Codable
+        // path is the only consumer of `splits`. Initialize empty
+        // here so receivers don't see junk data.
+        self.splits = []
     }
 
     // MARK: - Convenience derived values
 
-    // Resolve the snapshot's current station back to the shared `Station`
-    // enum. Returns `nil` for out-of-range indices (shouldn't happen from
-    // a healthy sender, but defensive on the watch side).
+    // Resolve the snapshot's current station back to the shared
+    // `Station` enum. `currentStationIndex` is the station's enum
+    // rawValue (set on the publishing side from
+    // `viewModel.currentStation?.rawValue`), so the correct lookup
+    // is `Station(rawValue:)`, NOT indexing into
+    // `Station.raceSequence`. The old indexing version happened to
+    // work for the canonical 16-station race because
+    // `Station.raceSequence` is in rawValue order — but it returned
+    // wrong stations for any custom workout where the sequence
+    // indices don't match rawValues. This is the bridge's view of
+    // the snapshot for both the watch and the duo guest.
     var currentStation: Station? {
-        Station.raceSequence.indices.contains(currentStationIndex)
-            ? Station.raceSequence[currentStationIndex]
-            : nil
+        Station(rawValue: currentStationIndex)
     }
 
     // Resolve the division raw string back to the enum. Falls back to

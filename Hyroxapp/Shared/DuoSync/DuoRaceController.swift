@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import SwiftData
 
 #if canImport(MultipeerConnectivity)
 
@@ -46,6 +47,33 @@ final class DuoRaceController {
     // until the first snapshot arrives. Guest views read this and
     // re-render on assignment (via @Observable).
     private(set) var latestSnapshot: RaceStateSnapshot?
+
+    // Partner's latest heart rate, in bpm. Updated when the
+    // partner's `localHeartRate` message arrives. Host displays
+    // this alongside its own HR; guest displays this if it ever
+    // wants to (today the guest reads host HR from
+    // `latestSnapshot.currentHeartRateBPM` instead).
+    //
+    // Nil before the first sample, or when the partner has no
+    // HealthKit authorization / no Watch streaming.
+    private(set) var partnerHeartRateBPM: Double?
+
+    // Local user's HR — populated by the guest's own HealthKit
+    // polling and broadcast to the host. Host doesn't poll
+    // through the controller (its RaceViewModel already polls
+    // and writes to `currentHeartRateBPM`); this property is
+    // primarily a guest-side cursor.
+    private(set) var localHeartRateBPM: Double?
+
+    // Polling task for the guest's own HR. Runs while the guest
+    // is in an active duo race; cancelled on disconnect or view
+    // disappear via `stopHeartRatePolling`.
+    private var heartRatePollTask: Task<Void, Never>?
+
+    // Same poll interval RaceViewModel uses on iOS. Five seconds
+    // matches the cadence Apple Watch typically writes HR samples
+    // to HealthKit in workout mode.
+    private static let heartRatePollInterval: TimeInterval = 5
 
     // Surfaced to the UI so banners can render "Connected to X" and
     // gracefully degrade on disconnect.
@@ -167,6 +195,26 @@ final class DuoRaceController {
         // where one race = one ruleset.
         guard let snapshot = vm.makeRaceStateSnapshot(division: coordinator.localDivision) else { return }
         coordinator.broadcastState(snapshot)
+
+        // When the host's race is now .finished, stamp the
+        // partner's display name onto the active Race row so it
+        // shows up in History as "Duo with Sarah" instead of a
+        // generic title. Idempotent — `race.partner == nil` guard
+        // means subsequent .finished broadcasts skip the assign.
+        //
+        // The cascade RaceView.onChange → publishWatchState +
+        // broadcast already fires after `engine.advance()`'s
+        // saveContextSilently call. We modify the SwiftData
+        // object AFTER that save, so we trigger one more save
+        // here through the model's own context to persist the
+        // partner field.
+        if snapshot.phase == .finished,
+           let partner = coordinator.session.partnerName,
+           let race = vm.activeRace,
+           race.partner == nil {
+            race.partner = partner
+            try? race.modelContext?.save()
+        }
     }
 
     // MARK: - Inbound (from partner)
@@ -178,6 +226,47 @@ final class DuoRaceController {
         case .guest:
             handleGuestInbound(message)
         }
+    }
+
+    // MARK: - Guest HR polling
+
+    // Start polling HealthKit for the guest's own HR and broadcast
+    // each new sample to the host via `localHeartRate`. No-op on
+    // the host side — the host already polls through RaceViewModel
+    // and ships HR via the snapshot's `currentHeartRateBPM`.
+    //
+    // Caller (DuoGuestRaceView's onAppear) is responsible for the
+    // pairing with `stopHeartRatePolling()` on disappear so we
+    // don't leak the task or burn battery between races.
+    func startHeartRatePollingIfGuest() {
+        #if canImport(HealthKit)
+        guard role == .guest else { return }
+        stopHeartRatePolling()
+
+        heartRatePollTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                if let bpm = await HealthKitService.shared.currentHeartRate() {
+                    self.localHeartRateBPM = bpm
+                    self.coordinator.session.send(.localHeartRate(bpm: bpm))
+                }
+                try? await Task.sleep(for: .seconds(Self.heartRatePollInterval))
+            }
+        }
+        #endif
+    }
+
+    // Stop the guest's HR polling and clear local state. Sends one
+    // final `localHeartRate(nil)` so the host UI clears its
+    // partner-HR chip rather than displaying a stale last-known
+    // value indefinitely.
+    func stopHeartRatePolling() {
+        heartRatePollTask?.cancel()
+        heartRatePollTask = nil
+        if role == .guest, localHeartRateBPM != nil {
+            coordinator.session.send(.localHeartRate(bpm: nil))
+        }
+        localHeartRateBPM = nil
     }
 
     // Host receives guest requests and forwards them to RaceViewModel
@@ -232,6 +321,12 @@ final class DuoRaceController {
             // choose.
             print("[DuoRaceController] guest requested cancel — surfaces as 'partner left' on host")
 
+        case .localHeartRate(let bpm):
+            // Guest's own HR sample. Host stores it as
+            // partnerHeartRateBPM; the in-race UI surfaces it as
+            // a second HR chip alongside the host's own.
+            partnerHeartRateBPM = bpm
+
         case .stateUpdate, .hello, .disconnect:
             // Host shouldn't receive these — guest never sends
             // stateUpdate, hello is handled in DuoSession,
@@ -246,6 +341,13 @@ final class DuoRaceController {
         switch message {
         case .stateUpdate(let snapshot):
             self.latestSnapshot = snapshot
+
+        case .localHeartRate(let bpm):
+            // Host shouldn't typically send this — its HR rides on
+            // snapshot.currentHeartRateBPM — but if it does, we
+            // honor it. Lets the same path serve both directions
+            // symmetrically without a second message type.
+            partnerHeartRateBPM = bpm
 
         case .requestStart, .requestAdvance, .requestEndSegment,
              .requestStartNextSegment, .requestPause, .requestResume,

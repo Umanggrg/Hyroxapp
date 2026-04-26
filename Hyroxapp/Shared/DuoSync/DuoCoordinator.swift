@@ -190,7 +190,7 @@ final class DuoCoordinator {
 
         case .requestStart, .requestAdvance, .requestEndSegment,
              .requestStartNextSegment, .requestPause, .requestResume,
-             .requestFinish, .requestCancel, .stateUpdate:
+             .requestFinish, .requestCancel, .stateUpdate, .localHeartRate:
             // Forward to the in-race coordinator if one's hooked up.
             // Pre-race these are dropped silently.
             onRaceMessage?(message)

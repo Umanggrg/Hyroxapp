@@ -63,6 +63,7 @@
 				Models/Division.swift,
 				Models/Split.swift,
 				Models/Station.swift,
+				Shared/DuoSync/SerializedSplit.swift,
 				Shared/Haptics.swift,
 				Shared/RaceStats.swift,
 				Shared/Theme.swift,

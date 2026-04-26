@@ -117,6 +117,30 @@ final class Race {
     // doesn't lose the transition time.
     var pendingRoxzoneSeconds: TimeInterval?
 
+    // Display name of the partner this race was run with, when
+    // mode == .duo. Always nil for solo races. Used by History +
+    // RaceCardView to render "Duo with Sarah" instead of the
+    // generic race title. Set by the host after duo race finish
+    // (from `coordinator.session.partnerName`); set by the guest
+    // when reconstructing a Race row from a host's broadcast
+    // .finished snapshot.
+    //
+    // Migration-safe additive optional — pre-existing rows
+    // decode cleanly with nil. Same SwiftData pattern as
+    // `notes` / `name` / `pausedAt`.
+    var partner: String?
+
+    // Set when the duo session dropped during an active race —
+    // the moment the link broke (Bluetooth out of range, partner
+    // killed the app, etc.). The surviving phone keeps timing
+    // solo from that point and the eventual saved race carries
+    // this annotation so History can render a small "partner left
+    // at MM:SS" note.
+    //
+    // `nil` when the race finished cleanly with both partners
+    // connected, or when the race wasn't a duo at all.
+    var partnerDisconnectedAt: Date?
+
     init(
         id: UUID = UUID(),
         startedAt: Date,
@@ -130,7 +154,9 @@ final class Race {
         targetDuration: TimeInterval? = nil,
         name: String = "",
         pausedAt: Date? = nil,
-        photoData: Data? = nil
+        photoData: Data? = nil,
+        partner: String? = nil,
+        partnerDisconnectedAt: Date? = nil
     ) {
         self.id = id
         self.startedAt = startedAt
@@ -145,6 +171,8 @@ final class Race {
         self.name = name
         self.pausedAt = pausedAt
         self.photoData = photoData
+        self.partner = partner
+        self.partnerDisconnectedAt = partnerDisconnectedAt
     }
 
     // MARK: - Derived

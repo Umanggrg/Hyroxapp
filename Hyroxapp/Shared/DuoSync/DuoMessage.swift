@@ -68,6 +68,22 @@ enum DuoMessage: Codable, Sendable, Equatable {
     // friendlier in the deliberate case.
     case disconnect
 
+    // Sender's own latest heart rate sample, in bpm. The receiver
+    // stores this as `partnerHeartRateBPM` and surfaces it as a
+    // second HR chip on the in-race screen.
+    //
+    // Why a separate message instead of riding `stateUpdate`?
+    // `stateUpdate` flows host→guest only. HR needs to flow both
+    // ways (host already ships its HR via snapshot.currentHR; this
+    // gives the guest a way to reciprocate). One symmetric message
+    // is simpler than embedding it in two different message
+    // shapes.
+    //
+    // Optional payload — `nil` means "I have no current sample
+    // (HealthKit not authorized, no Watch streaming, polling
+    // hasn't returned yet)." Receivers render a "—" placeholder.
+    case localHeartRate(bpm: Double?)
+
     // MARK: - Encoding
 
     // JSON over Multipeer. Encoding errors are unrecoverable here

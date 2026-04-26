@@ -94,20 +94,31 @@ struct RaceCardView: View {
             // when a custom name exists so the kind indicator
             // ("HYROX RACE" caps) stays visible — same pattern
             // Strava uses for activities with a custom title.
+            //
+            // Duo races also surface the partner's name as a
+            // sub-line ("Duo · with Sarah"), so a duo entry in
+            // History reads as a shared moment rather than a
+            // generic race.
             VStack(alignment: .leading, spacing: 2) {
                 if !race.name.isEmpty {
-                    Text("HYROX RACE")
+                    Text(race.mode == .duo ? "DUO RACE" : "HYROX RACE")
                         .font(.caption2.weight(.bold))
                         .tracking(0.6)
-                        .foregroundStyle(Color.textTertiary)
+                        .foregroundStyle(race.mode == .duo ? Color.accent : Color.textTertiary)
                     Text(race.name)
                         .font(.cardTitle)
                         .foregroundStyle(Color.textPrimary)
                         .lineLimit(2)
+                    if race.mode == .duo, let partner = race.partner, !partner.isEmpty {
+                        partnerLine(partner: partner)
+                    }
                 } else {
-                    Text("HYROX Race")
+                    Text(race.mode == .duo ? "Duo Race" : "HYROX Race")
                         .font(.cardTitle)
                         .foregroundStyle(Color.textPrimary)
+                    if race.mode == .duo, let partner = race.partner, !partner.isEmpty {
+                        partnerLine(partner: partner)
+                    }
                 }
             }
             Spacer()
@@ -115,6 +126,39 @@ struct RaceCardView: View {
                 .font(.metadata)
                 .foregroundStyle(Color.textSecondary)
         }
+    }
+
+    // "with Sarah" sub-line for duo races, plus an optional
+    // "· left at MM:SS" annotation when the partner dropped
+    // mid-race. Single helper so both branches of the title
+    // block (named race / unnamed race) render the same shape.
+    @ViewBuilder
+    private func partnerLine(partner: String) -> some View {
+        if let leftAt = race.partnerDisconnectedAt,
+           let elapsed = partnerLeftElapsed(at: leftAt) {
+            HStack(spacing: 4) {
+                Text("with \(partner)")
+                    .foregroundStyle(Color.textSecondary)
+                Text("· left at \(RaceStats.format(elapsed))")
+                    .foregroundStyle(Color.warning)
+                    .monospacedDigit()
+            }
+            .font(.caption.weight(.semibold))
+        } else {
+            Text("with \(partner)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.textSecondary)
+        }
+    }
+
+    // Convert the absolute disconnect timestamp to "race-relative"
+    // elapsed time. nil when the race had no startedAt or the
+    // disconnect was logged before the start (shouldn't happen,
+    // defensive). Used by partnerLine to render the "left at MM:SS"
+    // annotation in race-time terms rather than wall-clock.
+    private func partnerLeftElapsed(at disconnect: Date) -> TimeInterval? {
+        let elapsed = disconnect.timeIntervalSince(race.startedAt)
+        return elapsed >= 0 ? elapsed : nil
     }
 
     private var hero: some View {

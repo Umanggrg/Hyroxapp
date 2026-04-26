@@ -242,6 +242,17 @@ struct RaceDetailView: View {
                     .foregroundStyle(Color.warning)
             }
 
+            // Effort score — HR-time integration showing "how
+            // hard" this race was. Same line treatment as the
+            // roxzone summary above; both are post-race body-load
+            // readouts (discipline + intensity respectively).
+            if let effort = RaceStats.effortScore(for: race, maxHR: maxHeartRate) {
+                Text("Effort \(Int(effort.rounded())) · HR-time")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.accent)
+            }
+
             // Target outcome readout — only shown if a target
             // was set on this race. Tucks into the hero so the
             // success/over-target framing reads as part of the

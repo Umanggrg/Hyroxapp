@@ -32,6 +32,13 @@ struct RaceSummaryView: View {
     // time. Same scaling logic as the in-race CTAs.
     @Environment(\.colorScheme) private var colorScheme
 
+    // Athlete's configured max HR. Drives the effort-score
+    // computation surfaced under the time hero. Defaults to 190
+    // if no profile bootstrapped yet (defensive).
+    private var maxHeartRate: Int {
+        profiles.first?.maxHeartRate ?? 190
+    }
+
     // Cached renders of the share card — one per format. ImageRenderer
     // is non-trivial (lays out + rasterizes a SwiftUI view), so we
     // generate each once in `.onAppear` and reuse them for the
@@ -95,6 +102,20 @@ struct RaceSummaryView: View {
                                 .font(.caption.weight(.semibold))
                                 .monospacedDigit()
                                 .foregroundStyle(Color.warning)
+                        }
+
+                        // Effort score — HR-time integration
+                        // showing "how hard" this race was as an
+                        // interpretable single number. Sits next
+                        // to the roxzone line because both are
+                        // post-race body-load summaries: roxzone
+                        // is "discipline," effort is "intensity."
+                        if let race = viewModel.activeRace,
+                           let effort = RaceStats.effortScore(for: race, maxHR: maxHeartRate) {
+                            Text("Effort \(Int(effort.rounded())) · HR-time")
+                                .font(.caption.weight(.semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(Color.accent)
                         }
 
                     // Target outcome — only shown if the athlete set a

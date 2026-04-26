@@ -187,6 +187,14 @@ struct SettingsView: View {
                 "Splits the in-race advance into two taps — End Station then Start Next — so transition time gets logged separately from work time. The HYROX-specific metric athletes use for transition discipline."
             )
             .listRowBackground(Color.surface)
+
+            Toggle("Manual run start", isOn: $profile.manualRunStartEnabled)
+                .listRowBackground(Color.surface)
+
+            footnote(
+                "Run segments wait for a 'Start Run' tap before timing begins — gives you a beat to pre-position at the start line. The race total clock keeps ticking through."
+            )
+            .listRowBackground(Color.surface)
         } header: {
             Text("Race ritual")
         }

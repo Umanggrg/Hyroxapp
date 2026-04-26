@@ -45,7 +45,7 @@ enum InsightGenerator {
 
     // MARK: - Public
 
-    static func generate(for race: Race, allRaces: [Race]) -> [RaceInsight] {
+    static func generate(for race: Race, allRaces: [Race], maxHR: Int? = nil) -> [RaceInsight] {
         var out: [RaceInsight] = []
 
         if let pbInsight = pbCountInsight(for: race, allRaces: allRaces) {
@@ -68,6 +68,14 @@ enum InsightGenerator {
         }
         if let fatigueInsight = runFatigueInsight(for: race) {
             out.append(fatigueInsight)
+        }
+        // Effort insight needs maxHR to compute scores; when the
+        // caller doesn't have it, the insight is skipped silently.
+        // All current call sites have a UserProfile and pass
+        // maxHeartRate, so this branch fires in production.
+        if let maxHR,
+           let effortInsight = effortScoreInsight(for: race, allRaces: allRaces, maxHR: maxHR) {
+            out.append(effortInsight)
         }
 
         return out
@@ -239,5 +247,79 @@ enum InsightGenerator {
             symbol: delta > 0 ? "tortoise.fill" : "hare.fill",
             color: delta > 0 ? .warning : .success
         )
+    }
+
+    // MARK: - Effort score
+    //
+    // Compares this race's effort score against the athlete's
+    // recent average. Three buckets, one fires per race:
+    //
+    //   • >= 1.15 × average → "Highest-effort race in your last N"
+    //     (or just "Big effort day" when no comparison is meaningful)
+    //   • <= 0.75 × average → "Light effort — recovery vibes"
+    //   • Otherwise → no insight (the score line under the hero
+    //     already shows the number)
+    //
+    // First-race-with-HR: just surface the number with neutral
+    // tone — there's nothing to compare against yet.
+    //
+    // Returns nil when the race has no effort score (no HR data),
+    // matching the silence-on-no-data pattern of the other
+    // insights here.
+    private static func effortScoreInsight(
+        for race: Race,
+        allRaces: [Race],
+        maxHR: Int
+    ) -> RaceInsight? {
+        guard let score = RaceStats.effortScore(for: race, maxHR: maxHR) else {
+            return nil
+        }
+
+        // Compare against the athlete's last 10 finished races
+        // EXCLUDING the current race itself. Using a recent
+        // window (vs. all-time) keeps the comparison relevant
+        // — older races may pre-date HR sampling or have noisier
+        // data, and "highest effort ever" is less actionable than
+        // "highest effort lately."
+        let priorScores = allRaces
+            .filter { $0.id != race.id && $0.isFinished }
+            .sorted { $0.createdAt > $1.createdAt }
+            .prefix(10)
+            .compactMap { RaceStats.effortScore(for: $0, maxHR: maxHR) }
+
+        // No prior comparable data — surface the score itself
+        // with a neutral framing so the athlete sees we computed
+        // it without forcing a high/low judgment.
+        guard !priorScores.isEmpty else {
+            return RaceInsight(
+                text: "Effort score \(Int(score.rounded())) — your first HR-tracked race.",
+                symbol: "bolt.fill",
+                color: .accent
+            )
+        }
+
+        let avg = priorScores.reduce(0, +) / Double(priorScores.count)
+        guard avg > 0 else { return nil }
+
+        let ratio = score / avg
+
+        if ratio >= 1.15 {
+            return RaceInsight(
+                text: "Big effort — \(Int(score.rounded())) effort score, \(Int(((ratio - 1) * 100).rounded()))% above your recent average.",
+                symbol: "bolt.fill",
+                color: .accent
+            )
+        } else if ratio <= 0.75 {
+            return RaceInsight(
+                text: "Light effort — \(Int(score.rounded())) effort score. Solid recovery day.",
+                symbol: "leaf.fill",
+                color: .success
+            )
+        } else {
+            // Within the typical band — no callout. The hero's
+            // "Effort N · HR-time" line already shows the number
+            // for athletes who want it.
+            return nil
+        }
     }
 }

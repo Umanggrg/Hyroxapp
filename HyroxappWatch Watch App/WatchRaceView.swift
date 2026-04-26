@@ -336,7 +336,7 @@ struct WatchRaceView: View {
         let total = snapshot.startedAt.map { now.timeIntervalSince($0) } ?? 0
         let segment = snapshot.currentSegmentStartedAt.map { now.timeIntervalSince($0) } ?? 0
 
-        return VStack(spacing: 1) {
+        return VStack(spacing: 2) {
             Text(RaceStats.format(total))
                 .font(.system(size: 38, weight: .heavy, design: .rounded))
                 .monospacedDigit()
@@ -346,10 +346,29 @@ struct WatchRaceView: View {
                 // smaller viewport.
                 .shadow(color: Color.accent.opacity(0.35), radius: 10, y: 0)
 
-            Text(RaceStats.format(segment))
-                .font(.system(size: 11, weight: .semibold))
-                .monospacedDigit()
-                .foregroundStyle(Color.textSecondary)
+            HStack(spacing: 8) {
+                Text(RaceStats.format(segment))
+                    .font(.system(size: 11, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.textSecondary)
+
+                // HR chip — small heart + bpm digits. Visible only
+                // when the host is publishing HR samples; absent
+                // when HealthKit isn't authorized or no Watch
+                // hardware is feeding samples. We render the chip
+                // on the same line as the segment timer so the
+                // hero block stays compact.
+                if let hr = snapshot.currentHeartRateBPM {
+                    HStack(spacing: 3) {
+                        Image(systemName: "heart.fill")
+                            .font(.system(size: 9, weight: .heavy))
+                        Text("\(Int(hr.rounded()))")
+                            .font(.system(size: 11, weight: .heavy))
+                            .monospacedDigit()
+                    }
+                    .foregroundStyle(Color.accent)
+                }
+            }
         }
     }
 
