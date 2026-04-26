@@ -47,6 +47,13 @@ struct HeroBackdrop: View {
 
     let intensity: Intensity
 
+    // Active color scheme — drives the per-mode opacity scaling
+    // and the fingerprint ink color (white on dark, near-black on
+    // light). Read from the environment rather than passed in so
+    // every consumer of HeroBackdrop adapts automatically when
+    // the user flips Settings → Appearance.
+    @Environment(\.colorScheme) private var colorScheme
+
     init(_ intensity: Intensity = .standard) {
         self.intensity = intensity
     }
@@ -59,24 +66,46 @@ struct HeroBackdrop: View {
             // slightly above geometric center so the visual weight
             // sits where the eye naturally lands on a phone (~40%
             // from top).
+            //
+            // Glow opacity is scaled per mode via
+            // `adaptiveGlowOpacity` — the same coral that reads as
+            // subtle stadium light on near-black would read as a
+            // heavy wash on warm off-white if you didn't dial it
+            // back. Layer's blend mode also flips: screen lifts
+            // dark backgrounds; on light bg we want plus-lighter /
+            // multiply behavior is too muddy, so we use a plain
+            // SourceOver compose and rely on the lower opacity to
+            // keep things subtle.
             RadialGradient(
                 colors: [
-                    Color.accent.opacity(intensity.glowOpacity),
+                    Color.accent.opacity(
+                        adaptiveGlowOpacity(
+                            base: intensity.glowOpacity,
+                            scheme: colorScheme
+                        )
+                    ),
                     Color.clear
                 ],
                 center: UnitPoint(x: 0.5, y: 0.4),
                 startRadius: 0,
                 endRadius: 360
             )
-            .blendMode(.screen)
+            .blendMode(colorScheme == .dark ? .screen : .normal)
 
             // Layer 3: fingerprint watermark, bottom-anchored.
-            // Reads as a subtle floor pattern, not a chart.
+            // Reads as a subtle floor pattern, not a chart. Ink
+            // color flips with the mode so it always reads as
+            // texture against the bg, not as a contrast slap.
             VStack {
                 Spacer()
-                FingerprintWatermark()
+                FingerprintWatermark(ink: Color.fingerprintInk)
                     .frame(height: 90)
-                    .opacity(intensity.fingerprintOpacity)
+                    .opacity(
+                        adaptiveFingerprintOpacity(
+                            base: intensity.fingerprintOpacity,
+                            scheme: colorScheme
+                        )
+                    )
                     .padding(.horizontal, 32)
                     .padding(.bottom, 80)
             }
@@ -90,10 +119,10 @@ struct HeroBackdrop: View {
 // used on the app icon and share-card hero — keeps the brand
 // signature consistent across surfaces.
 //
-// Drawn as a Canvas at runtime rather than a static image so it
-// stays sharp at any size and respects the current foreground
-// style. Caller controls color via tint; default is white so
-// `.opacity(...)` at the call site does the dimming.
+// Drawn as a stack at runtime rather than a static image so it
+// stays sharp at any size. Ink color is caller-controlled — the
+// hero backdrop passes `Color.fingerprintInk` (an adaptive
+// token), share cards pass white, etc.
 struct FingerprintWatermark: View {
 
     // Heights normalized 0.0–1.0, same rhythm as the icon. Even
@@ -102,6 +131,12 @@ struct FingerprintWatermark: View {
         0.55, 0.85, 0.50, 0.95, 0.55, 0.92, 0.60, 0.78,
         0.65, 0.88, 0.65, 0.72, 0.70, 0.82, 0.72, 1.00
     ]
+
+    let ink: Color
+
+    init(ink: Color = .textPrimary) {
+        self.ink = ink
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -114,7 +149,7 @@ struct FingerprintWatermark: View {
             HStack(alignment: .bottom, spacing: gap) {
                 ForEach(0..<n, id: \.self) { i in
                     RoundedRectangle(cornerRadius: barRadius)
-                        .fill(Color.textPrimary)
+                        .fill(ink)
                         .frame(
                             width: barWidth,
                             height: max(geo.size.height * Self.heights[i], 4)

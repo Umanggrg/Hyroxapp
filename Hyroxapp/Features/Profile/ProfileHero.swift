@@ -36,6 +36,11 @@ struct ProfileHero: View {
     let avgDisplay: String
     let streakDays: Int
 
+    // Active mode — drives shadow intensity on the avatar so the
+    // drop shadow stays subtle on warm off-white but reads with
+    // depth on near-black.
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         ZStack {
             // Top half coral wash — bleeds full width via
@@ -62,19 +67,25 @@ struct ProfileHero: View {
     // Top-anchored radial glow that fades into the page. Looks
     // like a stadium spotlight on the avatar without coloring
     // the whole header coral.
+    //
+    // Mode-aware: `.screen` blend mode lifts dark backgrounds
+    // (correct on OLED black) but reads as a heavy wash on warm
+    // off-white. Light mode falls back to `.normal` compose with
+    // the opacity dialed down so it reads as a soft tint, not a
+    // stamp.
     private var backdropLayer: some View {
         GeometryReader { geo in
             ZStack {
                 RadialGradient(
                     colors: [
-                        Color.accent.opacity(0.18),
+                        Color.accent.opacity(colorScheme == .dark ? 0.18 : 0.10),
                         Color.clear
                     ],
                     center: UnitPoint(x: 0.5, y: 0.25),
                     startRadius: 0,
                     endRadius: max(geo.size.width, 320) * 0.7
                 )
-                .blendMode(.screen)
+                .blendMode(colorScheme == .dark ? .screen : .normal)
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
@@ -102,8 +113,24 @@ struct ProfileHero: View {
             Circle()
                 .stroke(Color.accent.opacity(0.55), lineWidth: 2.5)
         )
-        .shadow(color: Color.black.opacity(0.5), radius: 16, x: 0, y: 8)
-        .shadow(color: Color.accent.opacity(0.25), radius: 24, x: 0, y: 0)
+        // Drop shadow tuned per mode — full strength on dark
+        // (the avatar reads as elevated above the background),
+        // dialed back on light bg where harsh black shadow
+        // against warm off-white reads as muddy.
+        .shadow(
+            color: Color.black.opacity(colorScheme == .dark ? 0.5 : 0.16),
+            radius: 16,
+            x: 0,
+            y: 8
+        )
+        // Coral halo around the avatar — same mode-aware scaling
+        // pattern as the rest of the brand spotlights.
+        .shadow(
+            color: Color.accent.opacity(colorScheme == .dark ? 0.25 : 0.14),
+            radius: 24,
+            x: 0,
+            y: 0
+        )
     }
 
     private var initial: String {

@@ -43,6 +43,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                appearanceSection
                 hyroxSection
                 audioCuesSection
                 notificationsSection
@@ -55,7 +56,6 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
@@ -63,10 +63,45 @@ struct SettingsView: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
+        // Honor the user's selection inside this sheet too —
+        // sheets present in their own scene and don't inherit
+        // the host's `.preferredColorScheme`. nil = follow system.
+        .preferredColorScheme(profile.resolvedThemePreference.colorScheme)
     }
 
     // MARK: - Sections
+
+    // Light vs dark vs system mode picker. Same three-way model
+    // iOS Settings → Display & Brightness uses, so the affordance
+    // is familiar. `.system` follows whatever the OS is set to;
+    // the explicit Light / Dark options force one regardless.
+    //
+    // Picker uses a segmented style with iconography matching
+    // each option (iphone / sun / moon) so it reads at-a-glance
+    // without needing to expand a dropdown — three options is
+    // exactly the count where segmented beats a wheel.
+    private var appearanceSection: some View {
+        Section {
+            Picker("Appearance", selection: Binding(
+                get: { profile.resolvedThemePreference },
+                set: { profile.resolvedThemePreference = $0 }
+            )) {
+                ForEach(ThemePreference.allCases) { pref in
+                    Label(pref.displayName, systemImage: pref.systemImage)
+                        .tag(pref)
+                }
+            }
+            .pickerStyle(.segmented)
+            .listRowBackground(Color.surface)
+
+            footnote(
+                "Choose Light, Dark, or follow your iOS setting. The race screens, share cards, and Live Activities all adapt. Changes apply instantly."
+            )
+            .listRowBackground(Color.surface)
+        } header: {
+            Text("Appearance")
+        }
+    }
 
     // The HYROX-specific settings live here. Division + max HR for
     // zone classification today; per-station overrides and other

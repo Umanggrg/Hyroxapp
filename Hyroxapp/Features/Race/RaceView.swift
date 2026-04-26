@@ -56,6 +56,12 @@ struct RaceView: View {
     // it to the VM on appear so it can insert / update / delete `Race` rows.
     @Environment(\.modelContext) private var modelContext
 
+    // Active mode — drives shadow / glow opacity scaling on the
+    // in-race CTAs and overlays. Coral spotlights tuned for OLED
+    // black would read as a heavy wash on warm off-white, so we
+    // dial them back ~50% in light.
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         ZStack {
             Color.background.ignoresSafeArea()
@@ -881,7 +887,11 @@ struct RaceView: View {
                     .frame(maxWidth: .infinity)
                     .frame(height: Layout.raceButtonHeight)
                     .background(Color.accent)
-                    .foregroundStyle(Color.textPrimary)
+                    // White-on-coral is the brand contract for
+                    // primary CTAs — `Color.textPrimary` would flip
+                    // to near-black warm in light mode and read as
+                    // muted on the coral surface.
+                    .foregroundStyle(Color.onAccent)
                     .clipShape(RoundedRectangle(cornerRadius: Layout.cardCornerRadius))
             }
             .disabled(viewModel.isPaused)
@@ -929,7 +939,14 @@ struct RaceView: View {
                         .font(.system(size: 76, weight: .heavy, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(Color.warning)
-                        .shadow(color: Color.warning.opacity(0.35), radius: 18, x: 0, y: 0)
+                        // Amber glow scales with mode — same logic
+                        // as the accent shadow on the start button.
+                        .shadow(
+                            color: Color.warning.opacity(colorScheme == .dark ? 0.35 : 0.18),
+                            radius: 18,
+                            x: 0,
+                            y: 0
+                        )
 
                     Text("TRANSITION TIME")
                         .font(.caption2.weight(.heavy))
@@ -962,7 +979,8 @@ struct RaceView: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
                     }
-                    .foregroundStyle(Color.textPrimary)
+                    // Brand-contract white-on-coral; see Color.onAccent.
+                    .foregroundStyle(Color.onAccent)
                     .frame(maxWidth: .infinity)
                     .frame(height: Layout.raceButtonHeight)
                     .background(
@@ -973,7 +991,16 @@ struct RaceView: View {
                         )
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 16))
-                    .shadow(color: Color.accent.opacity(0.4), radius: 18, x: 0, y: 0)
+                    // Glow scales with mode — full strength on OLED
+                    // black, dialed back on warm off-white to keep
+                    // the button from looking like it's leaking
+                    // coral fog onto the bg.
+                    .shadow(
+                        color: Color.accent.opacity(colorScheme == .dark ? 0.4 : 0.22),
+                        radius: 18,
+                        x: 0,
+                        y: 0
+                    )
                 }
                 .buttonStyle(.plain)
                 .disabled(viewModel.isPaused)

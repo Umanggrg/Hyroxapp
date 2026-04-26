@@ -74,7 +74,6 @@ struct BadgesView: View {
                 isEarned: earned.contains(badge)
             )
             .presentationDetents([.medium])
-            .preferredColorScheme(.dark)
         }
     }
 

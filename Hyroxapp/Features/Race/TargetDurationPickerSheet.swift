@@ -89,7 +89,6 @@ struct TargetDurationPickerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { isPresented = false }

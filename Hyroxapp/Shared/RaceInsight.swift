@@ -63,6 +63,9 @@ enum InsightGenerator {
         if let compromisedInsight = compromisedRunningInsight(for: race) {
             out.append(compromisedInsight)
         }
+        if let roxzoneInsight = roxzoneInsight(for: race) {
+            out.append(roxzoneInsight)
+        }
         if let fatigueInsight = runFatigueInsight(for: race) {
             out.append(fatigueInsight)
         }
@@ -156,6 +159,47 @@ enum InsightGenerator {
             symbol: "arrow.down.right.circle.fill",
             color: .warning
         )
+    }
+
+    // MARK: - Roxzone discipline
+
+    // Surfaces an opinionated callout about transition discipline
+    // when roxzone data was captured. Three buckets:
+    //
+    //   • avg ≤ 10s — "Tight transitions" — race-grade discipline.
+    //     Coral / success.
+    //   • 10s < avg ≤ 20s — "Decent transitions" — room to tighten
+    //     but not a problem. Subtle / textPrimary.
+    //   • avg > 20s — "Lots of transition time" — actionable
+    //     callout: "you can win minutes here." Warning / amber.
+    //
+    // Returns nil when no roxzone data was captured (single-tap-
+    // mode races). The HYROX community's mental model is "every
+    // second in roxzone is a second not racing" — fast transitions
+    // aren't optional, they're a discipline you train.
+    private static func roxzoneInsight(for race: Race) -> RaceInsight? {
+        guard let avg = RaceStats.avgRoxzoneTime(race) else { return nil }
+        let avgRounded = Int(avg.rounded())
+
+        let text: String
+        let symbol: String
+        let color: Color
+
+        if avg <= 10 {
+            text = "Tight transitions — \(avgRounded)s avg roxzone."
+            symbol = "bolt.fill"
+            color = .success
+        } else if avg <= 20 {
+            text = "\(avgRounded)s avg roxzone — solid, room to tighten."
+            symbol = "arrow.right.circle.fill"
+            color = .textPrimary
+        } else {
+            text = "\(avgRounded)s avg roxzone — minutes to gain in transitions."
+            symbol = "arrow.right.circle.fill"
+            color = .warning
+        }
+
+        return RaceInsight(text: text, symbol: symbol, color: color)
     }
 
     // MARK: - Run fatigue

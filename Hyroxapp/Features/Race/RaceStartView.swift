@@ -22,6 +22,12 @@ struct RaceStartView: View {
     @Query(sort: [SortDescriptor(\UserProfile.createdAt, order: .forward)])
     private var profiles: [UserProfile]
 
+    // Active mode — drives glow opacity scaling on the start CTA.
+    // The pulsing coral spotlight that anchors the dark version
+    // would read as a coral haze on warm off-white if applied at
+    // full strength.
+    @Environment(\.colorScheme) private var colorScheme
+
     // Pinned upcoming race event — drives the optional "T-N days
     // to HYROX Miami" callout above the primary CTA. Sorted by
     // soonest first; we surface only the first.
@@ -110,7 +116,6 @@ struct RaceStartView: View {
                 duration: $targetDuration,
                 isPresented: $isTargetPickerPresented
             )
-            .preferredColorScheme(.dark)
         }
         // Quick Action listener — when the user long-presses the
         // app icon and picks "Custom Workout", ContentView swaps
@@ -215,7 +220,8 @@ struct RaceStartView: View {
                 Text("Start Race")
                     .font(.system(size: 24, weight: .heavy, design: .rounded))
             }
-            .foregroundStyle(Color.textPrimary)
+            // Brand-contract white-on-coral; see Color.onAccent.
+            .foregroundStyle(Color.onAccent)
             .frame(maxWidth: .infinity)
             .frame(height: Layout.raceButtonHeight)
             .background(
@@ -240,12 +246,24 @@ struct RaceStartView: View {
                 }
             )
             .shadow(
-                color: Color.accent.opacity(ctaGlowing ? 0.55 : 0.25),
+                // Pulsing coral spotlight scales with mode — full
+                // OLED-tuned values on dark, halved on light so the
+                // CTA reads as polished, not haloed.
+                color: Color.accent.opacity(
+                    colorScheme == .dark
+                        ? (ctaGlowing ? 0.55 : 0.25)
+                        : (ctaGlowing ? 0.30 : 0.14)
+                ),
                 radius: ctaGlowing ? 28 : 14,
                 x: 0,
                 y: 0
             )
-            .shadow(color: Color.black.opacity(0.4), radius: 8, x: 0, y: 4)
+            .shadow(
+                color: Color.black.opacity(colorScheme == .dark ? 0.4 : 0.12),
+                radius: 8,
+                x: 0,
+                y: 4
+            )
         }
         .buttonStyle(.plain)
         .animation(

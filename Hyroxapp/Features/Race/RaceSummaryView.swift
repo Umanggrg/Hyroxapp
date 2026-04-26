@@ -28,6 +28,10 @@ struct RaceSummaryView: View {
     @Query(sort: [SortDescriptor(\UserProfile.createdAt, order: .forward)])
     private var profiles: [UserProfile]
 
+    // Active mode — drives the coral halo behind the hero finish
+    // time. Same scaling logic as the in-race CTAs.
+    @Environment(\.colorScheme) private var colorScheme
+
     // Cached renders of the share card — one per format. ImageRenderer
     // is non-trivial (lays out + rasterizes a SwiftUI view), so we
     // generate each once in `.onAppear` and reuse them for the
@@ -78,6 +82,19 @@ struct RaceSummaryView: View {
                                 .font(.footnote.weight(.semibold))
                                 .monospacedDigit()
                                 .foregroundStyle(Color.accent)
+                        }
+
+                        // Roxzone summary — total transition time +
+                        // avg per transition. Only renders when
+                        // roxzone data was captured (two-tap mode
+                        // was on for this race).
+                        if let race = viewModel.activeRace,
+                           let total = RaceStats.totalRoxzoneTime(race),
+                           let avg = RaceStats.avgRoxzoneTime(race) {
+                            Text("\(RaceStats.format(total)) total roxzone · \(Int(avg.rounded()))s avg")
+                                .font(.caption.weight(.semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(Color.warning)
                         }
 
                     // Target outcome — only shown if the athlete set a
@@ -221,7 +238,17 @@ struct RaceSummaryView: View {
                 .font(.displayHero)
                 .monospacedDigit()
                 .foregroundStyle(Color.textPrimary)
-                .shadow(color: Color.accent.opacity(0.4), radius: 24, x: 0, y: 0)
+                // Coral halo behind the finish time. Stronger on
+                // dark (reads as a stadium-finish spotlight),
+                // softer on light (the hero already has plenty of
+                // weight from the displayHero typography against
+                // warm off-white).
+                .shadow(
+                    color: Color.accent.opacity(colorScheme == .dark ? 0.4 : 0.20),
+                    radius: 24,
+                    x: 0,
+                    y: 0
+                )
                 .scaleEffect(heroCountUpComplete ? 1.0 : 0.85)
                 .opacity(heroCountUpComplete ? 1.0 : 0)
 

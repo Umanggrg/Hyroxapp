@@ -90,7 +90,6 @@ struct RaceComparisonView: View {
                     pickingSide = nil
                 }
             )
-            .preferredColorScheme(.dark)
         }
     }
 

@@ -40,6 +40,31 @@ struct StationDetailView: View {
         sort: [SortDescriptor(\Race.createdAt, order: .forward)]
     ) private var allFinishedRaces: [Race]
 
+    // Need the user's Division to project this attempt to race-day
+    // weight. Same singleton-via-Query pattern used elsewhere — the
+    // bootstrap creates exactly one UserProfile, but we tolerate the
+    // pre-bootstrap case by falling back to `.mensOpen` defaults.
+    @Query(sort: [SortDescriptor(\UserProfile.createdAt, order: .forward)])
+    private var profiles: [UserProfile]
+
+    private var division: Division {
+        profiles.first?.resolvedDivision ?? .mensOpen
+    }
+
+    // Race-day projection — when the athlete logged a sub-race weight
+    // for this attempt, linearly extrapolate what the same effort
+    // would cost at the official HYROX weight. Returns nil when
+    // there's no weight to project from (no log, run station, or
+    // already at race weight).
+    private var raceDayProjection: (projected: TimeInterval, raceWeight: Double)? {
+        guard let projected = RaceStats.projectedRaceTime(
+            forSplit: split,
+            division: division
+        ) else { return nil }
+        guard let raceWeight = division.raceWeight(for: split.station) else { return nil }
+        return (projected, raceWeight)
+    }
+
     // Best ever on this station type (collapsing run cases together).
     private var personalBest: Split? {
         RaceStats.allTimeBest(for: split.station, among: allFinishedRaces)
@@ -67,12 +92,27 @@ struct StationDetailView: View {
             Color.background.ignoresSafeArea()
 
             ScrollView {
-                VStack(spacing: 20) {
+                VStack(spacing: 24) {
                     heroCard
+
                     if !trend.isEmpty {
-                        trendCard
+                        VStack(alignment: .leading, spacing: 12) {
+                            ProfileSectionHeader(
+                                title: "Trend",
+                                icon: "chart.line.uptrend.xyaxis",
+                                trailing: "\(trend.count) attempt\(trend.count == 1 ? "" : "s")"
+                            )
+                            trendCard
+                        }
                     }
-                    physiologyCard
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        ProfileSectionHeader(
+                            title: "Physiology",
+                            icon: "waveform.path.ecg"
+                        )
+                        physiologyCard
+                    }
                 }
                 .padding(Layout.screenMargin)
             }
@@ -128,6 +168,30 @@ struct StationDetailView: View {
                         .monospacedDigit()
                 }
                 .foregroundStyle(delta < 0 ? Color.success : Color.warning)
+                .padding(.top, 4)
+            }
+
+            // Race-day projection — when the athlete trained at a
+            // sub-race weight (e.g. 100kg sled push instead of the
+            // 152kg Men's Open standard), extrapolate this attempt
+            // linearly to what it would cost at race-day weight. The
+            // intent is "you went 5:00 here, but on race day at the
+            // real weight that's closer to ~6:30." A coaching honesty
+            // signal — small training weights can disguise where
+            // you'd actually struggle on race day.
+            if let projection = raceDayProjection {
+                HStack(spacing: 6) {
+                    Image(systemName: "scalemass.fill")
+                        .font(.caption.weight(.bold))
+                    Text("Race-day projection")
+                        .font(.caption.weight(.bold))
+                        .tracking(0.5)
+                        .textCase(.uppercase)
+                    Text("\(RaceStats.format(projection.projected)) at \(Int(projection.raceWeight)) kg")
+                        .font(.callout.weight(.semibold))
+                        .monospacedDigit()
+                }
+                .foregroundStyle(Color.accent)
                 .padding(.top, 4)
             }
         }

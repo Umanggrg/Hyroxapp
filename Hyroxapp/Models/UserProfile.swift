@@ -118,6 +118,27 @@ final class UserProfile {
     // through populating it before they touch the rest of the app.
     var hasCompletedOnboarding: Bool = false
 
+    // Theme preference — drives `.preferredColorScheme(...)` at the
+    // root of the app. Stored as Optional<String> for the same
+    // SwiftData migration reason as `division` (lightweight
+    // migration is unreliable for non-optional new fields on
+    // pre-existing rows). The `resolvedThemePreference` property
+    // gives every caller a non-optional `ThemePreference` value;
+    // the default `.system` follows iOS's mode setting and is the
+    // expected behavior for users upgrading from a pre-light-mode
+    // build.
+    var themePreferenceRaw: String? = ThemePreference.system.rawValue
+
+    var resolvedThemePreference: ThemePreference {
+        get {
+            guard let raw = themePreferenceRaw,
+                  let pref = ThemePreference(rawValue: raw)
+            else { return .system }
+            return pref
+        }
+        set { themePreferenceRaw = newValue.rawValue }
+    }
+
     var createdAt: Date
     var updatedAt: Date
 

@@ -64,7 +64,11 @@ struct YearlyRecapShareCardView: View {
             }
         }
         .frame(width: Self.canvasSize.width, height: Self.canvasSize.height)
-        .background(Color.background)
+        .background(Color(hex: 0x0A0A0B))
+        // Force dark for the export — same rationale as the
+        // RaceShareCardView. Year-in-review cards stay branded-
+        // dark regardless of the user's in-app theme.
+        .environment(\.colorScheme, .dark)
     }
 
     // MARK: - Background
@@ -78,7 +82,7 @@ struct YearlyRecapShareCardView: View {
             RadialGradient(
                 colors: [
                     Color.accent.opacity(0.35),
-                    Color.background
+                    Color(hex: 0x0A0A0B)
                 ],
                 center: .center,
                 startRadius: 30,
@@ -93,7 +97,7 @@ struct YearlyRecapShareCardView: View {
                 endPoint: .center
             )
         }
-        .background(Color.background)
+        .background(Color(hex: 0x0A0A0B))
     }
 
     // MARK: - Header

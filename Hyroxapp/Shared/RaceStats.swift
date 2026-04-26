@@ -56,6 +56,82 @@ enum RaceStats {
         return values.reduce(0, +)
     }
 
+    // Total Roxzone time across every transition this race captured.
+    // Sum of all `roxzoneSeconds` on the race's splits. Returns nil
+    // when no split has roxzone data — single-tap-mode races, or
+    // races finished before the feature shipped, have nil here.
+    //
+    // The HYROX-specific transition-discipline metric. "How much of
+    // your race was spent in transition vs work?" — lower is better;
+    // elite athletes target sub-10s avg per transition.
+    static func totalRoxzoneTime(_ race: Race) -> TimeInterval? {
+        let values = race.splits.compactMap(\.roxzoneSeconds)
+        guard !values.isEmpty else { return nil }
+        return values.reduce(0, +)
+    }
+
+    // Average Roxzone time per logged transition. Returns nil when
+    // no roxzone data captured. Useful as the headline number on
+    // race summary / detail because the AVG is what athletes
+    // actually optimize for ("get my avg under 10s").
+    static func avgRoxzoneTime(_ race: Race) -> TimeInterval? {
+        let values = race.splits.compactMap(\.roxzoneSeconds)
+        guard !values.isEmpty else { return nil }
+        return values.reduce(0, +) / Double(values.count)
+    }
+
+    // Cross-race avg roxzone — for the Profile-level "your
+    // transition discipline trend" surface. Walks every finished
+    // race and pools all roxzone-bearing splits, then divides.
+    // Single global average rather than per-race-then-averaged so
+    // races with more transitions get appropriately more weight.
+    static func crossRaceAvgRoxzone(among races: [Race]) -> TimeInterval? {
+        let values = races
+            .filter(\.isFinished)
+            .flatMap(\.splits)
+            .compactMap(\.roxzoneSeconds)
+        guard !values.isEmpty else { return nil }
+        return values.reduce(0, +) / Double(values.count)
+    }
+
+    // Projected race-day time for this attempt at division-canonical
+    // weight. Linear extrapolation by weight ratio — if you did
+    // 100kg in 4:00 and the race weight is 152kg, the projection is
+    // 4:00 × (152/100) = 6:05.
+    //
+    // Returns nil when:
+    //   - The split has no logged weight (we have nothing to scale)
+    //   - The station has no division race weight (runs, ergs)
+    //   - The current weight equals the race weight (already at race
+    //     weight, no projection needed; show the actual time instead)
+    //   - The current weight is HIGHER than race weight (the athlete
+    //     is over-weighting on purpose for training overload — a
+    //     projection downward is still computable but reads weird,
+    //     so we hide it as opinionated UX)
+    //
+    // Linear scaling is a simplification; in reality sled-push time
+    // typically scales sub-linearly with weight (a strong athlete's
+    // pace doesn't double when the weight doubles). We use linear as
+    // a conservative-pessimistic estimate — the "this is the worst
+    // case" projection. Athletes can read the projected time as a
+    // floor, then actual race-day will likely be better.
+    static func projectedRaceTime(
+        forSplit split: Split,
+        division: Division
+    ) -> TimeInterval? {
+        guard let logged = split.weightKg, logged > 0 else { return nil }
+        guard let raceWeight = division.raceWeight(for: split.station) else {
+            return nil
+        }
+        // Within ±0.5kg → already at race weight.
+        guard abs(logged - raceWeight) >= 0.5 else { return nil }
+        // Athlete is over-weighting; don't project downward.
+        guard logged < raceWeight else { return nil }
+
+        let ratio = raceWeight / logged
+        return split.duration * ratio
+    }
+
     // MARK: - Cross-race aggregates (for Profile) — phone only
 
     // Fastest total race time across the provided races (nil if none).

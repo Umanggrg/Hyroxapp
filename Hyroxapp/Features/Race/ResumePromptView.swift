@@ -15,52 +15,76 @@ struct ResumePromptView: View {
     let onDiscard: () -> Void
 
     var body: some View {
-        VStack(spacing: 20) {
-            Spacer()
+        ZStack {
+            // Calm hero backdrop — the screen is a recovery moment,
+            // not a celebration. Subtle radial glow + fingerprint
+            // watermark gives it the same brand voice as Race Start
+            // and Summary without overpowering the warning tone.
+            HeroBackdrop(.calm)
 
-            Text("Unfinished Race")
-                .capsLabelStyle()
-                .foregroundStyle(Color.warning)
+            VStack(spacing: 20) {
+                Spacer()
 
-            VStack(spacing: 6) {
-                Text(resumeHeroTime)
-                    .font(.heroStat)
-                    .monospacedDigit()
-                    .foregroundStyle(Color.textPrimary)
-                Text("on \(currentStationName) · \(race.startedAt.formatted(.relative(presentation: .named)))")
-                    .font(.metadata)
+                // Warning emblem — the visual cue that something
+                // requires attention before the screen's text is
+                // even read. Stays low-key (icon-only, dim warning
+                // tint) so it reads as a flag, not an alarm.
+                Image(systemName: "exclamationmark.arrow.circlepath")
+                    .font(.system(size: 36, weight: .semibold))
+                    .foregroundStyle(Color.warning)
+                    .padding(.bottom, 4)
+
+                Text("Unfinished Race")
+                    .capsLabelStyle()
+                    .foregroundStyle(Color.warning)
+
+                VStack(spacing: 6) {
+                    Text(resumeHeroTime)
+                        .font(.heroStat)
+                        .monospacedDigit()
+                        .foregroundStyle(Color.textPrimary)
+                    Text("on \(currentStationName) · \(race.startedAt.formatted(.relative(presentation: .named)))")
+                        .font(.metadata)
+                        .foregroundStyle(Color.textSecondary)
+                        .multilineTextAlignment(.center)
+                }
+
+                Text("Pick up from where you left off, or discard this race and start fresh. Timings continue from the original start — not paused.")
+                    .font(.body)
                     .foregroundStyle(Color.textSecondary)
                     .multilineTextAlignment(.center)
-            }
+                    .padding(.horizontal, 8)
 
-            Text("Pick up from where you left off, or discard this race and start fresh. Timings continue from the original start — not paused.")
-                .font(.body)
-                .foregroundStyle(Color.textSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 8)
+                Spacer()
 
-            Spacer()
-
-            VStack(spacing: 12) {
-                Button(action: onResume) {
-                    Text("Resume Race")
-                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                VStack(spacing: 12) {
+                    Button(action: onResume) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 18, weight: .bold))
+                            Text("Resume Race")
+                                .font(.system(size: 20, weight: .bold, design: .rounded))
+                        }
                         .frame(maxWidth: .infinity)
                         .frame(height: Layout.raceButtonHeight)
                         .background(Color.accent)
-                        .foregroundStyle(Color.textPrimary)
+                        // Brand-contract white-on-coral; see Color.onAccent.
+                        .foregroundStyle(Color.onAccent)
                         .clipShape(RoundedRectangle(cornerRadius: Layout.cardCornerRadius))
-                }
+                        .shadow(color: Color.accent.opacity(0.35), radius: 18, y: 6)
+                    }
 
-                Button(action: onDiscard) {
-                    Text("Discard")
-                        .font(.system(size: 18, weight: .semibold, design: .rounded))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: Layout.standardButtonHeight + 8)
-                        .foregroundStyle(Color.textSecondary)
+                    Button(action: onDiscard) {
+                        Text("Discard")
+                            .font(.system(size: 18, weight: .semibold, design: .rounded))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: Layout.standardButtonHeight + 8)
+                            .foregroundStyle(Color.textSecondary)
+                    }
                 }
+                .padding(.bottom, 24)
             }
-            .padding(.bottom, 24)
+            .padding(.horizontal, Layout.screenMargin)
         }
     }
 

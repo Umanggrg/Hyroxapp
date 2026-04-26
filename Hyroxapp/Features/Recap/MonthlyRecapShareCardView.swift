@@ -40,13 +40,13 @@ struct MonthlyRecapShareCardView: View {
             RadialGradient(
                 colors: [
                     Color.accent.opacity(0.30),
-                    Color.background
+                    Color(hex: 0x0A0A0B)
                 ],
                 center: .center,
                 startRadius: 30,
                 endRadius: Self.canvasSize.height * 0.7
             )
-            .background(Color.background)
+            .background(Color(hex: 0x0A0A0B))
 
             VStack(spacing: 0) {
                 wordmarkHeader
@@ -75,7 +75,11 @@ struct MonthlyRecapShareCardView: View {
             }
         }
         .frame(width: Self.canvasSize.width, height: Self.canvasSize.height)
-        .background(Color.background)
+        .background(Color(hex: 0x0A0A0B))
+        // Force dark for the export — share cards are Instagram /
+        // Stories-bound and stay branded-dark regardless of the
+        // user's in-app theme.
+        .environment(\.colorScheme, .dark)
     }
 
     // MARK: - Header

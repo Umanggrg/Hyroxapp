@@ -87,7 +87,11 @@ struct HoldToConfirmButton: View {
                         Spacer()
                         Text(title)
                             .font(.system(size: 24, weight: .bold, design: .rounded))
-                            .foregroundStyle(Color.textPrimary)
+                            // Brand-contract white-on-coral; this
+                            // button always sits on a coral fill so
+                            // the label color is fixed regardless of
+                            // the user's app theme.
+                            .foregroundStyle(Color.onAccent)
                             // Progress is visible even in Reduce Motion
                             // mode — three quantized steps provide the
                             // same "am I there yet?" feedback without
@@ -96,7 +100,7 @@ struct HoldToConfirmButton: View {
                                 if reduceMotion, p > 0 {
                                     Text(reduceMotionLabel(for: p))
                                         .font(.caption2.weight(.bold))
-                                        .foregroundStyle(Color.textPrimary)
+                                        .foregroundStyle(Color.onAccent)
                                         .padding(.leading, 8)
                                 }
                             }

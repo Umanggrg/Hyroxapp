@@ -477,14 +477,20 @@ The athlete's primary in-session experience.
 - 🟢 Screen stays awake mid-race
 - 🟢 Resume after force-kill / backgrounding
 - 🟢 Watch companion: phone↔watch live sync (architecture shipped, install on watchOS 26+ TBD)
-- 🟡 Heart rate tracking: avg + max per station via HKStatisticsQuery. Next: live HR display mid-race, HR curve chart, zone breakdowns
+- 🟢 Heart rate tracking: avg + max per station via HKStatisticsQuery, live HR display mid-race, HR curve chart, zone breakdowns — full stack shipped
+- 🟢 Live HR zone chip on RaceView — current zone classification visible mid-race
+- 🟢 **Roxzone (transition) tracking** — opt-in two-step advance (end segment → in-roxzone overlay → start next), per-split `roxzoneSeconds` capture, total + average displayed on summary/detail, discipline insight (≤10s tight / ≤20s solid / >20s actionable). HYROX-specific differentiator — every second outside a station counts on race day.
+- 🟢 **Live Activities scaffolding** — RaceActivityAttributes + LiveActivityService + widget Swift files all shipped. Pending: Widget Extension target via Xcode UI (see `docs/LIVE_ACTIVITY_SETUP.md`).
 - ⚪ **1km Run with manual start/stop** — explicit "Start Run" / "End Run" on the run segments specifically (rather than treating them as generic stations), so athletes can pre-position themselves before starting the timer. Same pattern as Strava's explicit run start.
-- ⚪ **Calories burned per station** — HealthKit `.activeEnergyBurned` statistics query alongside HR stats
+- 🟢 **Calories burned per station** — HealthKit `.activeEnergyBurned` statistics query alongside HR stats
 - ⚪ **Effort level / derived intensity score** — per station + full race rollup. Function of HR (relative to max), station duration, and division benchmark.
-- ⚪ **Manual reps / distance input** — for sleds, carries, lunges, wall balls. Let athletes log what they actually did when gym setup or injury means they deviated from the prescribed rule.
-- ⚪ **Voice / haptic cues on station transitions** — spoken "Next: Sled Push" or audio ping, distinct haptic pattern per station category. Critical for Watch-during-workout where screen isn't visible.
-- ⚪ **Auto-timer between transitions** — optional rest-interval countdown between stations during training (not during race simulation).
-- ⚪ **Pace indicator mid-race** — real-time "ahead / on pace / behind" readout alongside the main timer, based on a per-station time budget derived from the athlete's set target (see §4 v2 target finish-time, shipped). Two data-source tiers:
+- 🟢 **Manual reps / distance / weight input** — `weightKg`, `repsCompleted`, `rpe` per Split. Tap any split row on summary/detail to edit via StationStatsSheet. Powers race-readiness check + race-day weight projection.
+- 🟢 **Race-day weight projection** — when training at sub-race weight, linear extrapolation projects the same effort to official HYROX weight (`split.duration × raceWeight / loggedWeight`). Surfaced on StationDetailView hero. Coaching honesty signal.
+- 🟢 **Voice / haptic cues on station transitions** — VoiceCueService announces "Next: Sled Push," HR-zone entries also voiced. Toggleable in Settings.
+- 🟡 **Auto-timer between transitions** — partial via roxzone tracking (transitions are timed). True rest-interval countdown for training (not race simulation) still TBD.
+- 🟢 **Pace indicator mid-race** — real-time "ahead / on pace / behind" chip on RaceView based on naïve split of `targetDuration`. Tier 1 (naïve split) shipped. Tier 2 (benchmarked split using community/division data) pending backend.
+
+  Original two-tier framing kept here for context:
   1. **Naïve split of target** — divide `targetDuration` across the 16 stations, either evenly or weighted by station type (runs get a bigger allotment than sled push). Ships as soon as we commit — no backend required.
   2. **Benchmarked split** (v2+/v3, depends on §13.4 backend + community data) — once Supabase stores enough race history, derive per-station expected times from aggregated splits across the athlete's division. "You're 12 seconds off the average Men's Open athlete on this station." Much more motivating than a flat 1/16th-of-target split.
 
@@ -495,12 +501,10 @@ The athlete's primary in-session experience.
 Different container types for "do a workout with this app."
 
 - 🟢 **Full HYROX Simulation** (Race Mode) — the 16-segment official format
-- ⚪ **Custom Workout Builder** — user-defined station sequences, time-based or rep-based, save as templates, reuse. Opens the door to half-rox sessions, strength-focused days, any arbitrary subset.
-- ⚪ **Training Blocks** — named templates for common training patterns:
-  - **Strength day** — heavy-station-focused (sled push/pull + lunges + wall balls)
-  - **Conditioning day** — cardio-station-focused (runs + skierg + row + burpees)
-  - **Hybrid circuits** — shorter mixed sequences for mid-week
-  These are really named Custom Workout Builder templates with good defaults.
+- 🟢 **Custom Workout Builder** — user-defined station sequences, save as templates, reuse via WorkoutTemplatePickerSheet. Opens the door to half-rox sessions, strength-focused days, any arbitrary subset.
+- 🟢 **Training Blocks** — seeded `WorkoutTemplate` rows on first launch cover Strength / Conditioning / Hybrid presets. Picker is part of RaceStartView's Custom flow.
+- 🟢 **Race naming + photos** — every race gets an editable title and an optional photo (banner on RaceCardView, hero on share cards, shows up in RaceGalleryView).
+- 🟢 **Target finish time per race** — H/M/S wheel picker on RaceStartView, drives pace chip + summary/detail outcome callouts.
 
 ### 13.3 — Post-workout analytics
 
@@ -510,14 +514,19 @@ What the athlete sees after tapping Finish.
 - 🟢 Race saved to History as a card
 - 🟢 PB indicator on cards when a race sets a new PB
 - 🟢 Per-race notes ("how did this feel?") — editable from summary + history retroactively
-- 🟡 HR per split (avg + max displayed). Next: HR curve chart, station-level HR comparison
-- ⚪ **Detailed per-station breakdown** (Roxfit-style): tap any split in History → dedicated view with pace curve, HR curve, comparison to your PB for that station, comparison to last N races
-- ⚪ **Heart rate zones graph** — Z1–Z5 time-in-zone for the whole race
-- ⚪ **Fatigue curve** — line chart showing pace relative to rolling average, visualizes where the athlete slowed down
-- ⚪ **Narrative insights** — auto-generated callouts: "You slowed down 18% after Station 5," "Your HR peaks highest during lunges," "Fastest Sled Push in your last 10 races"
+- 🟢 HR per split (avg + max), curve chart, zone breakdowns, station-level comparison — full HR analytics stack shipped
+- 🟢 **Detailed per-station breakdown** (Roxfit-style): StationDetailView pushed from any split row — trend chart over all attempts, PB highlight, physiology tiles (avg/max HR, calories), race-day weight projection callout when training under race weight
+- 🟢 **Heart rate zones graph** — Z1–Z5 time-in-zone via HRZonesView, integrated into RaceDetailView
+- 🟢 **Fatigue curve** — RunFatigueChartView shows back-half slowdown across the 8 runs, surfaces fatigue insight automatically
+- 🟢 **Narrative insights** — InsightGenerator pumps PB count, HR peak, compromised running, roxzone discipline, run fatigue into RaceInsightsView. Shown on summary + detail.
+- 🟢 **Compromised running analysis** — detects which station hurt the next run most ("Sled Pull cost you — Run 6 was 22% slower"). Cross-race aggregation on Profile.
+- 🟢 **Engine impact view** — Profile-level rollup showing which stations consistently compromise the engine.
 - ⚪ **Recovery score** — post-workout strain estimate (Whoop-style)
-- ⚪ **PBs per station** — dedicated Profile / History section listing personal bests for each of the 16 segments, not just total race time
-- ⚪ **Weekly / monthly performance trends** — charts showing race count, avg total time, avg HR, etc. over rolling windows
+- 🟢 **PBs per station** — StationPersonalBestsView lists best splits per station, surfaced on Profile.
+- 🟢 **Weekly / monthly / yearly performance trends** — PerformanceTrendsView, MonthlyRecap, YearlyRecap with shareable cards.
+- 🟢 **Performance overload chart** — PerformanceOverloadView surfaces volume + intensity trend on Profile.
+- 🟢 **Race comparison view** — side-by-side split tables between two of your own races (HistoryView toolbar).
+- 🟢 **Training calendar heatmap** — month-grid on Profile showing race density.
 - ⚪ **Fatigue vs performance correlation** — scatter-plot style "when my resting HR is higher, my total race time is X% slower"
 
 ### 13.4 — HYROX-specific performance system
@@ -525,11 +534,9 @@ What the athlete sees after tapping Finish.
 The thing that makes this *not* a generic workout logger.
 
 - ⚪ **Station scoring** — each station gets its own score relative to division benchmarks (percentile, or a 0–100 rating)
-- ⚪ **HYROX Performance Score** — rollup on Profile with three pillars:
-  - **Strength** — sled push, sled pull, sandbag lunges, wall balls
-  - **Endurance** — farmers carry, sandbag lunges, total race duration
-  - **Engine** — runs, ski erg, rowing, burpees (cardio capacity)
-  Expressed as a 3-axis radar chart or 3 numerical scores. Updates after every finished race.
+- 🟢 **HYROX Performance Score** — HyroxPerformanceScoreView on Profile shows the 3-pillar rollup (Strength / Endurance / Engine) using `pillarTheoreticalBest` over historical splits. Updates after every finished race.
+- 🟢 **Race-readiness check** — Profile-level diagnostic: is the athlete training at race weights? Driven by `weightKg` + `Division.raceWeight(for:)`.
+- 🟢 **Race event countdown** — RaceEvent SwiftData model + ProfileView banner shows "T-N days to your next race." Editable via RaceEventEditSheet.
 - ⚪ **Benchmarking** — compare against:
   - Yourself (historical rolling averages)
   - Other users on the platform
@@ -545,13 +552,15 @@ How athletes see each other's work and stay accountable.
 
 - 🟡 Card design foreshadows social feed (RaceCardView structured for future kudos/comments row)
 - 🟡 Profile screen (real identity, handle, avatar, bio, social stats placeholders)
+- 🟢 **Profile share card** — ProfileShareCardView + share toolbar item exports a branded portrait of the athlete's identity + key stats.
 - ⚪ **Feed** — timeline of followed athletes' completed races, auto-posted on finish (opt-in), scrollable RaceCardView with kudos + comments
 - ⚪ **Follow / unfollow** — relationship graph, displayed as counts on Profile, drives feed filtering
 - ⚪ **Comments** — threaded comments per race, mentions (@athlete)
 - ⚪ **Kudos** (Strava's "like" equivalent) — one-tap positive reaction
-- ⚪ **Compare workouts** — side-by-side split tables between two athletes' same-format races
-- ⚪ **Share to Instagram** — export a clean, story-ready PNG/video of a finished race; one tap from summary. Includes hero time, key stats, branded.
-- ⚪ **Stories-style recap** — weekly/monthly auto-generated highlight reels ("your week in HYROX")
+- 🟢 **Compare own workouts** — RaceComparisonView for side-by-side splits across two of your races. Two-athlete comparison still pending backend.
+- 🟢 **Share to Instagram** — RaceShareCardView in both square and 9:16 story formats, ImageRenderer-backed export, format-picker Menu on summary + detail.
+- 🟢 **Stories-style recap** — MonthlyRecapView + YearlyRecapView with shareable card variants.
+- 🟢 **Race photo gallery** — RaceGalleryView grid of every race that carries a photo.
 
 ### 13.6 — Competition + gamification
 
@@ -561,15 +570,17 @@ Structured reasons to keep coming back.
   - Fastest full HYROX simulation (global, friends, division)
   - Best per-station times (fastest sled push, lowest wall ball time, etc.)
   - Weekly rankings (best race this week)
+  Pending backend.
 - ⚪ **Challenges** — time-boxed goals the athlete opts into:
   - "7-day HYROX streak" — do something each day
   - "Improve sled push time by 10% this month"
   - "Complete 4 full simulations in 4 weeks"
-- ⚪ **Badges** — achievements displayed on Profile:
-  - First simulation completed
-  - Elite performance tiers (sub-1:00:00 total race, sub-5:00 run average, etc.)
-  - Consistency streaks (30-day active, 100 total races)
+- 🟢 **Streak tracking** — RaceStreaks helper + StreakBannerView on Profile (current streak, longest streak, days since last race).
+- 🟢 **Badges** — Badge enum + BadgeAwarder + BadgesView on Profile. Covers first simulation, elite tiers, consistency streaks.
 - ⚪ **Segments / micro-challenges** — like Strava segments but per-station; compete for the fastest Sled Pull within a gym / region / globally
+- 🟢 **Quick Actions (3D Touch / long-press home icon)** — "Start Race" shortcut registered, deep-linked into RaceView.
+- 🟢 **Local notifications** — opt-in nudges for streak protection, race-event countdown reminders. Settings toggle + scheduling on app launch / race finish.
+- 🟢 **Onboarding wizard** — first-launch flow capturing handle, division, max HR. `hasCompletedOnboarding` gate on UserProfile.
 
 ### 13.7 — Inspiration + non-negotiables
 

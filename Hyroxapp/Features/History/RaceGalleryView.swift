@@ -51,12 +51,19 @@ struct RaceGalleryView: View {
                 emptyState
             } else {
                 ScrollView {
-                    LazyVGrid(columns: columns, spacing: 2) {
-                        ForEach(photoRaces) { race in
-                            NavigationLink(value: race) {
-                                tile(for: race)
+                    VStack(spacing: 0) {
+                        galleryHeader
+                            .padding(.horizontal, Layout.screenMargin)
+                            .padding(.top, 8)
+                            .padding(.bottom, 16)
+
+                        LazyVGrid(columns: columns, spacing: 2) {
+                            ForEach(photoRaces) { race in
+                                NavigationLink(value: race) {
+                                    tile(for: race)
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -64,6 +71,56 @@ struct RaceGalleryView: View {
         }
         .navigationTitle("Photos")
         .hyroxDarkNavigationBar(inline: true)
+    }
+
+    // Two-line header above the grid. Mirrors the "X photos · earliest
+    // → latest" framing Apple Photos uses on a date-grouped view —
+    // grounds the visual feed with a quick count + spans cue. Reads
+    // as memory metadata; doesn't compete with the photos themselves.
+    private var galleryHeader: some View {
+        let count = photoRaces.count
+        let earliest = photoRaces.last?.startedAt
+        let latest = photoRaces.first?.startedAt
+
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("\(count) Photo\(count == 1 ? "" : "s")")
+                .font(.system(size: 28, weight: .heavy, design: .rounded))
+                .foregroundStyle(Color.textPrimary)
+                .monospacedDigit()
+
+            if let earliest, let latest {
+                Text(spanText(from: earliest, to: latest))
+                    .font(.footnote)
+                    .foregroundStyle(Color.textSecondary)
+                    .monospacedDigit()
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // Compact span label. Same date → no range, just the single
+    // date. Different dates → "Mar 4 — Apr 22, 2026" (collapse the
+    // year when both are the same calendar year, keep both years
+    // when they differ — same convention iOS Photos uses).
+    private func spanText(from start: Date, to end: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDate(start, inSameDayAs: end) {
+            return start.formatted(date: .long, time: .omitted)
+        }
+        let startYear = cal.component(.year, from: start)
+        let endYear = cal.component(.year, from: end)
+        let earlyDate = min(start, end)
+        let lateDate = max(start, end)
+        let lateString = lateDate.formatted(date: .abbreviated, time: .omitted)
+        if startYear == endYear {
+            // Drop the year on the earlier date; keep it on the later
+            // one (matches "Mar 4 – Apr 22, 2026").
+            let earlyMonthDay = earlyDate.formatted(.dateTime.month(.abbreviated).day())
+            return "\(earlyMonthDay) – \(lateString)"
+        } else {
+            let earlyString = earlyDate.formatted(date: .abbreviated, time: .omitted)
+            return "\(earlyString) – \(lateString)"
+        }
     }
 
     // Single tile. Square aspect, photo fills via .scaledToFill
@@ -124,20 +181,33 @@ struct RaceGalleryView: View {
     // this view is hidden when no photos exist, but if the user
     // somehow lands here with zero photos (e.g. after deleting
     // every photo), guide them back rather than show a bare
-    // black screen.
+    // black screen. Uses the same fingerprint watermark + glow
+    // language as the History empty state so the brand voice
+    // stays consistent.
     private var emptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "photo.on.rectangle.angled")
-                .font(.system(size: 32, weight: .semibold))
-                .foregroundStyle(Color.textTertiary)
-            Text("No race photos yet")
-                .font(.headline)
-                .foregroundStyle(Color.textPrimary)
-            Text("Add a photo to a race from its summary or detail view.")
-                .font(.body)
-                .foregroundStyle(Color.textSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
+        ZStack {
+            HeroBackdrop(.calm)
+
+            VStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(Color.accent.opacity(0.12))
+                        .frame(width: 88, height: 88)
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.system(size: 36, weight: .semibold))
+                        .foregroundStyle(Color.accent)
+                }
+
+                Text("No race photos yet")
+                    .font(.title3.weight(.heavy))
+                    .foregroundStyle(Color.textPrimary)
+
+                Text("Add a photo to a race from its summary or detail view to start filling the gallery.")
+                    .font(.body)
+                    .foregroundStyle(Color.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+            }
         }
     }
 }

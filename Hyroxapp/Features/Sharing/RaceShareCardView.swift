@@ -136,8 +136,16 @@ struct RaceShareCardView: View {
             }
         }
         .frame(width: format.canvasSize.width, height: format.canvasSize.height)
-        .background(Color.background)
+        .background(Color(hex: 0x0A0A0B))
         .clipShape(RoundedRectangle(cornerRadius: 0))
+        // Force dark regardless of the user's app theme. Share
+        // cards are export targets for Instagram/Stories — the
+        // exported PNG always reads as a branded dark card,
+        // matching the look every other social race-post is
+        // rendered in. A light-mode user exporting a warm
+        // off-white card would look washed out next to other
+        // race posts in their feed.
+        .environment(\.colorScheme, .dark)
     }
 
     // Background layer — chooses between the user's attached photo

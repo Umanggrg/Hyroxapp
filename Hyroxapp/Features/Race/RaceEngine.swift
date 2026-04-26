@@ -529,9 +529,17 @@ struct RaceEngine: Sendable {
 
 // MARK: - Helpers
 
-// Out-of-bounds-safe subscript. `currentStation` / `upcomingStation` rely on it
-// so we don't have to sprinkle `indices.contains(...)` guards throughout.
-private extension Array {
+// Out-of-bounds-safe subscript. `currentStation` / `upcomingStation` rely on
+// it so we don't have to sprinkle `indices.contains(...)` guards throughout.
+//
+// Promoted from `private` to module-internal because RaceViewModel also
+// reaches into `engine.sequence[safe:]` when building the Live Activity
+// snapshot (it falls back to the last station after a race finishes so the
+// lock-screen UI still has a station name to render). A `private` extension
+// inside RaceEngine.swift is only visible inside that file; making this
+// `internal` (the default) lets the same helper be reused across the Race
+// feature without forcing every caller to re-implement the bounds check.
+extension Array {
     subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
     }

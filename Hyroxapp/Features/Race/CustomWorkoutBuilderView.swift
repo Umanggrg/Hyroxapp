@@ -30,6 +30,10 @@ struct CustomWorkoutBuilderView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
+    // Active mode — drives glow scaling on the Start button so
+    // the coral spotlight reads cleanly on warm off-white.
+    @Environment(\.colorScheme) private var colorScheme
+
     // All saved templates, newest first. Drives the Load button's
     // enabled state (disabled when empty) and populates the picker
     // sheet when opened.
@@ -81,7 +85,6 @@ struct CustomWorkoutBuilderView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -118,7 +121,6 @@ struct CustomWorkoutBuilderView: View {
                     sequence.append(picked)
                     isPickerPresented = false
                 }
-                .preferredColorScheme(.dark)
             }
             .sheet(isPresented: $isTemplatePickerPresented) {
                 WorkoutTemplatePickerSheet { picked in
@@ -128,7 +130,6 @@ struct CustomWorkoutBuilderView: View {
                     sequence = picked.sequence
                     isTemplatePickerPresented = false
                 }
-                .preferredColorScheme(.dark)
             }
             .alert("Save template", isPresented: $isSaveAlertPresented) {
                 TextField("Name", text: $saveDraftName)
@@ -140,7 +141,6 @@ struct CustomWorkoutBuilderView: View {
                 Text("Give this workout a name so you can run it again later.")
             }
         }
-        .preferredColorScheme(.dark)
     }
 
     // MARK: - Persistence
@@ -293,7 +293,10 @@ struct CustomWorkoutBuilderView: View {
                 Text(isReady ? "Start Workout" : "Add a Station to Start")
                     .font(.system(size: 22, weight: .heavy, design: .rounded))
             }
-            .foregroundStyle(Color.textPrimary)
+            // White-on-coral when ready (brand contract); falls
+            // back to textPrimary on the disabled surfaceElevated
+            // bg where adaptive contrast is what we want.
+            .foregroundStyle(isReady ? Color.onAccent : Color.textPrimary)
             .frame(maxWidth: .infinity)
             .frame(height: Layout.raceButtonHeight)
             .background(
@@ -318,12 +321,21 @@ struct CustomWorkoutBuilderView: View {
                 }
             )
             .shadow(
-                color: isReady ? Color.accent.opacity(0.35) : Color.clear,
+                // Coral glow scales with mode — softer in light to
+                // avoid coral fog against the warm bg.
+                color: isReady
+                    ? Color.accent.opacity(colorScheme == .dark ? 0.35 : 0.18)
+                    : Color.clear,
                 radius: 18,
                 x: 0,
                 y: 0
             )
-            .shadow(color: Color.black.opacity(0.4), radius: 8, x: 0, y: 4)
+            .shadow(
+                color: Color.black.opacity(colorScheme == .dark ? 0.4 : 0.12),
+                radius: 8,
+                x: 0,
+                y: 4
+            )
             .opacity(isReady ? 1.0 : 0.55)
         }
         .buttonStyle(.plain)
@@ -374,7 +386,6 @@ private struct StationPickerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -418,7 +429,6 @@ private struct WorkoutTemplatePickerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

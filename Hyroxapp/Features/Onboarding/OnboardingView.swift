@@ -25,6 +25,13 @@ struct OnboardingView: View {
 
     @Environment(\.dismiss) private var dismiss
 
+    // Active color scheme — drives shadow + glow scaling so the
+    // wizard reads cleanly on both warm off-white (light) and
+    // near-black (dark) backgrounds. Coral shadow opacity stays
+    // brand-true in dark, dials back ~50% in light to keep the
+    // hero icon from looking like it's glowing through fog.
+    @Environment(\.colorScheme) private var colorScheme
+
     @State private var step: Step = .welcome
 
     enum Step: Int, CaseIterable, Identifiable {
@@ -122,7 +129,16 @@ struct OnboardingView: View {
                     .font(.system(size: 38, weight: .bold))
                     .foregroundStyle(Color.accent)
             }
-            .shadow(color: Color.accent.opacity(0.35), radius: 24, x: 0, y: 0)
+            // Halo shadow scales with mode — full strength on dark
+            // (looks like a stadium spotlight), softened on light
+            // (so the icon doesn't sit in a coral fog against the
+            // warm bg).
+            .shadow(
+                color: Color.accent.opacity(colorScheme == .dark ? 0.35 : 0.18),
+                radius: 24,
+                x: 0,
+                y: 0
+            )
             .padding(.bottom, 4)
 
             Text(step.title)

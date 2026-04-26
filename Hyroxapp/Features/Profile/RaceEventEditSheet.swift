@@ -66,7 +66,6 @@ struct RaceEventEditSheet: View {
         NavigationStack {
             formContent
         }
-        .preferredColorScheme(.dark)
     }
 
     private var formContent: some View {
@@ -83,14 +82,12 @@ struct RaceEventEditSheet: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Color.background, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
         .toolbar { editorToolbar }
         .sheet(isPresented: $isShowingTargetPicker) {
             TargetDurationPickerSheet(
                 duration: $targetDuration,
                 isPresented: $isShowingTargetPicker
             )
-            .preferredColorScheme(.dark)
         }
         .alert(
             "Delete this race?",

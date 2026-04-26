@@ -34,6 +34,10 @@ struct RaceDetailView: View {
     @Query(sort: [SortDescriptor(\UserProfile.createdAt, order: .forward)])
     private var profiles: [UserProfile]
 
+    // Active mode — drives the coral halo behind the hero finish
+    // time. Same scaling logic as RaceSummaryView and RaceView.
+    @Environment(\.colorScheme) private var colorScheme
+
     private var maxHeartRate: Int {
         profiles.first?.maxHeartRate ?? 190
     }
@@ -205,7 +209,15 @@ struct RaceDetailView: View {
                 .font(.displayHero)
                 .monospacedDigit()
                 .foregroundStyle(Color.textPrimary)
-                .shadow(color: Color.accent.opacity(0.35), radius: 20, x: 0, y: 0)
+                // Coral halo behind the hero time. Strong on dark
+                // (stadium spotlight), softer on light (avoids
+                // a coral fog over warm off-white).
+                .shadow(
+                    color: Color.accent.opacity(colorScheme == .dark ? 0.35 : 0.18),
+                    radius: 20,
+                    x: 0,
+                    y: 0
+                )
 
             Text("TOTAL TIME")
                 .font(.caption2.weight(.heavy))
@@ -218,6 +230,16 @@ struct RaceDetailView: View {
                     .monospacedDigit()
                     .foregroundStyle(Color.accent)
                     .padding(.top, 6)
+            }
+
+            // Roxzone summary — only when captured (two-tap mode
+            // was on for this race).
+            if let total = RaceStats.totalRoxzoneTime(race),
+               let avg = RaceStats.avgRoxzoneTime(race) {
+                Text("\(RaceStats.format(total)) total roxzone · \(Int(avg.rounded()))s avg")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.warning)
             }
 
             // Target outcome readout — only shown if a target

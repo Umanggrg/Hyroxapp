@@ -153,22 +153,56 @@ struct EditProfileView: View {
     }
 
     private var avatarPreview: some View {
-        Group {
-            if let data = avatarData, let uiImage = UIImage(data: data) {
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-            } else {
-                Image(systemName: "person.crop.circle.fill")
-                    .resizable()
-                    .foregroundStyle(Color.textTertiary, Color.surfaceElevated)
+        ZStack {
+            // Coral spotlight halo behind the avatar — same visual
+            // language as ProfileHero's hero treatment. Reads as
+            // "this is the identity moment" rather than a flat
+            // form-field. Kept low opacity so it doesn't compete
+            // with the photo itself.
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [
+                            Color.accent.opacity(0.22),
+                            Color.clear
+                        ],
+                        center: .center,
+                        startRadius: 0,
+                        endRadius: 90
+                    )
+                )
+                .frame(width: 180, height: 180)
+                .blur(radius: 8)
+
+            Group {
+                if let data = avatarData, let uiImage = UIImage(data: data) {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } else {
+                    Image(systemName: "person.crop.circle.fill")
+                        .resizable()
+                        .foregroundStyle(Color.textTertiary, Color.surfaceElevated)
+                }
             }
+            .frame(width: 120, height: 120)
+            .clipShape(Circle())
+            .overlay(
+                Circle().strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            Color.accent.opacity(0.7),
+                            Color.accent.opacity(0.2)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 2
+                )
+            )
+            .shadow(color: Color.accent.opacity(0.25), radius: 12, y: 4)
         }
-        .frame(width: 120, height: 120)
-        .clipShape(Circle())
-        .overlay(
-            Circle().strokeBorder(Color.divider, lineWidth: 1)
-        )
+        .frame(height: 180)
         .padding(.vertical, 8)
     }
 

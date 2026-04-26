@@ -197,7 +197,6 @@ struct ProfileView: View {
             .sheet(isPresented: $isEditing) {
                 if let profile = profiles.first {
                     EditProfileView(profile: profile)
-                        .preferredColorScheme(.dark)
                 }
             }
             .sheet(isPresented: $isShowingSettings) {
@@ -211,10 +210,8 @@ struct ProfileView: View {
                 switch mode {
                 case .create:
                     RaceEventEditSheet(existing: nil)
-                        .preferredColorScheme(.dark)
                 case .edit(let event):
                     RaceEventEditSheet(existing: event)
-                        .preferredColorScheme(.dark)
                 }
             }
             #endif

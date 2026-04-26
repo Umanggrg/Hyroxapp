@@ -65,7 +65,12 @@ struct ContentView: View {
                 }
         }
         .tint(Color.accent)
-        .preferredColorScheme(.dark)
+        // Drive color scheme from the user's setting. `.system`
+        // resolves to nil → SwiftUI follows the iOS-wide mode; the
+        // other two cases force light or dark. Was hardcoded
+        // `.dark` pre-light-mode; now reactive to Settings →
+        // Appearance picker.
+        .preferredColorScheme(profiles.first?.resolvedThemePreference.colorScheme)
         // Solid background on the tab bar — the iOS default
         // translucency softens the dark theme more than we want
         // and lets content bleed through on scroll. .visible
@@ -111,7 +116,11 @@ struct ContentView: View {
             if let profile = profiles.first {
                 OnboardingView(profile: profile)
                     .interactiveDismissDisabled()
-                    .preferredColorScheme(.dark)
+                    // Honor the same theme preference inside the
+                    // sheet — sheets present in their own scene
+                    // and don't inherit `.preferredColorScheme`
+                    // from the host. nil = follow system.
+                    .preferredColorScheme(profile.resolvedThemePreference.colorScheme)
             }
         }
     }
