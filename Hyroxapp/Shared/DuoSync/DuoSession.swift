@@ -77,8 +77,16 @@ final class DuoSession: NSObject {
     // Local peer identity. The display name shown to nearby guests
     // when this device is hosting. Pinned at init so changing it
     // mid-session would require re-creating MCSession.
-    private let myPeerID: MCPeerID
-    private let session: MCSession
+    //
+    // `nonisolated let` — both are immutable references that
+    // Multipeer's nonisolated delegate methods need to read
+    // synchronously (the invitation handler MUST fire from inside
+    // didReceiveInvitationFromPeer, not after a hop to MainActor).
+    // MCPeerID + MCSession are documented thread-safe for these
+    // accesses; the `let` makes Swift 6's strict-concurrency checker
+    // happy without resorting to `nonisolated(unsafe)`.
+    nonisolated private let myPeerID: MCPeerID
+    nonisolated private let session: MCSession
 
     // Created lazily when the device starts advertising / browsing
     // (since most users will only ever be one of the two). Torn
@@ -390,9 +398,16 @@ extension DuoSession: MCNearbyServiceAdvertiserDelegate {
         // Host"), so any invitation that arrives is desired. If we
         // ever expose a confirm prompt for stranger danger, this is
         // where it'd live.
-        Task { @MainActor in
-            invitationHandler(true, self.session)
-        }
+        //
+        // CRITICAL: Multipeer requires the invitation handler to be
+        // called SYNCHRONOUSLY from this delegate method. Deferring
+        // via Task { @MainActor } adds latency (~tens of ms) that
+        // can race the framework's internal handshake timeout — the
+        // peer's session never reaches .connected and the
+        // `notConnected → connecting → notConnected` loop ensues.
+        // The session reference is `nonisolated let` so this read
+        // is concurrency-safe.
+        invitationHandler(true, self.session)
     }
 }
 
