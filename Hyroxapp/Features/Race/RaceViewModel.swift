@@ -151,6 +151,77 @@ final class RaceViewModel {
     }
     #endif
 
+    // MARK: - Race state snapshot
+    //
+    // Builds the engine's current state into a transport-friendly
+    // `RaceStateSnapshot`. Single source of truth for both the watch
+    // (WCSession path) and the duo bridge (Multipeer path). Returns
+    // nil for `.notStarted` so callers can early-exit.
+    //
+    // `division` is passed in rather than read from a stored property
+    // because the VM doesn't own division semantically — that's a
+    // UserProfile concern. Both call sites (RaceView for watch sync,
+    // DuoRaceController for duo broadcast) have the user's division
+    // already and pass it through.
+    func makeRaceStateSnapshot(division: Division) -> RaceStateSnapshot? {
+        let phase: RaceStateSnapshot.Phase
+        let startedAt: Date?
+        let segmentStartedAt: Date?
+        let endedAt: Date?
+        let pausedAt: Date?
+
+        switch engine.state {
+        case .notStarted:
+            return nil
+        case .inProgress(let raceStart, let segStart, _):
+            phase = .inProgress
+            startedAt = raceStart
+            segmentStartedAt = segStart
+            endedAt = nil
+            pausedAt = nil
+        case .paused(let raceStart, let segStart, _, let pauseStart):
+            phase = .paused
+            startedAt = raceStart
+            segmentStartedAt = segStart
+            endedAt = nil
+            pausedAt = pauseStart
+        case .inRoxzone(let raceStart, _, let roxStart):
+            phase = .inRoxzone
+            startedAt = raceStart
+            segmentStartedAt = roxStart
+            endedAt = nil
+            pausedAt = nil
+        case .finished(let raceStart, let raceEnd, _):
+            phase = .finished
+            startedAt = raceStart
+            segmentStartedAt = nil
+            endedAt = raceEnd
+            pausedAt = nil
+        }
+
+        // currentStation is nil after a race finishes (no next
+        // station to point at). Fall back to the last station's
+        // index so the receiver still shows the final station name.
+        let stationIndex: Int
+        if let station = currentStation {
+            stationIndex = station.rawValue
+        } else {
+            stationIndex = max(0, totalSegments - 1)
+        }
+
+        return RaceStateSnapshot(
+            phase: phase,
+            startedAt: startedAt,
+            currentSegmentStartedAt: segmentStartedAt,
+            currentStationIndex: stationIndex,
+            completedStationsCount: completedSegmentsCount,
+            totalStations: totalSegments,
+            divisionRaw: division.rawValue,
+            endedAt: endedAt,
+            pausedAt: pausedAt
+        )
+    }
+
     // MARK: - Derived state (same surface as before)
 
     // True for both in-progress and paused — both states represent

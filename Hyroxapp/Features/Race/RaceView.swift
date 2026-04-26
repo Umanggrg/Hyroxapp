@@ -56,6 +56,32 @@ struct RaceView: View {
     // it to the VM on appear so it can insert / update / delete `Race` rows.
     @Environment(\.modelContext) private var modelContext
 
+    // MARK: - Duo state (lifted from RaceStartView)
+    //
+    // These outlive RaceStartView: the user pairs on the start
+    // screen, RaceStartView disappears when the race begins, and the
+    // duo coordinator + controller need to keep running through the
+    // whole race. Owned here at RaceView level; bindings passed down
+    // to RaceStartView so the chip + pairing sheet still mutate the
+    // same state.
+
+    // The user's currently-selected race format. Defaults to .solo;
+    // flips to .duo only after a successful pairing flow.
+    @State private var selectedMode: RaceMode = .solo
+
+    // Pairing-level coordinator. Created on first Duo chip tap;
+    // torn down when the user reverts to Solo or finishes a duo race.
+    @State private var duoCoordinator: DuoCoordinator?
+
+    // In-race controller. Created when pairing reaches .ready and
+    // the local user starts the race (host) OR receives the first
+    // running snapshot (guest). Owns the bridge between the
+    // RaceViewModel + DuoCoordinator while a duo race is active.
+    @State private var duoController: DuoRaceController?
+
+    // Drives the DuoPairingView sheet presented from RaceStartView.
+    @State private var isPairingPresented = false
+
     // Active mode — drives shadow / glow opacity scaling on the
     // in-race CTAs and overlays. Coral spotlights tuned for OLED
     // black would read as a heavy wash on warm off-white, so we
@@ -77,7 +103,13 @@ struct RaceView: View {
                 } else if !viewModel.hasStarted {
                     // RaceStartView owns its own padding so the hero
                     // backdrop can bleed full-width.
-                    RaceStartView(viewModel: viewModel)
+                    RaceStartView(
+                        viewModel: viewModel,
+                        selectedMode: $selectedMode,
+                        duoCoordinator: $duoCoordinator,
+                        duoController: $duoController,
+                        isPairingPresented: $isPairingPresented
+                    )
                 } else if viewModel.isFinished {
                     // Same — RaceSummaryView controls its own bleed
                     // so the finish-moment backdrop reaches the edges.
@@ -177,6 +209,20 @@ struct RaceView: View {
             publishWatchState()
             announceTransitionIfEnabled()
         }
+        // Fires on EVERY engine-state mutation, including pause /
+        // resume / endSegment / startNextSegment that the two
+        // hooks above miss (those only see hasStarted + advance
+        // transitions). Covers the watch and duo broadcasts so
+        // pausing / roxzoning the race propagates to both.
+        //
+        // Equatable comparison is cheap: enum case + a few Date
+        // values + an array of up to 16 Splits. No heavy work.
+        .onChange(of: viewModel.engine.state) { _, _ in
+            publishWatchState()
+            #if canImport(MultipeerConnectivity)
+            duoController?.broadcastCurrent()
+            #endif
+        }
         // Keep the screen awake for the duration of an active race.
         // CLAUDE.md §6: the display must not dim mid-workout. Toggled off
         // again on finish, abandonment, or view-dismiss so we don't burn the
@@ -208,7 +254,49 @@ struct RaceView: View {
         } message: {
             Text("Your splits and total time will be discarded.")
         }
+        // Guest's race screen — full-screen cover routed in when
+        // the local user paired as a guest AND a snapshot has
+        // arrived from the host. The `notStarted` exclusion keeps
+        // the cover hidden until the host actually starts; once
+        // the host advances to `.inProgress`, the snapshot's
+        // phase flips and the cover slides up.
+        //
+        // The host never sees this cover — `isGuestRaceActive`
+        // is gated on role == .guest.
+        #if canImport(MultipeerConnectivity)
+        .fullScreenCover(isPresented: Binding(
+            get: { isGuestRaceActive },
+            set: { newValue in
+                if !newValue {
+                    // User dismissed (deliberate or post-finish).
+                    // Tear down the duo connection so a fresh
+                    // race can start cleanly.
+                    duoController = nil
+                    duoCoordinator?.cancel()
+                    duoCoordinator = nil
+                    selectedMode = .solo
+                }
+            }
+        )) {
+            if let controller = duoController {
+                DuoGuestRaceView(controller: controller)
+            }
+        }
+        #endif
     }
+
+    // True once the local user is acting as a guest AND the host
+    // has broadcast at least one running snapshot. Drives the
+    // fullScreenCover above.
+    #if canImport(MultipeerConnectivity)
+    private var isGuestRaceActive: Bool {
+        guard let controller = duoController,
+              controller.role == .guest,
+              let snapshot = controller.latestSnapshot
+        else { return false }
+        return snapshot.phase != .notStarted
+    }
+    #endif
 
     // MARK: - In-progress
 
@@ -776,82 +864,33 @@ struct RaceView: View {
     // handles the "what other surfaces need to know" plumbing.
     private func publishWatchState() {
         #if canImport(WatchConnectivity)
-        let phase: RaceStateSnapshot.Phase
-        let startedAt: Date?
-        let segmentStartedAt: Date?
-        let endedAt: Date?
-        let pausedAt: Date?
-
-        switch viewModel.engine.state {
-        case .notStarted:
-            phase = .notStarted
-            startedAt = nil
-            segmentStartedAt = nil
-            endedAt = nil
-            pausedAt = nil
-        case .inProgress(let raceStart, let segStart, _):
-            phase = .inProgress
-            startedAt = raceStart
-            segmentStartedAt = segStart
-            endedAt = nil
-            pausedAt = nil
-        case .paused(let raceStart, let segStart, _, let pauseStart):
-            // Phone is in .paused state — race timer is frozen at
-            // the pause moment. The snapshot carries `pausedAt` so
-            // the watch can compute and display the frozen elapsed
-            // (`pausedAt - startedAt`) instead of ticking from
-            // `Date()`. `currentSegmentStartedAt` keeps its
-            // original value so the segment timer freezes the
-            // same way.
-            phase = .paused
-            startedAt = raceStart
-            segmentStartedAt = segStart
-            endedAt = nil
-            pausedAt = pauseStart
-        case .inRoxzone(let raceStart, _, let roxStart):
-            // Phone is in .inRoxzone — segment finished, transition
-            // running. Map the snapshot's segment timestamp to the
-            // roxzone start so the watch's local "segment timer"
-            // doubles as the transition timer. The watch's
-            // .inRoxzone branch labels it accordingly.
-            phase = .inRoxzone
-            startedAt = raceStart
-            segmentStartedAt = roxStart
-            endedAt = nil
-            pausedAt = nil
-        case .finished(let raceStart, let raceEnd, _):
-            phase = .finished
-            startedAt = raceStart
-            segmentStartedAt = nil
-            endedAt = raceEnd
-            pausedAt = nil
+        // Snapshot construction now lives in `RaceViewModel` — same
+        // helper feeds both the watch path here and the duo
+        // broadcast path on `DuoRaceController`. Returning nil
+        // means engine is .notStarted (nothing meaningful to
+        // publish); we still send a stub for the watch's idle
+        // state so it transitions out of .finished cleanly.
+        if let snapshot = viewModel.makeRaceStateSnapshot(division: division) {
+            WatchCompanionService.shared.publish(snapshot)
+        } else {
+            // Engine is in .notStarted — synthesize a minimal
+            // notStarted snapshot so the watch returns to its
+            // waiting state instead of holding the last finished
+            // snapshot indefinitely. Same payload the make helper
+            // would build if it didn't early-exit.
+            let snapshot = RaceStateSnapshot(
+                phase: .notStarted,
+                startedAt: nil,
+                currentSegmentStartedAt: nil,
+                currentStationIndex: 0,
+                completedStationsCount: 0,
+                totalStations: viewModel.totalSegments,
+                divisionRaw: division.rawValue,
+                endedAt: nil,
+                pausedAt: nil
+            )
+            WatchCompanionService.shared.publish(snapshot)
         }
-
-        // `currentStation` is nil once the race has finished (no next
-        // station to point at). Fall back to the last station's index
-        // (`totalSegments - 1`) so the watch still shows Wall Balls
-        // on its finished state.
-        let stationIndex: Int = {
-            if let station = viewModel.currentStation {
-                return station.rawValue
-            } else {
-                return max(0, viewModel.totalSegments - 1)
-            }
-        }()
-
-        let snapshot = RaceStateSnapshot(
-            phase: phase,
-            startedAt: startedAt,
-            currentSegmentStartedAt: segmentStartedAt,
-            currentStationIndex: stationIndex,
-            completedStationsCount: viewModel.completedSegmentsCount,
-            totalStations: viewModel.totalSegments,
-            divisionRaw: division.rawValue,
-            endedAt: endedAt,
-            pausedAt: pausedAt
-        )
-
-        WatchCompanionService.shared.publish(snapshot)
         #endif
     }
 

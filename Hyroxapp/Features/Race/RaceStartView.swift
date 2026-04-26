@@ -13,6 +13,15 @@ import SwiftData
 struct RaceStartView: View {
     let viewModel: RaceViewModel
 
+    // Duo state owned by the parent RaceView. Bindings rather than
+    // local @State because the coordinator + controller need to
+    // outlive RaceStartView's lifetime — a duo race continues after
+    // the user taps Start and RaceStartView is no longer rendered.
+    @Binding var selectedMode: RaceMode
+    @Binding var duoCoordinator: DuoCoordinator?
+    @Binding var duoController: DuoRaceController?
+    @Binding var isPairingPresented: Bool
+
     // Read the user's countdown setting so the start button knows
     // whether to fire the 3-2-1 ritual or kick off the engine
     // immediately. Falls back to true (countdown on) when no
@@ -57,6 +66,10 @@ struct RaceStartView: View {
     // to nil clears the goal (race runs without a target).
     // Persists for this screen's lifetime; resets on app restart.
     @State private var targetDuration: TimeInterval? = 90 * 60
+
+    // (selectedMode, duoCoordinator, duoController, and
+    // isPairingPresented are now @Binding properties owned by
+    // the parent RaceView — see top of struct.)
 
     // Subtle pulse-glow animation on the primary CTA. Drives the
     // ambient breathing on the Start Race button — pulls the eye
@@ -116,6 +129,29 @@ struct RaceStartView: View {
                 duration: $targetDuration,
                 isPresented: $isTargetPickerPresented
             )
+        }
+        .sheet(isPresented: $isPairingPresented) {
+            #if canImport(MultipeerConnectivity)
+            if let coordinator = duoCoordinator {
+                DuoPairingView(coordinator: coordinator) {
+                    // Partner paired and the local user confirmed.
+                    // Promote selectedMode so the chip reads as Duo,
+                    // and spin up the in-race controller so it's
+                    // ready to broadcast (host) or receive (guest)
+                    // the moment the host taps Start.
+                    selectedMode = .duo
+                    let role = coordinator.role ?? .host
+                    duoController = DuoRaceController(
+                        role: role,
+                        coordinator: coordinator,
+                        // Only the host's controller mutates a
+                        // local engine; the guest renders read-only
+                        // from received snapshots.
+                        viewModel: role == .host ? viewModel : nil
+                    )
+                }
+            }
+            #endif
         }
         // Quick Action listener — when the user long-presses the
         // app icon and picks "Custom Workout", ContentView swaps
@@ -202,11 +238,70 @@ struct RaceStartView: View {
         )
     }
 
+    // True when the local user has paired as a guest. In this
+    // state, the primary CTA can't start a race — only the host
+    // does. We render a non-interactive "Waiting for host" panel
+    // instead.
+    private var isGuestWaiting: Bool {
+        #if canImport(MultipeerConnectivity)
+        return selectedMode == .duo
+            && duoCoordinator?.role == .guest
+        #else
+        return false
+        #endif
+    }
+
     // Primary CTA — Start Race. Bigger, with an ambient coral
     // glow that gently pulses to draw the eye. The glow uses
     // .shadow + opacity animation rather than a stroke so it
     // reads as "lit up from within."
+    @ViewBuilder
     private var primaryCTA: some View {
+        if isGuestWaiting {
+            guestWaitingPanel
+        } else {
+            hostStartButton
+        }
+    }
+
+    // Read-only panel shown to the guest while paired. Replaces
+    // the Start Race button — the guest can't start the race,
+    // only the host can. When the host starts, the controller's
+    // first inbound stateUpdate triggers a fullScreenCover
+    // routing the guest into DuoGuestRaceView.
+    private var guestWaitingPanel: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(Color.accent)
+                Text("Waiting for host…")
+                    .font(.system(size: 18, weight: .heavy, design: .rounded))
+                    .foregroundStyle(Color.textPrimary)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: Layout.raceButtonHeight)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(Color.accent.opacity(0.35), lineWidth: 1)
+            )
+
+            Text("\(pairedPartnerName ?? "Your partner") will tap Start on their phone.")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.textTertiary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal, Layout.screenMargin - 4)
+    }
+
+    // The original primary CTA — solo and host both use this.
+    // Tapping in duo mode (host) starts a normal race; the engine
+    // state change fires the broadcast hook on the parent RaceView.
+    private var hostStartButton: some View {
         Button {
             Haptics.impact(.heavy)
             viewModel.startRaceWithCountdown(
@@ -217,7 +312,7 @@ struct RaceStartView: View {
             HStack(spacing: 10) {
                 Image(systemName: "flag.checkered")
                     .font(.system(size: 22, weight: .heavy))
-                Text("Start Race")
+                Text(selectedMode == .duo ? "Start Duo Race" : "Start Race")
                     .font(.system(size: 24, weight: .heavy, design: .rounded))
             }
             // Brand-contract white-on-coral; see Color.onAccent.
@@ -361,43 +456,98 @@ struct RaceStartView: View {
     // RaceEventEditSheet can reuse it. Behavior unchanged.
 
     private func modeChip(_ mode: RaceMode) -> some View {
-        // Solo is the only selectable mode in v0.1; Duo is laid out now so
-        // the pattern exists in v2 when Supabase Realtime wires it up.
-        let isSelected = (mode == .solo)
-        let available = mode.isAvailable
+        let isSelected = (mode == selectedMode)
 
-        return VStack(spacing: 6) {
-            Image(systemName: mode == .solo ? "person.fill" : "person.2.fill")
-                .font(.callout.weight(.bold))
-                .foregroundStyle(
-                    isSelected ? Color.accent
-                        : (available ? Color.textSecondary : Color.textTertiary)
-                )
+        return Button {
+            handleModeTap(mode)
+        } label: {
+            VStack(spacing: 6) {
+                Image(systemName: mode == .solo ? "person.fill" : "person.2.fill")
+                    .font(.callout.weight(.bold))
+                    .foregroundStyle(isSelected ? Color.accent : Color.textSecondary)
 
-            Text(mode.displayName)
-                .font(.system(size: 15, weight: .heavy, design: .rounded))
+                Text(mode.displayName)
+                    .font(.system(size: 15, weight: .heavy, design: .rounded))
 
-            if !available {
-                Text("COMING SOON")
-                    .font(.system(size: 8, weight: .heavy))
-                    .tracking(0.6)
-                    .foregroundStyle(Color.textTertiary)
+                // For Duo: show the partner's name once pairing is
+                // complete so the chip doubles as a "you're paired
+                // with X" indicator. Pre-pair / Solo, this slot
+                // stays empty.
+                if mode == .duo, let partner = pairedPartnerName {
+                    Text("with \(partner)")
+                        .font(.system(size: 9, weight: .heavy))
+                        .tracking(0.4)
+                        .foregroundStyle(Color.success)
+                        .lineLimit(1)
+                }
             }
+            .frame(maxWidth: .infinity)
+            .frame(height: 74)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(isSelected ? Color.accent.opacity(0.10) : Color.surface.opacity(0.7))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(
+                        isSelected ? Color.accent.opacity(0.55) : Color.divider,
+                        lineWidth: 1
+                    )
+            )
+            .foregroundStyle(Color.textPrimary)
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 74)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(isSelected ? Color.accent.opacity(0.10) : Color.surface.opacity(0.7))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(
-                    isSelected ? Color.accent.opacity(0.55) : Color.divider,
-                    lineWidth: 1
+        .buttonStyle(.plain)
+    }
+
+    // Tap handler for the Solo / Duo chips.
+    //
+    // Solo tap: revert to solo, tear down any active duo coordinator.
+    // Duo tap (no coordinator yet): create a coordinator, present the
+    //   pairing sheet. Mode flip waits for the sheet's onReady — we
+    //   don't want to commit selectedMode = .duo just because they
+    //   tapped the chip; only after a partner is paired.
+    // Duo tap (already paired): re-present the sheet so the user can
+    //   see the connected status / cancel.
+    private func handleModeTap(_ mode: RaceMode) {
+        switch mode {
+        case .solo:
+            if selectedMode == .duo {
+                duoCoordinator?.cancel()
+                duoCoordinator = nil
+                // Tear down the controller too so it doesn't
+                // try to broadcast / receive after we've left
+                // duo mode. The fullScreenCover bound to its
+                // existence will dismiss naturally.
+                duoController = nil
+            }
+            selectedMode = .solo
+
+        case .duo:
+            #if canImport(MultipeerConnectivity)
+            if duoCoordinator == nil {
+                let profile = profiles.first
+                let displayName = profile?.displayName.trimmingCharacters(in: .whitespaces) ?? "Athlete"
+                let division = profile?.resolvedDivision ?? .mensOpen
+                duoCoordinator = DuoCoordinator(
+                    localDisplayName: displayName.isEmpty ? "Athlete" : displayName,
+                    localDivision: division
                 )
-        )
-        .foregroundStyle(available ? Color.textPrimary : Color.textTertiary)
-        .opacity(available ? 1.0 : 0.5)
+            }
+            isPairingPresented = true
+            #endif
+        }
+    }
+
+    // Convenience for the chip subtitle. Returns the partner's
+    // display name once the coordinator is in .ready state.
+    private var pairedPartnerName: String? {
+        #if canImport(MultipeerConnectivity)
+        guard let coordinator = duoCoordinator,
+              case .ready(let name, _) = coordinator.state
+        else { return nil }
+        return name
+        #else
+        return nil
+        #endif
     }
 }
