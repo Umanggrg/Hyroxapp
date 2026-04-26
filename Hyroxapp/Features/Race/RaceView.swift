@@ -780,6 +780,7 @@ struct RaceView: View {
         let startedAt: Date?
         let segmentStartedAt: Date?
         let endedAt: Date?
+        let pausedAt: Date?
 
         switch viewModel.engine.state {
         case .notStarted:
@@ -787,38 +788,43 @@ struct RaceView: View {
             startedAt = nil
             segmentStartedAt = nil
             endedAt = nil
+            pausedAt = nil
         case .inProgress(let raceStart, let segStart, _):
             phase = .inProgress
             startedAt = raceStart
             segmentStartedAt = segStart
             endedAt = nil
-        case .paused(let raceStart, let segStart, _, _):
-            // Watch sync currently has no .paused phase, so map
-            // pause to .inProgress and let the watch keep ticking
-            // visually. The phone is the authoritative timer; on
-            // resume we publish a fresh snapshot with shifted
-            // timestamps and the watch catches up. A proper
-            // .paused-aware snapshot phase is tracked in the §13
-            // backlog as a v2 polish.
-            phase = .inProgress
+            pausedAt = nil
+        case .paused(let raceStart, let segStart, _, let pauseStart):
+            // Phone is in .paused state — race timer is frozen at
+            // the pause moment. The snapshot carries `pausedAt` so
+            // the watch can compute and display the frozen elapsed
+            // (`pausedAt - startedAt`) instead of ticking from
+            // `Date()`. `currentSegmentStartedAt` keeps its
+            // original value so the segment timer freezes the
+            // same way.
+            phase = .paused
             startedAt = raceStart
             segmentStartedAt = segStart
             endedAt = nil
+            pausedAt = pauseStart
         case .inRoxzone(let raceStart, _, let roxStart):
-            // Watch sync similarly has no .inRoxzone phase.
-            // Treat as inProgress for the watch — overall race
-            // time keeps ticking, and the watch surface's
-            // segment timer will reset when the next segment
-            // starts on the phone. Same v2-polish caveat.
-            phase = .inProgress
+            // Phone is in .inRoxzone — segment finished, transition
+            // running. Map the snapshot's segment timestamp to the
+            // roxzone start so the watch's local "segment timer"
+            // doubles as the transition timer. The watch's
+            // .inRoxzone branch labels it accordingly.
+            phase = .inRoxzone
             startedAt = raceStart
             segmentStartedAt = roxStart
             endedAt = nil
+            pausedAt = nil
         case .finished(let raceStart, let raceEnd, _):
             phase = .finished
             startedAt = raceStart
             segmentStartedAt = nil
             endedAt = raceEnd
+            pausedAt = nil
         }
 
         // `currentStation` is nil once the race has finished (no next
@@ -841,7 +847,8 @@ struct RaceView: View {
             completedStationsCount: viewModel.completedSegmentsCount,
             totalStations: viewModel.totalSegments,
             divisionRaw: division.rawValue,
-            endedAt: endedAt
+            endedAt: endedAt,
+            pausedAt: pausedAt
         )
 
         WatchCompanionService.shared.publish(snapshot)

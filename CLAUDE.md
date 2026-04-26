@@ -163,35 +163,67 @@ If I ask for any of these during v0.1, push back and remind me we're scoped to R
 
 ---
 
-### 4.5 — Duo Mode Specification (v2 Feature, Design Intent Only for v0.1)
+### 4.5 — Duo Mode Specification (Tiered Rollout)
 
-HYROX has an official **Doubles** format where two athletes complete the race together, splitting work at each workout station. This app will support this natively.
+HYROX has an official **Doubles** format where two athletes complete the race together, splitting work at each workout station. This app will support this natively, and rolls out in **three tiers** — each builds on the previous, each ships independently, none requires the next.
 
-**Core concept:** Two users' phones (or Watches) are paired for a single race. The timer is synchronized across both devices. Both users can advance stations. Splits and total time are attributed to the pair.
+#### Tier 1 — Co-located Duo via Multipeer Connectivity (CURRENT BUILD)
 
-**User flow (planned):**
-1. User A starts a race, selects "Duo"
-2. User A is shown a shareable code or QR
-3. User B opens app, taps "Join Duo," enters code
-4. Both devices show a "Waiting for partner" confirmation screen
-5. Either user taps "Start" — timer begins synchronized on both devices
-6. Either user can tap "Next Station" — advancement propagates to both devices in realtime
-7. Race finishes, summary shows on both devices identically, saves to both accounts
+The 80% case for HYROX Doubles: two athletes physically together at the same gym, tapping in their workout side-by-side. No backend, no auth, no accounts needed.
 
-**Technical approach (preliminary, don't build yet):**
-- Use **Supabase Realtime** (Postgres CDC over WebSocket)
-- A `duo_race` row in Postgres with fields for `start_time`, `current_station`, `splits[]`, `status`
-- Both clients subscribe to changes on that row
-- Either client can write `advance_station` events; server updates `current_station`; both clients receive the update
-- Use server-authoritative timing (`start_time` is stored server-side on race start; clients compute elapsed from that) — this avoids clock drift between devices
+**Architecture: host-authoritative over Multipeer Connectivity.**
+- Apple's `MultipeerConnectivity` framework — peer-to-peer over Bluetooth + Wi-Fi Direct, no servers, encrypted by default.
+- Leader (host) owns the `RaceEngine`. Their state is the source of truth.
+- Guest's phone is a remote display + remote input. Either side can tap Start / Next / Pause / Finish, but the guest's tap becomes a `requestAdvance` message sent to the host, which mutates the engine and broadcasts the new snapshot back. No "two engines drifting in sync" problem.
+- Snapshot transport reuses `RaceStateSnapshot` (same shape we ship to the watch).
 
-**Hard edge cases to solve before shipping Duo Mode:**
-- One partner loses connection mid-race — what happens? (probably: local timer continues, sync resumes when reconnected, conflicts resolved by server timestamp order)
-- One partner's battery dies — other can finish solo, race saves to both with note
-- Both partners tap "Next Station" within milliseconds — server de-duplicates
-- Disagreement on when to advance — tie goes to the earlier tap
+**User flow:**
+1. User A taps Duo → "Host". Phone starts advertising.
+2. User B taps Duo → "Join". Phone starts browsing, sees A's name in a list.
+3. B taps A → invitation. A accepts. Both land on a shared "Ready" screen.
+4. Either taps Start — host's engine starts, broadcasts to guest. Both timers begin at the same `startedAt`.
+5. Either taps Next/End/Pause/Finish — host arbitrates, broadcasts. Both screens stay identical.
+6. Race finishes. Saves to BOTH athletes' Histories independently (Race row gets a `partner: String?` field carrying the other athlete's display name).
 
-**For v0.1 only:** Do NOT implement any of this. But when designing the Race Mode UI, leave room for a "Solo / Duo" toggle on the start screen. Grey it out for now with a "Coming soon" label. This forces us to design the pattern even if we don't wire it up.
+**Real design decisions to lock in before shipping:**
+- *Crediting:* identical times and splits to both athletes' Histories (matches the HYROX Doubles convention).
+- *Disconnect mid-race:* surviving phone keeps racing solo locally with a "partner disconnected" banner. Race saves with a `partnerDisconnectedAt` annotation. No re-pair flow in v1 of Duo.
+- *Watch:* no changes. Each phone's `WatchCompanionService` keeps streaming its own snapshot to its own paired watch — both watches end up showing the same race state because both phones do.
+
+**Hard edge cases:**
+- Both partners tap "Next Station" within milliseconds — host's engine processes the first one, second is a no-op against an already-advanced state. Multipeer's ~100–300ms latency makes this rare.
+- Pause arbitration — guest's pause becomes a `requestPause` message; ~200ms window where they could disagree visually. Acceptable for v1; surface a small "syncing…" state if it becomes a problem.
+
+**Estimate:** ~3–4 sessions. None of it requires backend work.
+
+#### Tier 2 — Cloud-backed Duo (requires accounts)
+
+Same UX, different transport. Unlocks "Duo with someone in another city" and survives bad gym Wi-Fi/Bluetooth.
+
+**Requires (in order):**
+- Supabase auth (email/Apple Sign-In) — every user has a stable `user_id`.
+- Cloud-synced UserProfile and Race rows (so a duo race saved on one device shows up on the other).
+- Supabase Realtime subscription model — a `duo_race` row in Postgres, both clients subscribe to changes, server-authoritative timing using `start_time` written by whichever client tapped Start first.
+- Pairing flow: either via short-lived 6-character code (typed in by the partner) OR by selecting from a friends list (see Tier 3).
+- Disconnect handling becomes more nuanced — one device offline doesn't mean disconnected, just delayed sync. Server-timestamp-ordered conflict resolution.
+
+**Why this needs accounts:** without a `user_id` you can't write a Race row attributable to a specific athlete, and you can't have a pairing code that survives an app restart.
+
+#### Tier 3 — Friends + invitations layer
+
+Builds on Tier 2. Now that users have accounts and races sync to the cloud, add the social graph.
+
+**Pieces:**
+- Follow/unfollow relationships in Supabase (`relationships` table, `from_user_id`, `to_user_id`, `created_at`).
+- Friends list view in Profile.
+- Invite-to-Duo flow — instead of typing a code, pick a follower from your list and tap "Invite to Duo." They get a push notification ("Sarah invited you to Duo race") that deep-links into the race start screen with the invitation pre-loaded.
+- Public profile pages — view another athlete's history, total stats, badges (with privacy controls).
+
+**Why this is its own tier:** the core duo mechanic doesn't need a social graph. Tier 1 + Tier 2 already deliver the duo experience. Tier 3 is the layer that makes Duo discoverable and convenient at scale, and naturally pairs with the social feed work that's also in v3+.
+
+**Backlog ordering:** Tier 1 ships now (Multipeer, no backend). Tier 2 is gated on Supabase auth + sync, which is the broader v1 work in §4. Tier 3 layers on top of Tier 2 once the social feed is live.
+
+**For Tier 1 only (current build):** the existing greyed-out "Solo / Duo" toggle on the start screen gets un-greyed and wired to the Multipeer flow. The Race model already has a `mode: RaceMode` field (.solo / .duo) — it's been there since v0.1, accommodated for exactly this moment.
 
 ---
 

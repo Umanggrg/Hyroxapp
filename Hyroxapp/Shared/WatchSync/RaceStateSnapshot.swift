@@ -20,11 +20,26 @@ import Foundation
 // Shared between iOS and watchOS targets via target membership; the file
 // is pure Swift with no platform imports so it compiles identically on
 // both.
-struct RaceStateSnapshot: Equatable, Sendable {
+// `Codable` is added so the same snapshot type can ride two transports:
+//   • WCSession (watch) — uses the hand-rolled plist-compatible dictionary
+//     path below (`toDictionary()` / `init?(dictionary:)`)
+//   • MultipeerConnectivity (Duo) — uses JSONEncoder/Decoder via Codable
+// Both paths describe the same race-state shape; reusing the type means
+// either transport can deliver a snapshot the receiver renders identically.
+struct RaceStateSnapshot: Equatable, Sendable, Codable {
 
     enum Phase: String, Codable, Sendable {
         case notStarted
         case inProgress
+        // Race timer is frozen — phone is in `.paused` engine state.
+        // Watch shows last total elapsed at pause time (computed from
+        // `startedAt..pausedAt`), dimmed UI, no advance button.
+        case paused
+        // Athlete just ended a segment and the next hasn't started yet.
+        // `currentSegmentStartedAt` is set to the roxzone-start timestamp
+        // so the watch's local timer ticks "transition time" from there.
+        // Watch shows amber treatment + the next station's name.
+        case inRoxzone
         case finished
     }
 
@@ -39,7 +54,17 @@ struct RaceStateSnapshot: Equatable, Sendable {
     // Start of the current (in-progress) segment. Used for the "segment
     // timer" shown under the main total timer. Nil when the race isn't
     // in progress.
+    //
+    // For `.inRoxzone`, this carries the roxzone-start timestamp so the
+    // watch can render "time in transition" the same way it renders a
+    // segment timer — same arithmetic, different label.
     let currentSegmentStartedAt: Date?
+
+    // When phase is `.paused`, the moment the athlete tapped pause on
+    // the phone. Watch freezes its total-time display at
+    // `pausedAt - startedAt` instead of computing live from `Date()`.
+    // `nil` for every other phase.
+    let pausedAt: Date?
 
     // 0-based index into `Station.raceSequence`. The watch resolves this
     // to a `Station` case and uses `station.displayName` /
@@ -76,7 +101,8 @@ struct RaceStateSnapshot: Equatable, Sendable {
         completedStationsCount: Int,
         totalStations: Int,
         divisionRaw: String,
-        endedAt: Date?
+        endedAt: Date?,
+        pausedAt: Date? = nil
     ) {
         self.phase = phase
         self.startedAt = startedAt
@@ -86,6 +112,7 @@ struct RaceStateSnapshot: Equatable, Sendable {
         self.totalStations = totalStations
         self.divisionRaw = divisionRaw
         self.endedAt = endedAt
+        self.pausedAt = pausedAt
     }
 
     // MARK: - Dictionary encoding (WCSession transport)
@@ -102,6 +129,7 @@ struct RaceStateSnapshot: Equatable, Sendable {
         static let totalStations = "totalStations"
         static let divisionRaw = "divisionRaw"
         static let endedAt = "endedAt"
+        static let pausedAt = "pausedAt"
     }
 
     // Build a plist-compatible dictionary suitable for
@@ -124,6 +152,9 @@ struct RaceStateSnapshot: Equatable, Sendable {
         }
         if let endedAt {
             dict[Key.endedAt] = endedAt.timeIntervalSince1970
+        }
+        if let pausedAt {
+            dict[Key.pausedAt] = pausedAt.timeIntervalSince1970
         }
         return dict
     }
@@ -168,6 +199,12 @@ struct RaceStateSnapshot: Equatable, Sendable {
             self.endedAt = Date(timeIntervalSince1970: endedAtInterval)
         } else {
             self.endedAt = nil
+        }
+
+        if let pausedAtInterval = dictionary[Key.pausedAt] as? TimeInterval {
+            self.pausedAt = Date(timeIntervalSince1970: pausedAtInterval)
+        } else {
+            self.pausedAt = nil
         }
     }
 
