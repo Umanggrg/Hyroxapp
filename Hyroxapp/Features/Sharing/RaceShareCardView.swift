@@ -390,13 +390,28 @@ struct RaceShareCardView: View {
                 .clipShape(Circle())
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(profile?.displayName ?? "HYROX Athlete")
+                // Title line — solo races show just the athlete's
+                // name; duo races show "Athlete & Partner" so the
+                // exported card reads as a shared moment. Both
+                // partners exporting from their phones get the same
+                // shape since each one's `partner` field carries
+                // the OTHER athlete's name.
+                Text(displayHeaderName)
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(Color.textPrimary)
                     .lineLimit(1)
 
                 HStack(spacing: 4) {
-                    if let handle = profile?.handle, !handle.isEmpty {
+                    if race.mode == .duo {
+                        // Subtle "Doubles" stamp instead of @handle
+                        // for duo races — handle is a per-athlete
+                        // identifier, less meaningful when the card
+                        // is about both partners' shared race.
+                        Text("DOUBLES")
+                            .font(.system(size: 10, weight: .heavy))
+                            .tracking(0.6)
+                            .foregroundStyle(Color.accent)
+                    } else if let handle = profile?.handle, !handle.isEmpty {
                         Text("@\(handle)")
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(Color.textSecondary)
@@ -455,6 +470,20 @@ struct RaceShareCardView: View {
     private var initial: String {
         let name = profile?.displayName ?? "H"
         return String(name.prefix(1)).uppercased()
+    }
+
+    // Header name for the athlete footer. Solo races show just the
+    // local athlete's display name. Duo races show "Athlete &
+    // Partner" so the exported card reads as a shared moment.
+    // Falls back gracefully when either name is missing.
+    private var displayHeaderName: String {
+        let me = profile?.displayName ?? "HYROX Athlete"
+        if race.mode == .duo,
+           let partner = race.partner,
+           !partner.trimmingCharacters(in: .whitespaces).isEmpty {
+            return "\(me) & \(partner)"
+        }
+        return me
     }
 
     // MARK: - Computed values

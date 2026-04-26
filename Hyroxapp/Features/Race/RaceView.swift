@@ -82,6 +82,13 @@ struct RaceView: View {
     // Drives the DuoPairingView sheet presented from RaceStartView.
     @State private var isPairingPresented = false
 
+    // Drives the "Start Run" overlay shown when the athlete enters
+    // a run station with manual run start enabled. Lifetime: set
+    // true on the run-station transition (in the .onChange watcher
+    // below), cleared when the user taps Start Run or when the
+    // station changes again.
+    @State private var isAwaitingRunStart = false
+
     // Active mode — drives shadow / glow opacity scaling on the
     // in-race CTAs and overlays. Coral spotlights tuned for OLED
     // black would read as a heavy wash on warm off-white, so we
@@ -136,8 +143,20 @@ struct RaceView: View {
                 countdownOverlay(value: value)
                     .transition(.opacity)
             }
+            // Manual run start overlay — only shown when the
+            // athlete enters a run station with the setting on.
+            // Z-stacks over the in-progress view so the regular
+            // race UI stays in place underneath. Total race
+            // timer keeps ticking; only the segment timer (and
+            // the athlete) is paused at the start line until
+            // they tap Start Run.
+            if isAwaitingRunStart {
+                startRunOverlay
+                    .transition(.opacity)
+            }
         }
         .animation(.easeInOut(duration: 0.2), value: viewModel.countdownValue)
+        .animation(.easeInOut(duration: 0.2), value: isAwaitingRunStart)
         // Per-tick side effects for the countdown — voice cue +
         // haptic. Fires exactly once per integer change. The voice
         // cue speaks the number ("3", "2", "1", "GO"); the haptic
@@ -251,6 +270,14 @@ struct RaceView: View {
             handleDuoSessionStateChange(newState)
         }
         #endif
+        // Manual run start trigger. When the active station flips
+        // to a run AND the athlete has the setting on, raise the
+        // overlay so they can pre-position before timing begins.
+        // Skip the very first run (race start) — the existing
+        // 3-2-1-GO countdown ritual already handles that case.
+        .onChange(of: viewModel.currentStation) { _, newStation in
+            handleStationChangedForManualRun(newStation)
+        }
         // Keep the screen awake for the duration of an active race.
         // CLAUDE.md §6: the display must not dim mid-workout. Toggled off
         // again on finish, abandonment, or view-dismiss so we don't burn the
@@ -352,6 +379,31 @@ struct RaceView: View {
         try? race.modelContext?.save()
     }
     #endif
+
+    // Watcher for `viewModel.currentStation` changes. Shows the
+    // Start Run overlay when:
+    //   1. The new station is a run (Station.kind == .run)
+    //   2. The athlete has manualRunStartEnabled in their profile
+    //   3. We're past the race's first station (the 3-2-1 countdown
+    //      already gives the athlete a moment to prep before run1;
+    //      a second prompt would be redundant)
+    //   4. The race is running, not paused / inRoxzone / finished
+    //
+    // Otherwise dismisses any open overlay (e.g. station changes to
+    // a workout, or race ends).
+    private func handleStationChangedForManualRun(_ newStation: Station?) {
+        guard let station = newStation,
+              station.kind == .run,
+              profiles.first?.manualRunStartEnabled == true,
+              viewModel.hasStarted,
+              !viewModel.isFinished,
+              viewModel.completedSegmentsCount > 0
+        else {
+            isAwaitingRunStart = false
+            return
+        }
+        isAwaitingRunStart = true
+    }
 
     // MARK: - In-progress
 
@@ -747,6 +799,73 @@ struct RaceView: View {
     }
     #endif
 
+    // Manual run start overlay — full-screen blackout with a big
+    // "Ready?" caps label, the upcoming run's name, and a single
+    // tap-to-start CTA. Total race timer keeps ticking through
+    // (the race is in progress; the athlete is just pre-positioning),
+    // but the visual emphasis is on the prompt so they know the
+    // segment hasn't begun timing yet.
+    //
+    // On confirm: rebases the engine's currentSegmentStartedAt to
+    // now, dismisses the overlay, fires a haptic + voice cue. Same
+    // pattern as the start-of-race countdown — a single decisive
+    // tap.
+    private var startRunOverlay: some View {
+        ZStack {
+            HeroBackdrop(.intense)
+
+            VStack(spacing: 18) {
+                Text("READY?")
+                    .font(.caption.weight(.heavy))
+                    .tracking(2.0)
+                    .foregroundStyle(Color.accent)
+
+                Text(viewModel.currentStation?.displayName ?? "Run")
+                    .font(.system(size: 56, weight: .heavy, design: .rounded))
+                    .foregroundStyle(Color.textPrimary)
+                    .multilineTextAlignment(.center)
+
+                Text("Pre-position at the start line. The segment timer begins when you tap.")
+                    .font(.body)
+                    .foregroundStyle(Color.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+                    .padding(.bottom, 16)
+
+                Button {
+                    Haptics.impact(.heavy)
+                    viewModel.rebaseCurrentSegment(at: Date())
+                    isAwaitingRunStart = false
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 22, weight: .heavy))
+                        Text("Start Run")
+                            .font(.system(size: 24, weight: .heavy, design: .rounded))
+                    }
+                    .foregroundStyle(Color.onAccent)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: Layout.raceButtonHeight)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.accent, Color.accent.opacity(0.85)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: Layout.cardCornerRadius))
+                    .shadow(
+                        color: Color.accent.opacity(colorScheme == .dark ? 0.4 : 0.22),
+                        radius: 18,
+                        y: 0
+                    )
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, Layout.screenMargin)
+            }
+        }
+    }
+
     // Full-screen pre-race countdown overlay. Massive number,
     // animated transition between values, tap anywhere to skip.
     // 0 renders as "GO" (the final beat before the race screen
@@ -988,13 +1107,28 @@ struct RaceView: View {
     private func registerWatchActionHandler() {
         #if canImport(WatchConnectivity)
         WatchCompanionService.shared.onAction = { action in
+            // Each case fires the same haptic + viewModel call as
+            // its iPhone-side button, so a wrist tap and a phone
+            // tap feel identical to the athlete. The Watch sends
+            // whichever action matches the current snapshot phase
+            // (advance for in-progress, endSegment / startNextSegment
+            // when roxzone is on, pause/resume mid-race).
             switch action {
             case .advance:
-                // Fire the same haptic + advance path as the iPhone's
-                // Next Station button so a wrist tap feels identical
-                // to a phone tap from the user's perspective.
                 Haptics.impact(.medium)
                 viewModel.advance()
+            case .endSegment:
+                Haptics.impact(.medium)
+                viewModel.endSegmentRace()
+            case .startNextSegment:
+                Haptics.impact(.medium)
+                viewModel.startNextSegmentRace()
+            case .pause:
+                Haptics.warning()
+                viewModel.pauseRace()
+            case .resume:
+                Haptics.success()
+                viewModel.resumeRace()
             }
         }
         #endif

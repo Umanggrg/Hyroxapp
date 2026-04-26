@@ -337,6 +337,30 @@ struct RaceEngine: Sendable {
         )
     }
 
+    // Rebase the current segment's start timestamp without touching
+    // the race-level startedAt. Used by the manual-run-start
+    // feature: when the user advances into a run station with
+    // manual start enabled, the engine has already moved to the
+    // run, but the athlete may take a few seconds to pre-position
+    // before they're ready. Tapping "Start Run" calls this with
+    // `now` so the segment's recorded duration reflects only the
+    // actual run time, not the pre-positioning delay. Total race
+    // time keeps ticking through the delay (it's part of the
+    // race), only the segment's clock starts fresh.
+    //
+    // No-op outside of `.inProgress` — paused / inRoxzone / finished
+    // races don't have an active segment to rebase.
+    mutating func rebaseCurrentSegmentStart(to now: Date) {
+        guard case .inProgress(let raceStart, _, let splits) = state else {
+            return
+        }
+        state = .inProgress(
+            startedAt: raceStart,
+            currentSegmentStartedAt: now,
+            splits: splits
+        )
+    }
+
     // Pause an in-progress race. Captures `now` as `pausedAt`. From
     // any other state this is a no-op — pausing a not-yet-started or
     // already-finished race has no semantic meaning.

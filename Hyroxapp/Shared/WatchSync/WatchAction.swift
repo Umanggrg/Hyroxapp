@@ -22,7 +22,24 @@ import Foundation
 //
 // Shared between iOS and watchOS targets via target membership.
 enum WatchAction: Sendable, Equatable {
+    // Single-tap advance — appropriate when the engine is in
+    // `.inProgress`. Closes the current segment and moves to the
+    // next station, or finishes the race on the last segment.
     case advance
+
+    // Two-step advance pair — used when the athlete has Roxzone
+    // tracking on. `.endSegment` closes the current segment and
+    // transitions the engine to `.inRoxzone`; `.startNextSegment`
+    // begins the next segment after the transition. The Watch
+    // sends whichever matches the current snapshot phase.
+    case endSegment
+    case startNextSegment
+
+    // Mid-race interruption controls. The Watch's pause/resume
+    // button toggles between these based on whether the engine
+    // is `.inProgress` or `.paused`.
+    case pause
+    case resume
 
     // MARK: - Dictionary encoding
 
@@ -35,7 +52,11 @@ enum WatchAction: Sendable, Equatable {
     // Watch builds talking to newer iPhone builds.
     private var rawValue: String {
         switch self {
-        case .advance: return "advance"
+        case .advance:           return "advance"
+        case .endSegment:        return "endSegment"
+        case .startNextSegment:  return "startNextSegment"
+        case .pause:             return "pause"
+        case .resume:            return "resume"
         }
     }
 
@@ -46,7 +67,11 @@ enum WatchAction: Sendable, Equatable {
     init?(dictionary: [String: Any]) {
         guard let raw = dictionary[Key.action] as? String else { return nil }
         switch raw {
-        case "advance": self = .advance
+        case "advance":          self = .advance
+        case "endSegment":       self = .endSegment
+        case "startNextSegment": self = .startNextSegment
+        case "pause":            self = .pause
+        case "resume":           self = .resume
         default: return nil
         }
     }

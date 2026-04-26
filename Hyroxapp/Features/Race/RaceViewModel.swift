@@ -533,6 +533,18 @@ final class RaceViewModel {
         startHeartRatePolling()
     }
 
+    // Rebase the current segment's start timestamp to `now`. Used
+    // by the manual-run-start UI on RaceView — the athlete advances
+    // into a run, gets a "Start Run" overlay, and tapping that
+    // button calls this so the segment's recorded duration is just
+    // the run time (no pre-positioning delay). Total race time
+    // keeps ticking through the delay; only the segment timer
+    // restarts. No-op outside of an active in-progress race.
+    func rebaseCurrentSegment(at now: Date) {
+        engine.rebaseCurrentSegmentStart(to: now)
+        persistActiveRace()
+    }
+
     func advance() {
         // Detect the transition to `.finished` so we can mirror the race out
         // to HealthKit exactly once (not on every advance).

@@ -403,7 +403,8 @@ struct ProfileView: View {
     // pillar grid. Sits between the aggregate stats grid and the
     // per-station Personal Bests so the layout reads top-down from
     // most-summary (counts/PB total) to most-detailed (per-station
-    // bests).
+    // bests). Now also surfaces a compact "Avg effort" pill under
+    // the pillar grid when HR data exists across recent races.
     private var hyroxScoreSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -414,6 +415,46 @@ struct ProfileView: View {
             .padding(.horizontal, 4)
 
             HyroxPerformanceScoreView(races: races)
+
+            avgEffortLine
+        }
+    }
+
+    // Compact "Avg effort N · HR-time across last X races" pill,
+    // shown under the pillar grid when at least one finished race
+    // has HR samples to score. Hidden silently when none do —
+    // first-time users / athletes without an Apple Watch see only
+    // the pillar grid.
+    //
+    // Computed from the same `RaceStats.averageEffortScore` helper
+    // used everywhere else, so the number matches what the per-
+    // race summary lines show.
+    @ViewBuilder
+    private var avgEffortLine: some View {
+        let maxHR = profiles.first?.maxHeartRate ?? 190
+        if let avg = RaceStats.averageEffortScore(across: races, maxHR: maxHR) {
+            // Count of races that actually contributed a score —
+            // shows "across 4 races" honestly even when the user
+            // has 12 finished races but only 4 have HR data.
+            let scoredCount = races
+                .filter(\.isFinished)
+                .compactMap { RaceStats.effortScore(for: $0, maxHR: maxHR) }
+                .count
+
+            HStack(spacing: 8) {
+                Image(systemName: "bolt.fill")
+                    .font(.caption2.weight(.heavy))
+                Text("Avg effort \(Int(avg.rounded())) · HR-time across \(scoredCount) race\(scoredCount == 1 ? "" : "s")")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+            }
+            .foregroundStyle(Color.accent)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                Capsule().fill(Color.accent.opacity(0.10))
+            )
+            .padding(.horizontal, 4)
         }
     }
 
