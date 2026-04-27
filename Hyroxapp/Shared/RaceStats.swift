@@ -165,6 +165,351 @@ enum RaceStats {
         return scored.reduce(0, +)
     }
 
+    // MARK: - Recovery demand
+
+    // Coarse-bucket categorization of how long the athlete should
+    // expect to need before another intense session. Different
+    // question from effort: effort says "how hard was this race,"
+    // recovery says "when can you train hard again."
+    //
+    // Ranges are calibrated to how Whoop, ACSM, and Banister TRIMP
+    // models map training load to recovery. We don't promise a
+    // precision-engineered estimate — just an honest coaching
+    // bucket. The athlete uses it to plan: "Hard session yesterday,
+    // easy run today, save the next simulation for 2 days out."
+    //
+    // Returns nil when the race has no HR data — without effort
+    // information we can't say anything useful about recovery
+    // demand. Better silence than a fabricated number.
+    enum RecoveryDemand: String, Sendable, CaseIterable, Codable {
+        case light       // < 20 effective load — recovery day or short workout
+        case moderate    // 20–35 — easy session next is fine
+        case hard        // 35–55 — full rest day, then easy
+        case veryHard    // > 55 — 2 days easy minimum
+
+        var displayName: String {
+            switch self {
+            case .light:    return "Light"
+            case .moderate: return "Moderate"
+            case .hard:     return "Hard"
+            case .veryHard: return "Very Hard"
+            }
+        }
+
+        // Typical recovery time range. Lower bound is "minimum, if
+        // you sleep well," upper bound is "more honest range."
+        // Phrased loosely so we're not pretending we can predict
+        // recovery to the hour.
+        var typicalRecovery: String {
+            switch self {
+            case .light:    return "12–18 hours"
+            case .moderate: return "18–30 hours"
+            case .hard:     return "30–48 hours"
+            case .veryHard: return "48–72 hours"
+            }
+        }
+
+        // Coaching guidance — one-liner the athlete can use as a
+        // training-plan input. Tone is "informed friend" not
+        // "diagnostic engine" — language softens with each tier.
+        var guidance: String {
+            switch self {
+            case .light:
+                return "Easy session tomorrow is fine."
+            case .moderate:
+                return "Tomorrow stays light. Save intensity for the day after."
+            case .hard:
+                return "Take tomorrow easy. Save your next hard session for 2 days out."
+            case .veryHard:
+                return "Real recovery day tomorrow. Don't stack another hard session for 2-3 days."
+            }
+        }
+
+        // SF Symbol for the rendering layer. Same icon language as
+        // EffortCategory: leaf for light, flame intensity for higher
+        // tiers. View layer doesn't pick its own icon — the bucket
+        // owns its visual identity.
+        var symbol: String {
+            switch self {
+            case .light:    return "leaf.fill"
+            case .moderate: return "figure.walk.motion"
+            case .hard:     return "flame.fill"
+            case .veryHard: return "bed.double.fill"
+            }
+        }
+    }
+
+    // Compute the recovery demand for a finished race. Combines:
+    //   • effort score (intensity-weighted minutes) — the base load
+    //   • bonus weight on Z5 minutes (anaerobic/VO2max work creates
+    //     disproportionate muscle damage and CNS fatigue per minute,
+    //     so a 5-minute Z5 push above lactate threshold contributes
+    //     more recovery demand than 5 minutes at moderate)
+    //
+    // The combined "load" number is then bucketed. Same units as
+    // effort score (minutes of weighted intensity) so the bucket
+    // boundaries map intuitively — a 90-minute HYROX at 80% avg HR
+    // with some Z5 lands solidly in "Hard," matching the gut feel.
+    //
+    // Returns nil when the race lacks HR data; nothing useful to
+    // say without it.
+    static func recoveryDemand(for race: Race, maxHR: Int) -> RecoveryDemand? {
+        guard let baseEffort = effortScore(for: race, maxHR: maxHR) else {
+            return nil
+        }
+
+        // Z5 minutes — anaerobic work weights heavier in recovery
+        // because muscle damage scales non-linearly with intensity.
+        // Whoop, Polar, and Garmin all apply a similar non-linear
+        // weighting in their TRIMP-style models.
+        let maxHRDouble = Double(maxHR)
+        let z5MinutesByDuration = race.splits.compactMap { split -> Double? in
+            guard let avg = split.heartRateAvgBPM, avg > 0 else { return nil }
+            // Use 0.90 maxHR as the Z5 threshold — same boundary
+            // HRZone uses (0.90 = lactate threshold / VO2 max
+            // floor). Splits AT or above that threshold contribute
+            // their full duration to the Z5 minute count.
+            guard avg / maxHRDouble >= 0.90 else { return nil }
+            return split.duration / 60
+        }
+        let z5Minutes = z5MinutesByDuration.reduce(0, +)
+
+        // Combined load: base effort + 1.5× Z5 minutes. The 1.5
+        // multiplier is a calibrated guess — feels right when
+        // backtested against a typical 90-min HYROX with 10ish
+        // minutes of wall-balls / final-station Z5 push (lands
+        // in Hard, occasionally Very Hard). Adjustable upward if
+        // dogfood reveals it underestimates.
+        let combinedLoad = baseEffort + (z5Minutes * 1.5)
+
+        switch combinedLoad {
+        case ..<20:  return .light
+        case ..<35:  return .moderate
+        case ..<55:  return .hard
+        default:     return .veryHard
+        }
+    }
+
+    // MARK: - Readiness
+
+    // Real-time training readiness signal — answers "should I push
+    // hard today, or take it easy?" by combining the most recent
+    // race's recovery demand with how many hours have elapsed.
+    //
+    // Three states:
+    //   • fresh — fully recovered (or no recent race) — push hard
+    //   • partial — mid-recovery, easy session OK
+    //   • recovering — recent hard session, recovery day
+    //
+    // Returns nil when there's no race history or the most recent
+    // race lacks HR data — without that we have nothing to base
+    // a readiness signal on, and a fabricated "Fresh" would mislead.
+    enum ReadinessState: String, Sendable, CaseIterable, Codable {
+        case fresh
+        case partial
+        case recovering
+
+        var displayName: String {
+            switch self {
+            case .fresh:      return "Fresh"
+            case .partial:    return "Partially Recovered"
+            case .recovering: return "Recovering"
+            }
+        }
+
+        // Guidance copy — same informed-friend tone as
+        // RecoveryDemand. Tells the athlete what kind of session
+        // makes sense today without being prescriptive.
+        var guidance: String {
+            switch self {
+            case .fresh:
+                return "Body's ready. Good day for an intense session."
+            case .partial:
+                return "Mostly recovered. Easy or moderate session is the call."
+            case .recovering:
+                return "Still recovering. Recovery day or skip; don't stack another hard session."
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .fresh:      return "bolt.fill"
+            case .partial:    return "figure.walk.motion"
+            case .recovering: return "leaf.fill"
+            }
+        }
+    }
+
+    // Carries both the state and the most-recent-race context so
+    // the rendering view can show "Recovering · 18h since last
+    // session" rather than just a bare state. Hours-since lets
+    // the athlete sanity-check the signal against their own felt
+    // sense of recovery.
+    struct ReadinessReadout: Sendable {
+        let state: ReadinessState
+        let hoursSinceLastRace: Double
+        let lastRaceDemand: RecoveryDemand
+    }
+
+    // Compute current readiness from race history + maxHR. Walks
+    // the most recent finished race with HR data, computes its
+    // recovery demand, and compares hours-elapsed to that bucket's
+    // typical range to bucket into Fresh / Partial / Recovering.
+    //
+    // Boundaries (rough but honest):
+    //   • Hours elapsed >= upper bound of demand's range → fresh
+    //   • Hours elapsed >= 50% of upper bound        → partial
+    //   • Otherwise                                  → recovering
+    //
+    // referenceDate is injectable for testing.
+    static func currentReadiness(
+        in races: [Race],
+        maxHR: Int,
+        referenceDate: Date = Date()
+    ) -> ReadinessReadout? {
+        // Find the most recent finished race that we can compute
+        // a recovery demand for. Skip races without HR data —
+        // they don't carry enough information to base readiness on.
+        let candidate = races
+            .filter { $0.isFinished }
+            .sorted { ($0.endedAt ?? .distantPast) > ($1.endedAt ?? .distantPast) }
+            .first { recoveryDemand(for: $0, maxHR: maxHR) != nil }
+
+        guard let race = candidate,
+              let endedAt = race.endedAt,
+              let demand = recoveryDemand(for: race, maxHR: maxHR)
+        else { return nil }
+
+        let hoursElapsed = referenceDate.timeIntervalSince(endedAt) / 3600
+        guard hoursElapsed >= 0 else { return nil }
+
+        // Use the demand's upper-bound recovery hour estimate as the
+        // "fully recovered" threshold. Below 50% of that, the
+        // athlete is meaningfully under-recovered.
+        let upperBound = recoveryUpperBound(for: demand)
+
+        let state: ReadinessState
+        if hoursElapsed >= upperBound {
+            state = .fresh
+        } else if hoursElapsed >= upperBound * 0.5 {
+            state = .partial
+        } else {
+            state = .recovering
+        }
+
+        return ReadinessReadout(
+            state: state,
+            hoursSinceLastRace: hoursElapsed,
+            lastRaceDemand: demand
+        )
+    }
+
+    // Hours threshold that maps to "fully recovered" for each demand
+    // bucket. Pegged to the upper bound of each bucket's typical
+    // range. Light = 18, Moderate = 30, Hard = 48, Very Hard = 72.
+    // Centralized here so the boundaries stay in sync with
+    // RecoveryDemand.typicalRecovery copy.
+    private static func recoveryUpperBound(for demand: RecoveryDemand) -> Double {
+        switch demand {
+        case .light:    return 18
+        case .moderate: return 30
+        case .hard:     return 48
+        case .veryHard: return 72
+        }
+    }
+
+    // Per-split effort score — same intensity-weighted-minutes
+    // formula as the whole-race version, but applied to a single
+    // segment. Used by StationDetailView's physiology row + the
+    // per-split effort chip on summary / detail.
+    //
+    // Returns nil when the split has no avg HR data or maxHR <= 0,
+    // matching the whole-race variant's silence-on-missing-data.
+    static func effortScore(forSplit split: Split, maxHR: Int) -> Double? {
+        guard maxHR > 0, let avg = split.heartRateAvgBPM, avg > 0 else {
+            return nil
+        }
+        let intensity = avg / Double(maxHR)
+        let minutes = split.duration / 60
+        return intensity * minutes
+    }
+
+    // Translate a raw effort score into a coarse category label.
+    // The whole-race score reads in "intensity-weighted minutes" —
+    // the absolute number depends heavily on duration, so a single
+    // numeric chip is hard to interpret without context.
+    //
+    // The category-by-intensity-fraction approach normalizes that:
+    // we take the raw score and divide back by minutes to get the
+    // average HR fraction (avgHR / maxHR) for the segment, then
+    // bucket:
+    //
+    //   < 0.65  → Recovery (Z1–Z2)
+    //   < 0.75  → Moderate (Z3 — aerobic threshold)
+    //   < 0.85  → High     (Z4 — lactate threshold)
+    //   >= 0.85 → Very High (Z5 — VO2 max + anaerobic)
+    //
+    // Aligns with the HRZone tiering already shipped, so the
+    // language used on the per-station effort chip matches what
+    // an athlete sees on the zones chart elsewhere in the app.
+    //
+    // Returns nil when the score or duration is too small to
+    // meaningfully categorize (under 5 seconds — usually a mistap
+    // mid-race rather than a real segment).
+    static func effortCategory(
+        forSplit split: Split,
+        maxHR: Int
+    ) -> EffortCategory? {
+        guard let avg = split.heartRateAvgBPM, avg > 0, maxHR > 0 else {
+            return nil
+        }
+        guard split.duration >= 5 else { return nil }
+
+        let fraction = avg / Double(maxHR)
+        switch fraction {
+        case ..<0.65:
+            return .recovery
+        case ..<0.75:
+            return .moderate
+        case ..<0.85:
+            return .high
+        default:
+            return .veryHigh
+        }
+    }
+
+    // Coarse category for the per-station effort chip. Keeps the
+    // numeric score for the post-race summary while giving a
+    // human-readable label for the in-line chip on summary /
+    // detail / StationDetailView.
+    enum EffortCategory: String, Sendable, CaseIterable {
+        case recovery
+        case moderate
+        case high
+        case veryHigh
+
+        var displayName: String {
+            switch self {
+            case .recovery: return "Recovery"
+            case .moderate: return "Moderate"
+            case .high:     return "High"
+            case .veryHigh: return "Very High"
+            }
+        }
+
+        // SF Symbol + color hint for the rendering layer. The
+        // category logic stays in RaceStats so views render the
+        // same icon/color across every surface that displays effort.
+        var symbol: String {
+            switch self {
+            case .recovery: return "leaf.fill"
+            case .moderate: return "figure.walk.motion"
+            case .high:     return "flame.fill"
+            case .veryHigh: return "bolt.fill"
+            }
+        }
+    }
+
     // Cross-race average effort score — useful for Profile-level
     // "your typical effort level" callouts. Pass finished races
     // only; in-progress races get a partial score that would skew

@@ -85,7 +85,13 @@ final class NotificationService {
     // Skips silently when the trigger date is in the past (e.g.
     // it's already 7 PM), since iOS rejects backwards-dated
     // requests anyway.
-    func scheduleStreakReminder(currentStreak: Int) async {
+    // Schedule the streak-protection reminder for 6 PM on the
+    // calendar day. Pass `isAtRisk: true` when today is genuinely
+    // a streak-break day (last training was yesterday, no race
+    // logged yet today) — the copy sharpens accordingly. The
+    // routine-reminder copy stays gentle for streaks that are just
+    // active without imminent risk.
+    func scheduleStreakReminder(currentStreak: Int, isAtRisk: Bool = false) async {
         guard currentStreak >= 2 else {
             // Below threshold — nothing to protect. Cancel any
             // stale request so a previously-scheduled reminder
@@ -113,8 +119,20 @@ final class NotificationService {
         }
 
         let content = UNMutableNotificationContent()
-        content.title = "Don't break your streak"
-        content.body = "You've trained \(currentStreak) day\(currentStreak == 1 ? "" : "s") in a row. A race tonight keeps it alive."
+        if isAtRisk {
+            // At-risk path — the streak ends at midnight if no race
+            // is logged tonight. Sharper title, more direct copy.
+            // Caller (ContentView) determines this from
+            // RaceStreaks.isStreakAtRisk.
+            content.title = "Your \(currentStreak)-day streak ends tonight"
+            content.body = "Last training was yesterday. A race today keeps it alive."
+        } else {
+            // Routine reminder — streak active but not in imminent
+            // risk (e.g. the user opens the app mid-streak before
+            // their typical training time). Gentler nudge.
+            content.title = "Don't break your streak"
+            content.body = "You've trained \(currentStreak) day\(currentStreak == 1 ? "" : "s") in a row. A race tonight keeps it alive."
+        }
         content.sound = .default
 
         let trigger = UNCalendarNotificationTrigger(

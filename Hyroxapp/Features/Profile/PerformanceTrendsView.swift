@@ -21,6 +21,14 @@ struct PerformanceTrendsView: View {
     // typically passes them ascending by createdAt for readability.
     let races: [Race]
 
+    // Drives entrance animation — line + dots fade in on first
+    // appear. Same pattern as EffortTrendView so the two trend
+    // charts feel like a coordinated reveal when both render
+    // together in the Profile trends section.
+    @State private var animationsRevealed = false
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     // Minimum races needed for a trendline to be meaningful. Two
     // points is a line, not a trend; three is the smallest set
     // where you can see "is the slope flat or trending."
@@ -65,6 +73,7 @@ struct PerformanceTrendsView: View {
                 .foregroundStyle(Color.accentDim)
                 .lineStyle(StrokeStyle(lineWidth: 2))
                 .interpolationMethod(.monotone)
+                .opacity(animationsRevealed ? 1.0 : 0)
 
                 // Dot at each race so the athlete can pick out
                 // individual races on the line — useful when the
@@ -74,7 +83,16 @@ struct PerformanceTrendsView: View {
                     y: .value("Time", point.seconds)
                 )
                 .foregroundStyle(Color.accent)
-                .symbolSize(40)
+                .symbolSize(animationsRevealed ? 40 : 0)
+            }
+        }
+        .animation(
+            reduceMotion ? .none : .smooth(duration: 0.8),
+            value: animationsRevealed
+        )
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                animationsRevealed = true
             }
         }
         .chartYAxis {

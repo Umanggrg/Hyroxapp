@@ -359,3 +359,41 @@ extension View {
         self.hyroxNavigationBar(inline: inline)
     }
 }
+
+// MARK: - Pressable card button style
+
+// Subtle press-feedback for tappable card surfaces (RaceCardView,
+// recent-race rows, recap banners). Replaces .buttonStyle(.plain)
+// on NavigationLinks that wrap a card-shaped element so the user
+// gets tactile confirmation their tap registered.
+//
+// Scale-down on press: 0.98 — small enough to feel like the card
+// "depresses" rather than shrinks, but visible enough to register
+// at typical iPhone viewing distance. Reduce-Motion users get no
+// scale change (the spring is bypassed) but still get the press
+// state through SwiftUI's default tinting.
+//
+// Spring response 0.3 / damping 0.7 — same brand-canonical motion
+// shape called out in CLAUDE.md §5. Lands with weight, doesn't
+// bounce.
+//
+// Usage: `.buttonStyle(.pressableCard)` in place of `.plain` on
+// any NavigationLink wrapping a card.
+struct PressableCardButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1.0)
+            .animation(
+                reduceMotion ? .none : .spring(response: 0.3, dampingFraction: 0.7),
+                value: configuration.isPressed
+            )
+    }
+}
+
+extension ButtonStyle where Self == PressableCardButtonStyle {
+    static var pressableCard: PressableCardButtonStyle {
+        PressableCardButtonStyle()
+    }
+}

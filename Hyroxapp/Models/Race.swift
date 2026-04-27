@@ -141,6 +141,24 @@ final class Race {
     // connected, or when the race wasn't a duo at all.
     var partnerDisconnectedAt: Date?
 
+    // Privacy gate. `true` means this race is hidden from any
+    // future-public surfaces (the v1 social feed, leaderboards,
+    // shared profile). Local History + Profile stats always
+    // include it — privacy controls the EXTERNAL visibility,
+    // not the athlete's own view.
+    //
+    // Forward-compatible move: shipping the toggle now means
+    // existing races flagged private stay private when v1's
+    // feed lights up. Default `false` matches user intent
+    // (most training is public-by-default in the Strava model)
+    // and is migration-safe — pre-existing rows decode cleanly.
+    //
+    // Today the only effect is the lock icon on the race card +
+    // a subtitle line on summary/detail. Once the social feed
+    // ships, the upload pipeline reads this flag and skips
+    // private races entirely.
+    var isPrivate: Bool = false
+
     init(
         id: UUID = UUID(),
         startedAt: Date,

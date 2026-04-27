@@ -227,17 +227,29 @@ struct ProfileView: View {
     // Inner cards keep their existing components — the
     // restructure is composition only, not new UI per card.
 
-    // NEXT UP — future-facing race anchor + nothing else here.
-    // Single-card section, but it earns its own header because
-    // it answers a different question ("what are you training
-    // for?") than everything below it ("what have you done?").
+    // NEXT UP — future-facing race anchor PLUS today's readiness
+    // signal. Both answer questions about TODAY's training context:
+    //   • Race event banner — "what are you training for?"
+    //   • Readiness banner — "should you train hard today?"
+    // Together they're the forward-looking pair, separate from the
+    // backward-looking summary/performance/training sections below.
+    //
+    // Readiness sits ABOVE the race event banner so the most
+    // immediately-actionable signal (today's body state) reads
+    // first. Race event countdown is a multi-week anchor; readiness
+    // is the answer the athlete usually opened the app to find.
     private var nextUpSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let maxHR = profiles.first?.maxHeartRate ?? 190
+
+        return VStack(alignment: .leading, spacing: 12) {
             ProfileSectionHeader(
                 title: "Next Up",
                 icon: "flag.checkered",
                 accent: true
             )
+            if ReadinessBanner.shouldShow(in: races, maxHR: maxHR) {
+                ReadinessBanner(races: races, maxHR: maxHR)
+            }
             raceEventBanner
         }
         .padding(.horizontal, Layout.screenMargin)
@@ -250,6 +262,7 @@ struct ProfileView: View {
         let hasYearly = (YearlyRecapBuilder.mostRecent(from: races) != nil)
         let hasMonthly = (MonthlyRecap.mostRecent(from: races) != nil)
         let hasStreak = StreakBannerView.shouldShow(in: races)
+        let hasAtRiskBanner = StreakAtRiskBanner.shouldShow(in: races)
 
         if hasYearly || hasMonthly || hasStreak {
             VStack(alignment: .leading, spacing: 12) {
@@ -258,6 +271,15 @@ struct ProfileView: View {
                     icon: "calendar",
                     trailing: nil
                 )
+                // At-risk banner sits ABOVE the regular streak
+                // banner — when both render together (streak alive
+                // but no race yet today), the urgent CTA leads and
+                // the standard counter follows. The at-risk banner
+                // has its own warning treatment so the visual
+                // hierarchy reads correctly.
+                if hasAtRiskBanner {
+                    StreakAtRiskBanner(races: races)
+                }
                 if let recap = YearlyRecapBuilder.mostRecent(from: races) {
                     yearlyRecapBanner(recap)
                 }
@@ -368,9 +390,13 @@ struct ProfileView: View {
             )
             ForEach(recentRaces) { race in
                 NavigationLink(value: race) {
-                    RaceCardView(race: race, allRaces: races)
+                    RaceCardView(
+                        race: race,
+                        allRaces: races,
+                        maxHR: profiles.first?.maxHeartRate ?? 190
+                    )
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.pressableCard)
             }
         }
         .padding(.horizontal, Layout.screenMargin)
@@ -809,16 +835,61 @@ struct ProfileView: View {
     // gated on race count via PerformanceTrendsView.hasEnoughData; this
     // wrapper only adds the section header so the layout reads
     // consistently with the other Profile sections.
+    //
+    // Effort trend stacks below total-time trend when the athlete has
+    // captured HR data on enough races. The two charts are
+    // complementary — total time answers "am I getting faster," effort
+    // answers "am I training harder." Skipping effort when HR is
+    // missing keeps the section clean for athletes racing without a
+    // watch.
     private var trendsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Trends")
-                    .capsLabelStyle()
-                Spacer()
-            }
-            .padding(.horizontal, 4)
+        let maxHR = profiles.first?.maxHeartRate ?? 190
+        let hasEffortTrend = EffortTrendView.hasEnoughData(in: races, maxHR: maxHR)
+        let hasEffortDistribution = EffortDistributionView.hasEnoughData(in: races, maxHR: maxHR)
 
-            PerformanceTrendsView(races: races)
+        return VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Time Trend")
+                        .capsLabelStyle()
+                    Spacer()
+                }
+                .padding(.horizontal, 4)
+
+                PerformanceTrendsView(races: races)
+            }
+
+            if hasEffortTrend {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Effort Trend")
+                            .capsLabelStyle()
+                        Spacer()
+                    }
+                    .padding(.horizontal, 4)
+
+                    EffortTrendView(races: races, maxHR: maxHR)
+                }
+            }
+
+            // Distribution complements the trend chart — same data,
+            // different question. Trend = "how is intensity moving
+            // over time?" Distribution = "what's the mix across my
+            // recent races?" Together they cover the load-balance
+            // story. Same data-availability gate so they appear and
+            // disappear as a unit.
+            if hasEffortDistribution {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Intensity Mix")
+                            .capsLabelStyle()
+                        Spacer()
+                    }
+                    .padding(.horizontal, 4)
+
+                    EffortDistributionView(races: races, maxHR: maxHR)
+                }
+            }
         }
     }
 

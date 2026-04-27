@@ -19,6 +19,14 @@ struct HRZonesView: View {
     let splits: [Split]
     let maxBPM: Int
 
+    // Drives the entrance animation — bar segments grow from 0 width
+    // to their final share. Same pattern as EffortDistributionView's
+    // stacked bar so the two zone-style charts feel like a coordinated
+    // family.
+    @State private var animationsRevealed = false
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     // Pre-compute the totals once per render. SwiftUI re-evaluates
     // the body on every state change; if this were inside `body`
     // we'd be re-iterating splits on every redraw.
@@ -44,6 +52,15 @@ struct HRZonesView: View {
             RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
                 .fill(Color.surface)
         )
+        .animation(
+            reduceMotion ? .none : .smooth(duration: 0.7),
+            value: animationsRevealed
+        )
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                animationsRevealed = true
+            }
+        }
     }
 
     // MARK: - Stacked bar
@@ -63,7 +80,9 @@ struct HRZonesView: View {
                         Rectangle()
                             .fill(zone.color)
                             .frame(
-                                width: width(for: seconds, in: proxy.size.width)
+                                width: animationsRevealed
+                                    ? width(for: seconds, in: proxy.size.width)
+                                    : 0
                             )
                     }
                 }

@@ -19,8 +19,59 @@ struct RaceCardView: View {
     let race: Race
     let allRaces: [Race]
 
+    // Athlete's max HR — drives the effort-category chip in the
+    // badge row. Defaults to 190 (matches `UserProfile.maxHeartRate`'s
+    // own default) so callers that don't have access to the user
+    // profile (recap previews, share-card render passes) still get
+    // a defensible chip if HR data is present. Pass the real value
+    // from any call site that's already querying UserProfile.
+    var maxHR: Int = 190
+
+    // Drives the badge entrance animation — PB and effort chips
+    // scale in with a spring on first appear so they feel earned
+    // rather than just static decoration. Initial state false; flips
+    // to true 0.1s after onAppear (one runloop tick) so the layout
+    // settles before the spring fires.
+    @State private var badgesRevealed = false
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     private var isPB: Bool {
         RaceStats.wasPBWhenSet(race, among: allRaces)
+    }
+
+    // Race-wide effort category — pull avg HR across all splits with
+    // data, divide by maxHR, bucket. Returns nil for races without
+    // HR data so the chip just doesn't render rather than showing
+    // a misleading "Recovery" for an unmeasured race.
+    private var effortCategory: RaceStats.EffortCategory? {
+        let scoredSplits = race.splits.compactMap { split -> (avg: Double, duration: TimeInterval)? in
+            guard let avg = split.heartRateAvgBPM, avg > 0, split.duration > 0 else {
+                return nil
+            }
+            return (avg, split.duration)
+        }
+        guard !scoredSplits.isEmpty else { return nil }
+
+        // Duration-weighted average HR across the race — same shape as
+        // a single-split fraction, just summed across the race.
+        // Long stations weigh more than short ones, which matches how
+        // an athlete experiences the day.
+        let totalDuration = scoredSplits.reduce(0) { $0 + $1.duration }
+        guard totalDuration > 0 else { return nil }
+        let weightedAvg = scoredSplits.reduce(0) { $0 + ($1.avg * $1.duration) } / totalDuration
+        let fraction = weightedAvg / Double(maxHR)
+
+        switch fraction {
+        case ..<0.65:
+            return .recovery
+        case ..<0.75:
+            return .moderate
+        case ..<0.85:
+            return .high
+        default:
+            return .veryHigh
+        }
     }
 
     var body: some View {
@@ -40,8 +91,32 @@ struct RaceCardView: View {
                 header
                 hero
                 supportingStats
-                if isPB {
-                    pbBadge
+                // Badge row — PB and effort category each render
+                // independently. Wrapped in HStack so they sit
+                // side-by-side when both are present without an
+                // extra wrapper view.
+                if isPB || effortCategory != nil {
+                    HStack(spacing: 10) {
+                        if isPB {
+                            pbBadge
+                                .scaleEffect(badgesRevealed ? 1.0 : 0.6)
+                                .opacity(badgesRevealed ? 1.0 : 0)
+                        }
+                        if let category = effortCategory {
+                            effortBadge(category: category)
+                                .scaleEffect(badgesRevealed ? 1.0 : 0.6)
+                                .opacity(badgesRevealed ? 1.0 : 0)
+                        }
+                        Spacer()
+                    }
+                    // Spring entrance for the badge row. Small
+                    // overshoot from the .spring damping ratio
+                    // (0.65) gives a satisfying "lands with weight"
+                    // feel. Reduce-motion bypass for accessibility.
+                    .animation(
+                        reduceMotion ? .none : .spring(response: 0.45, dampingFraction: 0.65).delay(0.15),
+                        value: badgesRevealed
+                    )
                 }
             }
             .padding(Layout.cardPadding)
@@ -55,6 +130,17 @@ struct RaceCardView: View {
         // card's rounded shape; without this the image overflows the
         // background's rounded rectangle on the top edge.
         .clipShape(RoundedRectangle(cornerRadius: Layout.cardCornerRadius))
+        .onAppear {
+            // Spring-in the badge row one runloop tick after the
+            // card lands. Cards in a long History feed reveal as
+            // the user scrolls them into view (SwiftUI re-fires
+            // onAppear when off-screen views become visible),
+            // turning the History scroll into a series of small
+            // flourishes rather than a static grid.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                badgesRevealed = true
+            }
+        }
     }
 
     // MARK: - Photo hero (top banner when race has a photo)
@@ -122,9 +208,33 @@ struct RaceCardView: View {
                 }
             }
             Spacer()
-            Text(race.startedAt.formatted(.relative(presentation: .named)))
-                .font(.metadata)
-                .foregroundStyle(Color.textSecondary)
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(race.startedAt.formatted(.relative(presentation: .named)))
+                    .font(.metadata)
+                    .foregroundStyle(Color.textSecondary)
+
+                // Private indicator — small lock icon when this race is
+                // flagged private. Forward-compatible with the v1 social
+                // feed: athletes scanning their own History at a glance
+                // can tell which races would be hidden if/when public
+                // surfaces ship. Hidden entirely for public races to
+                // keep the card clean.
+                if race.isPrivate {
+                    HStack(spacing: 3) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 9, weight: .heavy))
+                        Text("PRIVATE")
+                            .font(.system(size: 9, weight: .heavy))
+                            .tracking(0.6)
+                    }
+                    .foregroundStyle(Color.warning)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule().fill(Color.warning.opacity(0.16))
+                    )
+                }
+            }
         }
     }
 
@@ -217,5 +327,32 @@ struct RaceCardView: View {
                 .textCase(.uppercase)
         }
         .foregroundStyle(Color.success)
+    }
+
+    // Effort category badge — small chip showing how hard this race
+    // was overall (Recovery / Moderate / High / Very High). Color
+    // matches the StationDetailView per-station chip and the
+    // EffortCategory enum's symbol contract, so the same language
+    // shows up at every effort surface in the app. Hidden when no
+    // HR data was captured for the race.
+    private func effortBadge(category: RaceStats.EffortCategory) -> some View {
+        let tint: Color = {
+            switch category {
+            case .recovery: return .success
+            case .moderate: return .textPrimary
+            case .high:     return .warning
+            case .veryHigh: return .accent
+            }
+        }()
+
+        return HStack(spacing: 6) {
+            Image(systemName: category.symbol)
+                .font(.caption)
+            Text(category.displayName)
+                .font(.caption.weight(.bold))
+                .tracking(0.3)
+                .textCase(.uppercase)
+        }
+        .foregroundStyle(tint)
     }
 }

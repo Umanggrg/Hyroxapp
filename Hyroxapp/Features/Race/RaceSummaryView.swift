@@ -131,6 +131,18 @@ struct RaceSummaryView: View {
                         .padding(.top, 4)
                     }
 
+                    // Recovery estimate — bucketed coaching readout
+                    // ("Hard · ~30-48 hours · Take tomorrow easy").
+                    // Sits between the target outcome and the
+                    // narrative insights so the post-race scroll
+                    // reads: did you hit your goal → how hard was it
+                    // → what to do next. Hidden cleanly when no HR
+                    // data was captured for this race.
+                    if let race = viewModel.activeRace {
+                        RecoveryEstimateView(race: race, maxHR: maxHeartRate)
+                            .padding(.top, 8)
+                    }
+
                     // Auto-generated narrative insights — PBs, HR
                     // peak, run fatigue. The view skips itself when
                     // no insights apply (e.g. first race ever, no
@@ -175,6 +187,8 @@ struct RaceSummaryView: View {
                         TitleSection(race: race)
                             .padding(.top, 8)
                         NotesSection(race: race)
+                            .padding(.top, 8)
+                        PrivacyToggleSection(race: race)
                             .padding(.top, 8)
                     }
                 }
@@ -431,6 +445,19 @@ struct RaceSummaryView: View {
 
     private func splitRow(for split: Split) -> some View {
         HStack {
+            // Effort dot — small colored marker in the leading
+            // gutter showing this split's intensity category. Reads
+            // at-a-glance when scanning the splits list ("Sled
+            // Push hit me hardest"). Hidden when no HR data was
+            // captured so unmeasured rows don't show a misleading
+            // "Recovery" green for any-old-station.
+            //
+            // Tint mirrors the per-station chip on
+            // StationDetailView and the badge on RaceCardView so
+            // the same color language reads consistently across
+            // every effort surface in the app.
+            Self.effortDot(for: split, maxHR: maxHeartRate)
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(split.station.displayName)
                     .font(.body)
@@ -503,6 +530,39 @@ struct RaceSummaryView: View {
             parts.append("→ \(Int(roxzone.rounded()))s rox")
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    // Effort dot for the leading gutter of split rows. Small (6pt)
+    // colored circle that matches the EffortCategory tint contract
+    // used everywhere else — green for recovery, white for moderate,
+    // amber for high, coral for very high. Returns a fixed-width
+    // 14pt frame regardless of whether the dot renders, so rows
+    // align cleanly whether the data is present or not.
+    //
+    // Static so RaceDetailView can call the same helper without
+    // duplicating the rendering logic.
+    @ViewBuilder
+    static func effortDot(for split: Split, maxHR: Int) -> some View {
+        let tint: Color? = {
+            guard let category = RaceStats.effortCategory(forSplit: split, maxHR: maxHR) else {
+                return nil
+            }
+            switch category {
+            case .recovery: return .success
+            case .moderate: return .textPrimary
+            case .high:     return .warning
+            case .veryHigh: return .accent
+            }
+        }()
+
+        ZStack {
+            if let tint {
+                Circle()
+                    .fill(tint)
+                    .frame(width: 6, height: 6)
+            }
+        }
+        .frame(width: 14, alignment: .center)
     }
 
     // Shared formatting between summary and detail views. Centralizing
@@ -640,6 +700,57 @@ struct NotesSection: View {
             .lineLimit(3...8)
             .font(.body)
             .foregroundStyle(Color.textPrimary)
+            .padding(Layout.cardPadding)
+            .background(
+                RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                    .fill(Color.surface)
+            )
+        }
+    }
+}
+
+// Privacy toggle — hides this race from any future-public surfaces
+// (v1 social feed, leaderboards, public profile). Local History +
+// Profile stats are unaffected; this controls EXTERNAL visibility
+// only.
+//
+// Shipping the toggle now means existing races flagged private
+// stay private when the social feed lights up — no retroactive
+// "everything I logged in 2026 is suddenly public" surprise. The
+// `Race.isPrivate` field defaults to false, matching the
+// public-by-default Strava model.
+struct PrivacyToggleSection: View {
+    @Bindable var race: Race
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Privacy").capsLabelStyle()
+                Spacer()
+            }
+            .padding(.horizontal, 4)
+
+            Toggle(isOn: $race.isPrivate) {
+                HStack(spacing: 12) {
+                    Image(systemName: race.isPrivate ? "lock.fill" : "globe")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(race.isPrivate ? Color.warning : Color.textSecondary)
+                        .frame(width: 28)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(race.isPrivate ? "Private race" : "Public race")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.textPrimary)
+
+                        Text(race.isPrivate
+                            ? "Hidden from feed and leaderboards."
+                            : "Will appear in feed and leaderboards.")
+                            .font(.caption)
+                            .foregroundStyle(Color.textTertiary)
+                    }
+                }
+            }
+            .tint(Color.accent)
             .padding(Layout.cardPadding)
             .background(
                 RoundedRectangle(cornerRadius: Layout.cardCornerRadius)

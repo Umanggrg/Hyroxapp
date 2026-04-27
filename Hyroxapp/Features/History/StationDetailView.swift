@@ -51,6 +51,15 @@ struct StationDetailView: View {
         profiles.first?.resolvedDivision ?? .mensOpen
     }
 
+    // Athlete's configured max HR. Drives the per-station effort
+    // category chip below the physiology tiles. Falls back to the
+    // canonical 190 default when the user hasn't onboarded yet so
+    // the chip still renders something defensible — same fallback
+    // shipped on `UserProfile.maxHeartRate`.
+    private var maxHeartRate: Int {
+        profiles.first?.maxHeartRate ?? 190
+    }
+
     // Race-day projection — when the athlete logged a sub-race weight
     // for this attempt, linearly extrapolate what the same effort
     // would cost at the official HYROX weight. Returns nil when
@@ -319,7 +328,74 @@ struct StationDetailView: View {
                     label: "CALORIES"
                 )
             }
+
+            // Effort chip — full-width row below the three tiles.
+            // Categorizes this station's avg HR / maxHR fraction into
+            // Recovery / Moderate / High / Very High so the post-race
+            // story carries a per-station intensity readout
+            // alongside the raw HR. Whole-race effort lives on
+            // RaceSummary; this answers the "which station hurt most"
+            // question one level deeper.
+            //
+            // Hidden when there's no avg HR data — same silence
+            // pattern as the other HR-derived UI elsewhere.
+            if let category = RaceStats.effortCategory(
+                forSplit: split,
+                maxHR: maxHeartRate
+            ) {
+                effortChip(category: category)
+            }
         }
+    }
+
+    // Per-station effort chip. Color tied to the category's HR
+    // zone roughly (recovery = success, moderate = textPrimary,
+    // high = warning, veryHigh = accent) so the chip carries
+    // information at a glance — green for "easy day," coral for
+    // "you absolutely sent it on this station."
+    private func effortChip(category: RaceStats.EffortCategory) -> some View {
+        let tint: Color = {
+            switch category {
+            case .recovery: return .success
+            case .moderate: return .textPrimary
+            case .high:     return .warning
+            case .veryHigh: return .accent
+            }
+        }()
+
+        return HStack(spacing: 8) {
+            Image(systemName: category.symbol)
+                .font(.system(size: 13, weight: .heavy))
+                .foregroundStyle(tint)
+
+            Text("\(category.displayName) effort")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.textPrimary)
+
+            Spacer()
+
+            // Subtitle mirrors the whole-race "HR-time" framing so
+            // athletes recognize this as part of the same effort
+            // family rather than a brand-new metric. Keeps the
+            // mental model coherent across surfaces.
+            if let avg = split.heartRateAvgBPM {
+                let percent = Int(((avg / Double(maxHeartRate)) * 100).rounded())
+                Text("\(percent)% maxHR")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.textTertiary)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                .fill(Color.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                .stroke(tint.opacity(0.25), lineWidth: 1)
+        )
     }
 
     private func physiologyTile(value: String, unit: String, label: String) -> some View {

@@ -25,6 +25,17 @@ struct HistoryView: View {
         sort: [SortDescriptor(\Race.createdAt, order: .reverse)]
     ) private var races: [Race]
 
+    // User profile for max HR — drives the effort-category chip on
+    // each RaceCardView. Singleton-via-Query pattern matches every
+    // other surface that reads UserProfile; when no profile exists
+    // yet (pre-onboarding) the cards fall back to the 190 default.
+    @Query(sort: [SortDescriptor(\UserProfile.createdAt, order: .forward)])
+    private var profiles: [UserProfile]
+
+    private var maxHeartRate: Int {
+        profiles.first?.maxHeartRate ?? 190
+    }
+
     @State private var searchText = ""
     @State private var selectedFilter: HistoryFilter = .all
 
@@ -64,9 +75,9 @@ struct HistoryView: View {
                             } else {
                                 ForEach(filteredRaces) { race in
                                     NavigationLink(value: race) {
-                                        RaceCardView(race: race, allRaces: races)
+                                        RaceCardView(race: race, allRaces: races, maxHR: maxHeartRate)
                                     }
-                                    .buttonStyle(.plain)
+                                    .buttonStyle(.pressableCard)
                                 }
                             }
                         }

@@ -250,9 +250,15 @@ struct SettingsView: View {
                 }
                 profile.notificationsEnabled = true
                 // Schedule based on the current streak. If below
-                // threshold, scheduleStreakReminder no-ops.
+                // threshold, scheduleStreakReminder no-ops. Pass
+                // the at-risk flag so the notification copy
+                // sharpens on streak-end days.
                 let streak = RaceStreaks.currentStreak(in: allRaces)
-                await NotificationService.shared.scheduleStreakReminder(currentStreak: streak)
+                let atRisk = RaceStreaks.isStreakAtRisk(in: allRaces)
+                await NotificationService.shared.scheduleStreakReminder(
+                    currentStreak: streak,
+                    isAtRisk: atRisk
+                )
             }
         } else {
             profile.notificationsEnabled = false

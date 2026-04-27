@@ -85,6 +85,16 @@ enum InsightGenerator {
            let effortInsight = effortScoreInsight(for: race, allRaces: allRaces, maxHR: maxHR) {
             out.append(effortInsight)
         }
+        // Hardest-station callout — names the single station that
+        // burned the most intensity-weighted minutes. Pairs nicely
+        // with the whole-race effort insight: one says "today's
+        // race was hard," the other says "and *this* is the
+        // station that did it." Skipped when no per-split HR data
+        // is available (same maxHR-required gate).
+        if let maxHR,
+           let hardest = hardestStationInsight(for: race, maxHR: maxHR) {
+            out.append(hardest)
+        }
 
         return out
     }
@@ -379,5 +389,75 @@ enum InsightGenerator {
             // for athletes who want it.
             return nil
         }
+    }
+
+    // MARK: - Hardest station
+
+    // Identify the single split that consumed the most
+    // intensity-weighted minutes of the race — i.e. the station
+    // that hurt the most physiologically. Different question than
+    // "longest split" (which is just duration) and different from
+    // "highest avg HR" (which is intensity alone). Effort score
+    // multiplies the two, so a long station at moderate HR can
+    // beat a short station at peak HR — and that ordering matches
+    // how a coach actually thinks about training load.
+    //
+    // Skips the run-station family by default. Eight 1km runs
+    // collectively dominate a HYROX race's effort budget; calling
+    // out "your runs were the hardest part" every time would be
+    // noise. The athlete cares which WORKOUT station beat them up
+    // most, because that's where training adaptations happen.
+    //
+    // Threshold: only fires when the top station's effort exceeds
+    // the median workout-station effort by 30%+. Keeps the callout
+    // meaningful — if every station was roughly equal, naming a
+    // "hardest" one would mislead.
+    private static func hardestStationInsight(
+        for race: Race,
+        maxHR: Int
+    ) -> RaceInsight? {
+        // Compute per-workout-split effort scores. Splits without
+        // HR data are silently skipped — same silence-on-no-data
+        // pattern used everywhere else in this module.
+        let scored: [(split: Split, score: Double)] = race.splits
+            .filter { $0.station.kind == .workout }
+            .compactMap { split in
+                guard let score = RaceStats.effortScore(forSplit: split, maxHR: maxHR) else {
+                    return nil
+                }
+                return (split, score)
+            }
+
+        // Need at least 3 scored workout splits for a meaningful
+        // ranking — calling something the "hardest" of two doesn't
+        // really land.
+        guard scored.count >= 3,
+              let hardest = scored.max(by: { $0.score < $1.score })
+        else { return nil }
+
+        // Compare against the median of the rest. If the top score
+        // doesn't pull meaningfully above the pack, don't name a
+        // single station — they were all roughly equally taxing.
+        let others = scored.filter { $0.split.station != hardest.split.station }
+        guard !others.isEmpty else { return nil }
+
+        let sortedOtherScores = others.map(\.score).sorted()
+        let median: Double = {
+            let mid = sortedOtherScores.count / 2
+            if sortedOtherScores.count.isMultiple(of: 2) {
+                return (sortedOtherScores[mid - 1] + sortedOtherScores[mid]) / 2
+            }
+            return sortedOtherScores[mid]
+        }()
+        guard median > 0, hardest.score / median >= 1.3 else { return nil }
+
+        let stationName = hardest.split.station.displayName
+        let text = "\(stationName) was your hardest station — biggest physiological cost of the race."
+
+        return RaceInsight(
+            text: text,
+            symbol: "flame.fill",
+            color: .warning
+        )
     }
 }

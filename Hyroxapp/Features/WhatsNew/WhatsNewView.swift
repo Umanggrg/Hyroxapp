@@ -159,9 +159,31 @@ struct WhatsNewView: View {
     // to know about." Edit + bump version on every release; the
     // list rotates per release.
     static func features(forVersion version: String) -> [Feature] {
-        // For now we ship a single curated list for v0.2.
-        // Future versions can switch on `version` to deliver
-        // version-specific notes.
+        // Version-keyed feature lists. Each version's headline
+        // additions are returned for that version exactly so a
+        // user upgrading multiple versions sees only the most
+        // recent set (what's actually new for them) — versus
+        // a stacking changelog which gets unreadable.
+        //
+        // When a new version ships, add a new branch above and
+        // leave the old ones for any user catching up via a
+        // delayed install.
+        switch version {
+        case let v where v.hasPrefix("1.1"):
+            return featuresV1_1()
+        default:
+            // Earlier versions and any out-of-band test runs
+            // fall back to the v1.0 set — the original public
+            // launch list.
+            return featuresV1_0()
+        }
+    }
+
+    // v1.0 — original public launch. Duo, appearance, roxzone,
+    // weight projection, watch polish. Kept around so users
+    // who skip 1.0 → 1.1 (highly unlikely but possible) still
+    // see something coherent.
+    private static func featuresV1_0() -> [Feature] {
         [
             Feature(
                 id: "duo",
@@ -192,6 +214,45 @@ struct WhatsNewView: View {
                 symbol: "applewatch",
                 title: "Watch Race Screen",
                 detail: "Wrist-tuned brand identity: the 16-bar fingerprint as live progress, hero timer with coral underglow, hold-to-finish on the final station to prevent mistaps."
+            ),
+        ]
+    }
+
+    // v1.1 — effort everywhere. Per-station effort categories,
+    // hardest-station insight, race privacy toggle, streak-
+    // at-risk surfacing. The intensity-story arc that ties
+    // every post-race surface together.
+    private static func featuresV1_1() -> [Feature] {
+        [
+            Feature(
+                id: "effort-everywhere",
+                symbol: "bolt.fill",
+                title: "Effort, Everywhere",
+                detail: "Every race card now shows its effort category at a glance. Inside, each split row gets a colored dot — recovery, moderate, high, very high — so you can see which stations cooked you without leaving the summary."
+            ),
+            Feature(
+                id: "hardest-station",
+                symbol: "flame.fill",
+                title: "Hardest Station Callout",
+                detail: "Post-race insights now name the single workout station that demanded the biggest physiological cost. Pulls from HR-time integration; only fires when one station genuinely stood out from the pack."
+            ),
+            Feature(
+                id: "privacy",
+                symbol: "lock.fill",
+                title: "Per-Race Privacy",
+                detail: "New toggle on every race — public or private. Local History always shows everything; private races stay out of any future feed or leaderboard. Forward-compatible with the social work coming in v2."
+            ),
+            Feature(
+                id: "streak-at-risk",
+                symbol: "exclamationmark.triangle.fill",
+                title: "Streak-at-Risk Banner",
+                detail: "On the day your streak is in danger of breaking, Profile now surfaces a warning banner — and the evening reminder gets sharper copy. Defend the streak, or don't; either way you'll know."
+            ),
+            Feature(
+                id: "duo-pb",
+                symbol: "person.2.fill",
+                title: "Mode-Aware PBs",
+                detail: "Duo and solo PBs are now tracked separately. Cracking your fastest duo race fires a distinct insight from cracking your fastest solo — because they're not really the same race."
             ),
         ]
     }

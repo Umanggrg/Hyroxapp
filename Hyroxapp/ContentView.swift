@@ -241,7 +241,11 @@ struct ContentView: View {
                 NotificationService.shared.cancelStreakReminder()
             } else {
                 let streak = RaceStreaks.currentStreak(in: finishedRaces)
-                await NotificationService.shared.scheduleStreakReminder(currentStreak: streak)
+                let atRisk = RaceStreaks.isStreakAtRisk(in: finishedRaces)
+                await NotificationService.shared.scheduleStreakReminder(
+                    currentStreak: streak,
+                    isAtRisk: atRisk
+                )
             }
         }
     }

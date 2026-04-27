@@ -55,6 +55,42 @@ enum RaceStreaks {
         return streak
     }
 
+    // Streak-at-risk gate. Returns true when:
+    //   • The athlete has an active streak (currentStreak >= 1), AND
+    //   • The most recent training day is YESTERDAY (not today).
+    //
+    // That's the moment the banner should appear — if they don't
+    // race today, the streak breaks tomorrow morning. Returns false
+    // when:
+    //   • No streak (most recent training was today, or > 1 day ago)
+    //   • Streak already protected today (most recent training
+    //     was today)
+    //
+    // Used by `StreakAtRiskBanner` on Profile so the athlete sees
+    // a small CTA on the day their streak is in danger. Pure
+    // calendar-day arithmetic; no haunting of the user before the
+    // streak is actually at risk.
+    static func isStreakAtRisk(
+        in races: [Race],
+        referenceDate: Date = Date(),
+        calendar: Calendar = .current
+    ) -> Bool {
+        let trainingDays = trainingDaySet(from: races, calendar: calendar)
+        guard !trainingDays.isEmpty else { return false }
+
+        let today = calendar.startOfDay(for: referenceDate)
+        guard let yesterday = calendar.date(byAdding: .day, value: -1, to: today) else {
+            return false
+        }
+        guard let mostRecent = trainingDays.max() else { return false }
+
+        // At-risk only if the most recent training day was
+        // YESTERDAY. Today = streak protected; older = already
+        // broken (currentStreak returns 0 for those, no point
+        // nudging).
+        return mostRecent == yesterday
+    }
+
     static func longestStreak(
         in races: [Race],
         calendar: Calendar = .current

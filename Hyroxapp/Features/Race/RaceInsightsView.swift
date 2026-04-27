@@ -17,15 +17,28 @@ import SwiftUI
 struct RaceInsightsView: View {
     let insights: [RaceInsight]
 
+    // Drives the staggered reveal. False on mount; flipped to true
+    // on appear so each insight slides+fades in with a per-row
+    // delay. Reads as a sequential reveal — coach reading off
+    // observations one at a time — rather than a wall of insights
+    // appearing at once.
+    @State private var revealedCount = 0
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         if insights.isEmpty {
             EmptyView()
         } else {
             VStack(alignment: .leading, spacing: 10) {
-                ForEach(insights) { insight in
+                ForEach(Array(insights.enumerated()), id: \.element.id) { index, insight in
                     insightRow(insight)
+                        .opacity(index < revealedCount ? 1.0 : 0)
+                        .offset(y: index < revealedCount ? 0 : 6)
                     if insight.id != insights.last?.id {
-                        Divider().background(Color.divider)
+                        Divider()
+                            .background(Color.divider)
+                            .opacity(index < revealedCount ? 1.0 : 0)
                     }
                 }
             }
@@ -34,6 +47,26 @@ struct RaceInsightsView: View {
                 RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
                     .fill(Color.surface)
             )
+            .onAppear {
+                if reduceMotion {
+                    revealedCount = insights.count
+                } else {
+                    // Stagger: 80ms between each row's reveal,
+                    // first row fires 100ms after onAppear so the
+                    // layout pass has time to settle. With 3-5
+                    // insights, the whole reveal completes inside
+                    // 500ms — feels purposeful, not slow.
+                    for index in insights.indices {
+                        DispatchQueue.main.asyncAfter(
+                            deadline: .now() + 0.1 + Double(index) * 0.08
+                        ) {
+                            withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) {
+                                revealedCount = index + 1
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

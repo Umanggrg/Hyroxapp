@@ -695,8 +695,12 @@ struct RaceView: View {
             let zone = HRZone.zone(for: bpm, maxBPM: maxHeartRate)
 
             HStack(spacing: 4) {
-                Image(systemName: "heart.fill")
-                    .font(.system(size: 10, weight: .semibold))
+                // Heartbeat icon — pulses at a tempo synced with
+                // the actual displayed HR (rough proxy for the
+                // athlete's heart rate). Period = 60/bpm seconds.
+                // Subtle scale 0.9 → 1.1 with ease-out for the
+                // "beat" feel. Off when reduce-motion is set.
+                HeartbeatIcon(bpm: bpm)
                 Text("\(Int(bpm.rounded()))")
                     .font(.caption2.weight(.bold))
                     .monospacedDigit()
@@ -1363,6 +1367,51 @@ struct RaceView: View {
                 .padding(.bottom, 16)
             }
         }
+    }
+}
+
+// Pulsing heart icon for the live HR chip — beats at the tempo of
+// the actual displayed HR (60/bpm period). Subtle scale 0.9 → 1.15
+// with ease-out so the icon "thumps" rather than wobbles. Pure
+// visual cue; conveys aliveness when the athlete glances at the
+// timer column.
+//
+// Off when accessibilityReduceMotion is set — replaced with a
+// static heart so vestibular-sensitive users get the same data
+// without the rhythm.
+private struct HeartbeatIcon: View {
+    let bpm: Double
+
+    @State private var pulsing = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    // Period of one full beat in seconds, derived from the displayed
+    // HR. At 60bpm = 1.0s per beat; 180bpm = 0.33s per beat. Clamped
+    // to a 0.3s minimum so very-high-HR readings don't strobe at
+    // distracting frequencies (and to stay safe for photosensitive
+    // users — 0.3s = ~3.3Hz, well below the 4Hz photosensitivity
+    // safety threshold).
+    private var beatPeriod: Double {
+        let raw = 60.0 / max(bpm, 30)
+        return max(0.3, raw)
+    }
+
+    var body: some View {
+        Image(systemName: "heart.fill")
+            .font(.system(size: 10, weight: .semibold))
+            .scaleEffect(pulsing && !reduceMotion ? 1.15 : 0.9)
+            .animation(
+                reduceMotion
+                    ? .none
+                    : .easeOut(duration: beatPeriod * 0.5)
+                        .repeatForever(autoreverses: true),
+                value: pulsing
+            )
+            .onAppear {
+                if !reduceMotion {
+                    pulsing = true
+                }
+            }
     }
 }
 

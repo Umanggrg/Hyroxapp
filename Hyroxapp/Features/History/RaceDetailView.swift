@@ -306,13 +306,23 @@ struct RaceDetailView: View {
             for: race,
             allRaces: allFinishedRaces
         )
-        if !insights.isEmpty {
+        // Recovery card is part of the insights group conceptually
+        // — it's a coaching readout, not raw analytics. Skip the
+        // group header entirely when neither the recovery card nor
+        // the narrative insights have anything to render.
+        let hasRecovery = RaceStats.recoveryDemand(for: race, maxHR: maxHeartRate) != nil
+        if !insights.isEmpty || hasRecovery {
             VStack(alignment: .leading, spacing: 12) {
                 ProfileSectionHeader(
                     title: "Insights",
                     icon: "sparkles"
                 )
-                RaceInsightsView(insights: insights)
+                if hasRecovery {
+                    RecoveryEstimateView(race: race, maxHR: maxHeartRate)
+                }
+                if !insights.isEmpty {
+                    RaceInsightsView(insights: insights)
+                }
             }
         }
     }
@@ -371,6 +381,7 @@ struct RaceDetailView: View {
             #endif
             TitleSection(race: race)
             NotesSection(race: race)
+            PrivacyToggleSection(race: race)
         }
     }
 
@@ -534,6 +545,13 @@ struct RaceDetailView: View {
                 .monospacedDigit()
                 .foregroundStyle(Color.textTertiary)
                 .frame(width: 24, alignment: .leading)
+
+            // Effort dot — same renderer used on RaceSummaryView's
+            // split rows. Tints the leading gutter by intensity
+            // category so a quick scan shows which stations were
+            // hardest. Hidden cleanly when the split has no HR
+            // data (the helper returns an empty 14pt frame).
+            RaceSummaryView.effortDot(for: split, maxHR: maxHeartRate)
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 8) {
