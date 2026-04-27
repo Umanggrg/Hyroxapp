@@ -37,6 +37,15 @@ struct ProfileView: View {
     @Query(sort: [SortDescriptor(\RaceEvent.date, order: .forward)])
     private var allRaceEvents: [RaceEvent]
 
+    // All challenges — active, completed, abandoned. The
+    // mostRecentActiveChallenge computed below filters down to
+    // the single one we surface on Profile. Sorted descending by
+    // createdAt so the freshest active one wins when multiple
+    // happen to be active simultaneously (rare; the setup sheet
+    // replaces existing).
+    @Query(sort: [SortDescriptor(\Challenge.createdAt, order: .reverse)])
+    private var challenges: [Challenge]
+
     // Future-dated race events. The Profile banner pulls
     // `upcomingEvents.first` for the headline countdown — we
     // surface only one event at a time in v1 even when multiple
@@ -50,6 +59,11 @@ struct ProfileView: View {
 
     @State private var isEditing = false
     @State private var isShowingSettings = false
+
+    // Drives the challenge setup sheet from the Next Up section.
+    // Triggered by the empty-state CTA or the "Replace Challenge"
+    // context menu on an existing active challenge.
+    @State private var isShowingChallengeSheet = false
 
     // Drives the RaceEventEditSheet — non-nil with an event to
     // edit (or .create for the new-event path). Wrapped in an
@@ -214,6 +228,12 @@ struct ProfileView: View {
                     RaceEventEditSheet(existing: event)
                 }
             }
+            // ChallengeSetupSheet — picker for a new active
+            // challenge. Replaces any existing active challenge
+            // on commit (single-active invariant).
+            .sheet(isPresented: $isShowingChallengeSheet) {
+                ChallengeSetupSheet(existingChallenge: mostRecentActiveChallenge)
+            }
             #endif
         }
     }
@@ -251,8 +271,95 @@ struct ProfileView: View {
                 ReadinessBanner(races: races, maxHR: maxHR)
             }
             raceEventBanner
+            challengeBannerOrCTA
         }
         .padding(.horizontal, Layout.screenMargin)
+    }
+
+    // Active challenge — either the most recent active one or, when
+    // none exist, a "Start a challenge" CTA that opens the setup
+    // sheet. Renders below the readiness/event signals so the
+    // forward-looking trio reads top to bottom: how you feel today
+    // → what race you're training for → what goal you committed to.
+    @ViewBuilder
+    private var challengeBannerOrCTA: some View {
+        if let active = mostRecentActiveChallenge {
+            NavigationLink {
+                EmptyView()  // placeholder for ChallengeDetailView (v2)
+            } label: {
+                ActiveChallengeBanner(challenge: active, races: races)
+            }
+            .buttonStyle(.plain)
+            .contextMenu {
+                Button {
+                    isShowingChallengeSheet = true
+                } label: {
+                    Label("Replace Challenge", systemImage: "arrow.triangle.2.circlepath")
+                }
+                Button(role: .destructive) {
+                    abandonChallenge(active)
+                } label: {
+                    Label("Abandon", systemImage: "trash")
+                }
+            }
+        } else {
+            Button {
+                Haptics.impact(.light)
+                isShowingChallengeSheet = true
+            } label: {
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.accent.opacity(0.12))
+                            .frame(width: 40, height: 40)
+                        Image(systemName: "target")
+                            .font(.system(size: 18, weight: .heavy))
+                            .foregroundStyle(Color.accent)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Start a Challenge")
+                            .font(.subheadline.weight(.heavy))
+                            .foregroundStyle(Color.textPrimary)
+                        Text("Pick a goal — race count, sub-time, or streak.")
+                            .font(.caption)
+                            .foregroundStyle(Color.textSecondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.heavy))
+                        .foregroundStyle(Color.textTertiary)
+                }
+                .padding(Layout.cardPadding)
+                .background(
+                    RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                        .fill(Color.surface)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                        .stroke(Color.accent.opacity(0.25), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.pressableCard)
+        }
+    }
+
+    // Most recently created challenge that's still active (not
+    // expired AND not completed). The Profile only ever surfaces
+    // one — the single-active-challenge invariant from §1 of the
+    // Challenge model.
+    private var mostRecentActiveChallenge: Challenge? {
+        challenges
+            .filter { $0.isActive }
+            .max(by: { $0.createdAt < $1.createdAt })
+    }
+
+    // Hard delete — abandon = "I'm not pursuing this anymore."
+    // Different from completion which sets completedAt.
+    private func abandonChallenge(_ challenge: Challenge) {
+        Haptics.warning()
+        modelContext.delete(challenge)
+        try? modelContext.save()
     }
 
     // SUMMARY — the recap trio + streak. Backwards-looking

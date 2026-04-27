@@ -45,7 +45,7 @@ struct HyroxappApp: App {
         //
         // Adding a new @Model type? Include it here or queries for it
         // will crash with "entity not found."
-        .modelContainer(for: [Race.self, UserProfile.self, WorkoutTemplate.self, RaceEvent.self])
+        .modelContainer(for: [Race.self, UserProfile.self, WorkoutTemplate.self, RaceEvent.self, Challenge.self])
     }
 }
 
