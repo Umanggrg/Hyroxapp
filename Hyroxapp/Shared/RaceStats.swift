@@ -1068,6 +1068,51 @@ enum RaceStats {
         actualElapsed - expectedElapsed
     }
 
+    // MARK: - Predicted finish time
+
+    // Project the current pace forward to estimate total finish
+    // time. Naive linear extrapolation: total predicted = elapsed
+    // × (total segments / segments completed). Same shape as
+    // `naiveExpectedElapsed` — assumes remaining stations take the
+    // same average time as completed ones.
+    //
+    // Real-world note: HYROX athletes typically slow down on the
+    // back half (fatigue + late wall balls), so this projection
+    // tends to UNDERESTIMATE the true finish on a tired athlete.
+    // We surface it anyway because the directional information
+    // ("you're projected to beat 1:30") is useful even with the
+    // bias, and v2 can refine using either the athlete's
+    // historical back-half slowdown ratio or a weighted-by-
+    // station-kind projection.
+    //
+    // Returns nil when:
+    //   • segmentsCompleted == 0 — no data yet to project from
+    //   • totalSegments == 0 — defensive against zero-station
+    //     custom workouts
+    static func predictedFinishTime(
+        segmentsCompleted: Int,
+        totalSegments: Int,
+        actualElapsed: TimeInterval
+    ) -> TimeInterval? {
+        guard segmentsCompleted > 0, totalSegments > 0 else { return nil }
+        guard actualElapsed > 0 else { return nil }
+        let scaleFactor = Double(totalSegments) / Double(segmentsCompleted)
+        return actualElapsed * scaleFactor
+    }
+
+    // Signed delta vs the target time. Negative = projecting under
+    // (will beat goal), positive = projecting over (will miss).
+    // Returns nil when no target is set or no projection is
+    // available. Same convention as paceDelta — the UI layer
+    // chooses tinting from the sign.
+    static func predictedFinishDelta(
+        predicted: TimeInterval?,
+        target: TimeInterval?
+    ) -> TimeInterval? {
+        guard let predicted, let target else { return nil }
+        return predicted - target
+    }
+
     // MARK: - Formatting (shared with watchOS)
 
     // Render a TimeInterval as MM:SS, or H:MM:SS when it crosses an hour.

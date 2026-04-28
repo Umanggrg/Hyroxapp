@@ -614,6 +614,48 @@ struct RaceView: View {
                     .monospacedDigit()
                     .foregroundStyle(isOverTarget ? Color.warning : Color.textTertiary)
             }
+
+            // Predicted finish projection — naive linear extrapolation
+            // of current pace forward to the full race. Different
+            // question than the pace chip above: pace says "are you
+            // ahead/behind your target *right now*"; this says "at
+            // this rate, when will you actually finish?" Both are
+            // useful — one's about the moment, one's about the
+            // outcome.
+            //
+            // Tinted green when projecting under the athlete's
+            // target (on track to beat goal), warning amber when
+            // projecting over (going to miss). Without a target
+            // set, renders neutral textTertiary — informational
+            // rather than a verdict.
+            if let predicted = RaceStats.predictedFinishTime(
+                segmentsCompleted: viewModel.completedSegmentsCount,
+                totalSegments: viewModel.totalSegments,
+                actualElapsed: elapsed
+            ) {
+                let predictedDelta = RaceStats.predictedFinishDelta(
+                    predicted: predicted,
+                    target: target
+                )
+                let predictedColor: Color = {
+                    guard let predictedDelta else { return .textTertiary }
+                    return predictedDelta <= 0 ? .success : .warning
+                }()
+
+                Text("projected \(RaceStats.format(predicted))")
+                    .font(.metadata)
+                    .monospacedDigit()
+                    .foregroundStyle(predictedColor)
+                    // Numeric content transition keeps the digits
+                    // animating smoothly as the projection updates
+                    // each tick — at 0.05s timeline cadence the
+                    // digits would otherwise jitter.
+                    .contentTransition(.numericText())
+                    .animation(
+                        reduceMotion ? .none : .smooth(duration: 0.4),
+                        value: predictedColor
+                    )
+            }
         }
     }
 

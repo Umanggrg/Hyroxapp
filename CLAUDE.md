@@ -621,7 +621,87 @@ Structured reasons to keep coming back.
 - **Indoor-first** — HYROX is an indoor race; the app should work on a treadmill or in a garage gym just as well as outdoors
 - **Watch is first-class** — for mid-workout interaction, the wrist beats the phone. Architecture already reflects this.
 
-### 13.8 — How items move from §13 into §4
+### 13.8 — Apple Watch sensor roadmap
+
+Where the app could genuinely separate from every other HYROX tracker. Ranked top-to-bottom by impact-per-effort once the paid Apple Developer license is active. Currently the Watch is a mirror + remote — every sensor reading the user sees comes from phone HealthKit via WCSession snapshot. These tiers move sensor consumption to the Watch directly.
+
+**Tier 1 — Direct Watch HR streaming** (~2 sessions, ⚪)
+
+The first move post-activation. Replaces the phone-roundtrip HR path with `HKWorkoutSession` + `HKLiveWorkoutBuilder` on the Watch directly. Wins:
+- 1–2s HR update cadence vs current 5s polling
+- HR data when the phone is locked in a locker / out of range
+- Proper "Functional Strength Training" workout categorization in Apple Health
+- Activity ring credit for HYROX sessions on Watch wearers
+
+Same UI surfaces (live HR chip, zones chart) — only the data source changes. Closes the deferred task from §13.1 / task #282.
+
+**Tier 2 — IMU rep counting** (~1 week, ⚪ — headline feature)
+
+Use `CMDeviceMotion` accelerometer + gyroscope to auto-count reps for the four rep-based stations. *No other HYROX app does this.* Gestures to detect:
+
+| Station | Motion signature |
+|---|---|
+| Wall balls | Up-back-up arm extension cycle, ~2s period |
+| Burpee broad jumps | Vertical drop → push-up → jump impulse |
+| Sandbag lunges | Alternating L/R foot impulse during steps with held weight |
+| Farmer's carry | Step impulses with stable arm position (count steps) |
+
+Phase 1: ship with classical signal processing (band-pass on Z-axis acceleration, peak detection above a tuned threshold). Phase 2: train a small Create ML classifier per station type if signal-processing accuracy plateaus.
+
+Surfaces: optional rep counter chip on the in-race screen for rep stations, post-race auto-fill of `Split.repsCompleted` so the athlete doesn't have to type. Pairs with the existing manual `repsCompleted` field — if the auto-count detects N, athletes can confirm or override.
+
+**Tier 3 — Pre-race readiness from overnight HealthKit** (~3 sessions, ⚪)
+
+Combines four signals from HealthKit (already on the Watch via overnight tracking) into a readiness score:
+- Resting HR vs 30-day baseline
+- HRV ratio (last-night HRV / 30-day average)
+- Sleep duration + quality from `HKCategoryTypeIdentifierSleepAnalysis`
+- Skin temperature delta from overnight baseline (S8+/Ultra only)
+
+Surface: enhances the existing `ReadinessBanner` on Profile from "based on last race" to "based on last race + last night's body data." Color-coded: green = race-day ready, amber = easy session today, coral = real recovery day.
+
+The Whoop / Oura play. The data is already on the Watch via Apple Health; we just have to read it. Comparable products charge $200–300/year for this; we get it free.
+
+**Tier 4 — Post-race SpO2 + skin temp** (~1 session each, ⚪)
+
+`HKQuantityTypeIdentifierOxygenSaturation` lookup post-race shows the lowest SpO2 reading during the session. Combined with HR peak, it's a real anaerobic-threshold proxy ("Your SpO2 dropped to 92% on Wall Balls — near anaerobic threshold").
+
+Wrist skin temp during a race trends with thermal load. A surge could flag overheating risk on a hot gym day. Both are passive HealthKit reads — minimal code to surface.
+
+Niche but positions the app as performance-grade. SpO2 is Series 6+; skin temp is Series 8+/Ultra.
+
+**Tier 5 — Apple Watch Ultra Action Button** (~1 session, ⚪)
+
+Configurable physical button on Ultra hardware. Wire it to "advance station" so the athlete can rip through the race with one hardware press, no screen tap. Critical for sweaty hands and gloves. Falls back to no-op on non-Ultra hardware (Series-only users keep tapping).
+
+Implementation: register via `WKExtension` shortcuts; settings toggle for the binding.
+
+**Tier 6 — Auto station advance via motion classification** (deferred — requires Tiers 1–2 first, ⚪)
+
+The most ambitious sensor item. Detect when the athlete transitions from one station to the next based on motion-pattern shift and auto-fire `advance()`. Needs a trained classifier (Create ML or hand-tuned heuristics on running cadence vs. strength patterns).
+
+Risk: false positives ruin a race. False negatives leave the athlete tapping. Ship with a confirmation prompt ("Advance to Sled Push?") rather than silent advance until accuracy is proven on real-world training data.
+
+**Out of scope (intentionally)**
+
+- GPS — see §1 non-goals
+- ECG — irrelevant for racing; requires holding still + finger on crown
+- Compass / altimeter — indoor HYROX surfaces don't have meaningful magnetic or elevation signal at the resolutions the sensors provide
+- Voice commands via microphone — battery + accuracy concerns; cleaner to use the Action Button + screen tap
+- Depth gauge / water temp — wrong sport
+
+**Sequencing once activation lands**
+
+Recommended build order (each tier is independent — can be reordered if user feedback shifts priorities):
+
+1. **Tier 1** — Direct HR. Closes a real correctness gap, fast win.
+2. **Tier 5** — Ultra Action Button. Small lift, noticeable UX win for the subset of users on Ultra hardware.
+3. **Tier 2** — Wall ball rep counting first, then expand to the other three rep stations. The headline feature that shows up in App Store screenshots.
+4. **Tier 3** — Overnight readiness. Turns the Profile readiness banner from useful into compelling.
+5. **Tier 4** — SpO2 + skin temp post-race. Performance-grade positioning.
+6. **Tier 6** — Auto station advance. Last, after rep-counting data exists to train on.
+
+### 13.9 — How items move from §13 into §4
 
 When we commit to building something from this list:
 1. Pick a specific item and give it an estimate (sessions of work)
