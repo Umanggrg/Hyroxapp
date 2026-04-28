@@ -1,0 +1,95 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: #0a0a0b;
+  color: #f5f5f7;
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Horizontal-overflow guard — applied to <main>, NOT html/body,
+   so it doesn't establish a scrolling ancestor that breaks
+   `position: sticky` on the IntroAnimation. The rotating phone
+   inside IntroAnimation is already clipped by the section's own
+   `overflow-hidden`; this is just a safety net for any other
+   stray transform that might push past the viewport. */
+main {
+  overflow-x: clip;
+}
+
+/* The hero number ticker in the app uses monospaced digits to
+   prevent jitter as digits change width. We mirror that on the
+   site so the feel matches. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* A hairline divider that matches the in-app `Color.divider`. */
+.hairline {
+  border-color: #2c2c2e;
+}
+
+/* Faint grain overlay used on the hero — gives the dark canvas
+   a textured, "shot on film" feel without leaning into stock
+   photography. Pure CSS, no asset. */
+.grain::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(
+      rgba(255, 255, 255, 0.025) 1px,
+      transparent 1px
+    ),
+    radial-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+  background-size: 3px 3px, 7px 7px;
+  background-position: 0 0, 1px 2px;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: 0.6;
+}
+
+/* Soft scrollbar so the site doesn't get a default chrome look. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0a0b;
+}
+::-webkit-scrollbar-thumb {
+  background: #1c1c1f;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2c2c2e;
+}
+
+/* Section reveal — applied to top-level <section> via JS-free
+   scroll-driven animation where supported. Falls back to the
+   element being visible. */
+@supports (animation-timeline: view()) {
+  .reveal {
+    animation: riseIn linear both;
+    animation-timeline: view();
+    animation-range: entry 5% cover 25%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
