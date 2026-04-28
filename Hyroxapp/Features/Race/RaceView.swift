@@ -95,6 +95,13 @@ struct RaceView: View {
     // dial them back ~50% in light.
     @Environment(\.colorScheme) private var colorScheme
 
+    // Drives the in-race motion bypass: when the system
+    // accessibility setting is on, all spring/scale animations
+    // collapse to .none and the race screen reads as static
+    // (vestibular-sensitive users can still race without
+    // the visual motion).
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         ZStack {
             Color.background.ignoresSafeArea()
@@ -127,11 +134,38 @@ struct RaceView: View {
                     // button + countup transition timer.
                     inRoxzoneView
                         .padding(.horizontal, Layout.screenMargin)
+                        .transition(
+                            reduceMotion
+                                ? .opacity
+                                : .asymmetric(
+                                    // Roxzone slides in from below
+                                    // with a slight scale-up — reads
+                                    // as the screen "lifting up to
+                                    // surface the transition timer."
+                                    insertion: .move(edge: .bottom)
+                                        .combined(with: .opacity)
+                                        .combined(with: .scale(scale: 0.96)),
+                                    // Slides back down on dismiss
+                                    // (start next segment) so the
+                                    // exit reverses the entry.
+                                    removal: .move(edge: .bottom)
+                                        .combined(with: .opacity)
+                                )
+                        )
                 } else {
                     inProgressView
                         .padding(.horizontal, Layout.screenMargin)
+                        .transition(.opacity)
                 }
             }
+            // Roxzone enter/exit drives the asymmetric transitions
+            // above. Same spring shape used by onboarding step
+            // transitions so the motion feels coherent across
+            // surfaces.
+            .animation(
+                reduceMotion ? .none : .spring(response: 0.45, dampingFraction: 0.85),
+                value: viewModel.isInRoxzone
+            )
 
             // Countdown overlay — full-screen, sits above the
             // start screen so the athlete sees a clean 3 → 2 → 1
@@ -152,11 +186,21 @@ struct RaceView: View {
             // they tap Start Run.
             if isAwaitingRunStart {
                 startRunOverlay
-                    .transition(.opacity)
+                    .transition(
+                        reduceMotion
+                            ? .opacity
+                            : .opacity.combined(with: .scale(scale: 0.96))
+                    )
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: viewModel.countdownValue)
-        .animation(.easeInOut(duration: 0.2), value: isAwaitingRunStart)
+        .animation(
+            reduceMotion ? .none : .spring(response: 0.4, dampingFraction: 0.85),
+            value: viewModel.countdownValue
+        )
+        .animation(
+            reduceMotion ? .none : .spring(response: 0.4, dampingFraction: 0.85),
+            value: isAwaitingRunStart
+        )
         // Per-tick side effects for the countdown — voice cue +
         // haptic. Fires exactly once per integer change. The voice
         // cue speaks the number ("3", "2", "1", "GO"); the haptic
@@ -495,6 +539,19 @@ struct RaceView: View {
                     .foregroundStyle(Color.textSecondary)
             }
         }
+        // Keying by station + applying a content transition makes
+        // SwiftUI crossfade the station name + target on advance
+        // rather than snapping. The user feels the race progress
+        // through the motion. Numeric-text content transition
+        // animates between distinct text contents at the
+        // typography level — Apple's recommended pattern for
+        // info that changes.
+        .id(viewModel.currentStation)
+        .transition(.opacity.combined(with: .scale(scale: 0.94)))
+        .animation(
+            reduceMotion ? .none : .smooth(duration: 0.4),
+            value: viewModel.currentStation
+        )
     }
 
     private func timerColumn(now: Date) -> some View {
@@ -609,17 +666,36 @@ struct RaceView: View {
             HStack(spacing: 4) {
                 Image(systemName: state.icon)
                     .font(.system(size: 10, weight: .semibold))
+                    // Content transition for the icon glyph swap
+                    // when crossing pace thresholds (chevron-up
+                    // → equal → chevron-down). The default jump
+                    // would feel binary; symbolEffect smooths it.
+                    .contentTransition(.symbolEffect(.replace))
                 Text(state.label)
                     .font(.caption2.weight(.bold))
                     .tracking(0.3)
                     .textCase(.uppercase)
                     .monospacedDigit()
+                    // Numeric-text content transition keeps the
+                    // delta number ("+0:12") animating smoothly
+                    // as the gap to expected pace evolves second
+                    // by second rather than snapping each tick.
+                    .contentTransition(.numericText())
             }
             .foregroundStyle(state.color)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(
                 Capsule().fill(Color.surface)
+            )
+            // Color crossfade when crossing thresholds — going
+            // from amber "behind" to green "ahead" should feel
+            // like a victory, not a snap. The animation hooks
+            // both the foreground tint and the icon symbol
+            // replacement at once.
+            .animation(
+                reduceMotion ? .none : .smooth(duration: 0.4),
+                value: state.label
             )
             .accessibilityLabel("Pace: \(state.label)")
         }
@@ -704,11 +780,18 @@ struct RaceView: View {
                 Text("\(Int(bpm.rounded()))")
                     .font(.caption2.weight(.bold))
                     .monospacedDigit()
+                    // Numeric content transition smooths the BPM
+                    // digits so the chip ticks rather than snaps
+                    // between samples. ~5s polling interval makes
+                    // the difference visible — without this each
+                    // refresh would jump.
+                    .contentTransition(.numericText())
                 // Zone label appears as a small "Z3" suffix so the
                 // athlete sees both the raw number and the zone in
                 // one glance. Strava-watch-face style.
                 Text("Z\(zone.rawValue)")
                     .font(.caption2.weight(.heavy))
+                    .contentTransition(.numericText())
                     .padding(.horizontal, 4)
                     .padding(.vertical, 1)
                     .background(
@@ -721,6 +804,15 @@ struct RaceView: View {
             .padding(.vertical, 6)
             .background(
                 Capsule().fill(Color.surface)
+            )
+            // Zone color crossfade when crossing zone boundaries.
+            // The chip's tint cascade (text + icon + Z-pill bg)
+            // all animate together for a unified feel — the
+            // athlete sees the chip "warm up" toward Z5 / "cool
+            // down" toward Z2 rather than flicking discretely.
+            .animation(
+                reduceMotion ? .none : .smooth(duration: 0.4),
+                value: zone
             )
             .accessibilityLabel("Current heart rate \(Int(bpm.rounded())) beats per minute, \(zone.displayName)")
         }
@@ -1243,6 +1335,7 @@ struct RaceView: View {
             } label: {
                 Text(useRoxzone ? "End Station" : "Next Station")
                     .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .contentTransition(.opacity)
                     .frame(maxWidth: .infinity)
                     .frame(height: Layout.raceButtonHeight)
                     .background(Color.accent)
@@ -1253,8 +1346,21 @@ struct RaceView: View {
                     .foregroundStyle(Color.onAccent)
                     .clipShape(RoundedRectangle(cornerRadius: Layout.cardCornerRadius))
             }
+            // Pressable-card style scales the button to 0.98 on
+            // press with a 0.3s spring. Same tactile feedback as
+            // the rest of the app's tappable surfaces — sweaty
+            // mid-race fingers get clear "your tap registered"
+            // confirmation through the scale instead of waiting
+            // for the next-station screen to render.
+            .buttonStyle(.pressableCard)
             .disabled(viewModel.isPaused)
             .opacity(viewModel.isPaused ? 0.4 : 1.0)
+            // Pause-state opacity now animates rather than
+            // snapping when the athlete pauses/resumes mid-race.
+            .animation(
+                reduceMotion ? .none : .smooth(duration: 0.25),
+                value: viewModel.isPaused
+            )
         }
     }
 

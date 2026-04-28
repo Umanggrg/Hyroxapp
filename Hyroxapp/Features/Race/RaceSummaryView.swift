@@ -143,6 +143,18 @@ struct RaceSummaryView: View {
                             .padding(.top, 8)
                     }
 
+                    // Race-day weight projection — when the athlete
+                    // logged sub-race-weight on at least one station,
+                    // surface what the race would total at official
+                    // setup. Coaching honesty signal: "your fitness
+                    // is here, race-day would be there." Hidden when
+                    // every station was already at race weight.
+                    if let race = viewModel.activeRace {
+                        let division = profiles.first?.resolvedDivision ?? .mensOpen
+                        RaceDayProjectionView(race: race, division: division)
+                            .padding(.top, 8)
+                    }
+
                     // Auto-generated narrative insights — PBs, HR
                     // peak, run fatigue. The view skips itself when
                     // no insights apply (e.g. first race ever, no

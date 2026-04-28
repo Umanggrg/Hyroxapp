@@ -63,11 +63,11 @@ struct RaceDetailView: View {
 
             ScrollView {
                 VStack(spacing: 24) {
-                    detailHeroSection
-                    insightsGroupSection
-                    analysisGroupSection
-                    splitsGroupSection
-                    reflectionGroupSection
+                    detailHeroSection.applyScrollAppearTransition()
+                    insightsGroupSection.applyScrollAppearTransition()
+                    analysisGroupSection.applyScrollAppearTransition()
+                    splitsGroupSection.applyScrollAppearTransition()
+                    reflectionGroupSection.applyScrollAppearTransition()
                 }
                 .padding(.horizontal, Layout.screenMargin)
                 .padding(.bottom, Layout.screenMargin)
@@ -306,12 +306,16 @@ struct RaceDetailView: View {
             for: race,
             allRaces: allFinishedRaces
         )
-        // Recovery card is part of the insights group conceptually
-        // — it's a coaching readout, not raw analytics. Skip the
-        // group header entirely when neither the recovery card nor
-        // the narrative insights have anything to render.
+        // Recovery + race-day projection are coaching readouts, not
+        // raw analytics — same group as the narrative insights.
+        // Skip the group header entirely when nothing in the trio
+        // has anything to render.
         let hasRecovery = RaceStats.recoveryDemand(for: race, maxHR: maxHeartRate) != nil
-        if !insights.isEmpty || hasRecovery {
+        let hasProjection = RaceStats.raceDayProjectedTotal(
+            for: race,
+            division: profiles.first?.resolvedDivision ?? .mensOpen
+        ) != nil
+        if !insights.isEmpty || hasRecovery || hasProjection {
             VStack(alignment: .leading, spacing: 12) {
                 ProfileSectionHeader(
                     title: "Insights",
@@ -319,6 +323,12 @@ struct RaceDetailView: View {
                 )
                 if hasRecovery {
                     RecoveryEstimateView(race: race, maxHR: maxHeartRate)
+                }
+                if hasProjection {
+                    RaceDayProjectionView(
+                        race: race,
+                        division: profiles.first?.resolvedDivision ?? .mensOpen
+                    )
                 }
                 if !insights.isEmpty {
                     RaceInsightsView(insights: insights)

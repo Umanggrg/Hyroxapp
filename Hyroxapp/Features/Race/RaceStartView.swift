@@ -495,8 +495,14 @@ struct RaceStartView: View {
                     )
             )
             .foregroundStyle(Color.textPrimary)
+            // Subtle scale lift on the selected chip so the
+            // active mode reads visually elevated even before
+            // the user looks at the border + bg tint cues. 1.04
+            // is small enough to feel like depth, not a callout.
+            .scaleEffect(isSelected ? 1.04 : 1.0)
+            .animation(.spring(response: 0.35, dampingFraction: 0.75), value: isSelected)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressableCard)
     }
 
     // Tap handler for the Solo / Duo chips.

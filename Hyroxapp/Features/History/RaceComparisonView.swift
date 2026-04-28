@@ -71,14 +71,14 @@ struct RaceComparisonView: View {
 
             ScrollView {
                 VStack(spacing: 22) {
-                    pickerRow
+                    pickerRow.applyScrollAppearTransition()
 
                     if let a = raceA, let b = raceB {
-                        comparisonHero(a: a, b: b)
-                        aggregatesCard(a: a, b: b)
-                        splitsCompareCard(a: a, b: b)
+                        comparisonHero(a: a, b: b).applyScrollAppearTransition()
+                        aggregatesCard(a: a, b: b).applyScrollAppearTransition()
+                        splitsCompareCard(a: a, b: b).applyScrollAppearTransition()
                     } else {
-                        emptyState
+                        emptyState.applyScrollAppearTransition()
                     }
                 }
                 .padding(Layout.screenMargin)

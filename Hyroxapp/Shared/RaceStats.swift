@@ -132,6 +132,60 @@ enum RaceStats {
         return split.duration * ratio
     }
 
+    // Race-level rollup of the race-day weight projection. Sums:
+    //   • For each split with a sub-race-weight projection (returned
+    //     by `projectedRaceTime`): the projected duration.
+    //   • For every other split: the actual logged duration.
+    //
+    // The result is "what your race would have been at official
+    // HYROX weight, holding everything else equal." Single coaching
+    // number, more honest than the per-station projection because
+    // it shows the cumulative cost of training under-weight.
+    //
+    // Returns nil when no splits had a meaningful projection — in
+    // that case the actual `totalDuration` IS the race-day projection
+    // (every station was already at race weight) and surfacing a
+    // duplicate would be noise.
+    //
+    // Also returns nil when the race isn't finished — projections
+    // require all splits to be complete.
+    static func raceDayProjectedTotal(
+        for race: Race,
+        division: Division
+    ) -> TimeInterval? {
+        guard race.isFinished else { return nil }
+
+        // Track whether at least one station had a meaningful
+        // projection — otherwise return nil and let the actual
+        // total stand on its own.
+        var anyProjected = false
+        var total: TimeInterval = 0
+
+        for split in race.splits {
+            if let projected = projectedRaceTime(forSplit: split, division: division) {
+                total += projected
+                anyProjected = true
+            } else {
+                total += split.duration
+            }
+        }
+
+        return anyProjected ? total : nil
+    }
+
+    // Coupled helper: how many splits in the race had a
+    // meaningful sub-race-weight projection. Used by the UI to
+    // render a confidence subtitle ("based on 3 stations") so the
+    // athlete knows the projection isn't conjured from thin air.
+    static func raceDayProjectionStationCount(
+        for race: Race,
+        division: Division
+    ) -> Int {
+        race.splits
+            .compactMap { projectedRaceTime(forSplit: $0, division: division) }
+            .count
+    }
+
     // MARK: - Effort score (HR-time integration)
     //
     // A single interpretable number for "how hard was this race."

@@ -102,7 +102,7 @@ struct StationDetailView: View {
 
             ScrollView {
                 VStack(spacing: 24) {
-                    heroCard
+                    heroCard.applyScrollAppearTransition()
 
                     if !trend.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
@@ -113,6 +113,7 @@ struct StationDetailView: View {
                             )
                             trendCard
                         }
+                        .applyScrollAppearTransition()
                     }
 
                     VStack(alignment: .leading, spacing: 12) {
@@ -122,6 +123,7 @@ struct StationDetailView: View {
                         )
                         physiologyCard
                     }
+                    .applyScrollAppearTransition()
                 }
                 .padding(Layout.screenMargin)
             }

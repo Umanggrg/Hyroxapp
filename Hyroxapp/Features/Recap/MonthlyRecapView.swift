@@ -48,17 +48,15 @@ struct MonthlyRecapView: View {
 
             ScrollView {
                 VStack(spacing: 20) {
-                    heroCard
-
-                    statsGrid
+                    heroCard.applyScrollAppearTransition()
+                    statsGrid.applyScrollAppearTransition()
 
                     if let mover = recap.biggestMover {
-                        biggestMoverCard(mover)
+                        biggestMoverCard(mover).applyScrollAppearTransition()
                     }
 
-                    highlightsCard
-
-                    racesSection
+                    highlightsCard.applyScrollAppearTransition()
+                    racesSection.applyScrollAppearTransition()
                 }
                 .padding(Layout.screenMargin)
             }

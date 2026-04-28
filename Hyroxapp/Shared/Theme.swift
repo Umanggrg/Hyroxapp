@@ -397,3 +397,34 @@ extension ButtonStyle where Self == PressableCardButtonStyle {
         PressableCardButtonStyle()
     }
 }
+
+// MARK: - Scroll-appearance transition
+
+// Subtle fade + scale-up applied to children of a scrolling view.
+// SwiftUI's .scrollTransition runs the closure with a `phase` value
+// describing the child's position relative to the viewport — at the
+// edges it's reduced (.topLeading / .bottomTrailing), in the middle
+// it's .identity. We map .identity to full opacity + 1.0 scale and
+// edges to dimmed + slightly smaller, so children fade in as they
+// scroll into view.
+//
+// Used on long scrolling stacks like ProfileView's grouped sections
+// and HistoryView's race feed to give them an Apple-grade entrance
+// rhythm. The effect is strongest on first appearance (each child
+// fades in sequentially as the layout settles) and during
+// pull-to-refresh-style scrolls (children at the edges dim slightly).
+//
+// Reduce-Motion users get the full identity rendering at every
+// phase via SwiftUI's built-in motion-respecting behavior on
+// .scrollTransition (system handles it automatically).
+extension View {
+    @ViewBuilder
+    func applyScrollAppearTransition() -> some View {
+        self.scrollTransition(axis: .vertical) { content, phase in
+            content
+                .opacity(phase.isIdentity ? 1 : 0)
+                .scaleEffect(phase.isIdentity ? 1 : 0.96)
+                .blur(radius: phase.isIdentity ? 0 : 1.5)
+        }
+    }
+}

@@ -78,6 +78,14 @@ struct HistoryView: View {
                                         RaceCardView(race: race, allRaces: races, maxHR: maxHeartRate)
                                     }
                                     .buttonStyle(.pressableCard)
+                                    // Same scroll-appearance polish
+                                    // ProfileView's sections get —
+                                    // cards fade + scale slightly as
+                                    // they enter the viewport. Long
+                                    // History scrolls feel more
+                                    // alive without manual stagger
+                                    // state.
+                                    .applyScrollAppearTransition()
                                 }
                             }
                         }

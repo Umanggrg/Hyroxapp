@@ -103,6 +103,14 @@ struct ProfileView: View {
                     // unchanged — empty groups skip their header
                     // entirely so a fresh user doesn't see a wall
                     // of empty section labels.
+                    //
+                    // .scrollTransition fades + slightly scales each
+                    // child as it enters the visible viewport. The
+                    // effect is most visible on first appearance
+                    // (sections reveal sequentially as the scroll
+                    // settles) and during pull-to-scroll (sections
+                    // re-fade as they leave/enter the edges). Apple-
+                    // grade entrance, no manual state plumbing.
                     LazyVStack(spacing: 28, pinnedViews: []) {
                         if let profile = profiles.first {
                             ProfileHero(
@@ -112,6 +120,7 @@ struct ProfileView: View {
                                 avgDisplay: heroAvgDisplay,
                                 streakDays: heroStreakDays
                             )
+                            .applyScrollAppearTransition()
                         }
 
                         if races.isEmpty {
@@ -124,14 +133,15 @@ struct ProfileView: View {
                                 emptyStats
                             }
                             .padding(.horizontal, Layout.screenMargin)
+                            .applyScrollAppearTransition()
                         } else {
-                            nextUpSection
-                            summarySection
-                            performanceSection
-                            trainingSection
-                            personalBestsSection
-                            achievementsGroupSection
-                            recentSection
+                            nextUpSection.applyScrollAppearTransition()
+                            summarySection.applyScrollAppearTransition()
+                            performanceSection.applyScrollAppearTransition()
+                            trainingSection.applyScrollAppearTransition()
+                            personalBestsSection.applyScrollAppearTransition()
+                            achievementsGroupSection.applyScrollAppearTransition()
+                            recentSection.applyScrollAppearTransition()
                         }
                     }
                     .padding(.bottom, Layout.screenMargin)

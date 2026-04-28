@@ -34,6 +34,38 @@ struct OnboardingView: View {
 
     @State private var step: Step = .welcome
 
+    // Tracks the direction of the most recent step change so the
+    // transition can be asymmetric — new content slides in from
+    // the trailing edge when advancing, leading edge when going
+    // back. Without this, every step change would slide the same
+    // direction and a "Back" tap would feel wrong.
+    @State private var slideDirection: SlideDirection = .forward
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    // Asymmetric slide direction used by the step content's
+    // .transition modifier. forward = new content from the right
+    // (typical "next page" feel); backward = new content from the
+    // left (typical "previous page" feel).
+    enum SlideDirection {
+        case forward
+        case backward
+
+        var insertEdge: Edge {
+            switch self {
+            case .forward:  return .trailing
+            case .backward: return .leading
+            }
+        }
+
+        var removeEdge: Edge {
+            switch self {
+            case .forward:  return .leading
+            case .backward: return .trailing
+            }
+        }
+    }
+
     enum Step: Int, CaseIterable, Identifiable {
         case welcome
         case identity
@@ -84,9 +116,20 @@ struct OnboardingView: View {
                     .padding(.horizontal, Layout.screenMargin)
 
                 ScrollView {
+                    // Whole content panel (hero + step body) is
+                    // keyed by step and gets an asymmetric slide
+                    // transition. Treating hero + body as one unit
+                    // means the icon, title, subtitle, and inputs
+                    // travel together — reads as a single panel
+                    // sliding rather than separate elements
+                    // crossfading at different times.
+                    //
+                    // .id(step) is what triggers SwiftUI to treat
+                    // the new step's view as a distinct insertion
+                    // (firing the transition) vs. a state update
+                    // on the existing view (which wouldn't animate).
                     VStack(alignment: .leading, spacing: 28) {
                         heroBlock
-
                         Group {
                             switch step {
                             case .welcome:  welcomeStep
@@ -97,6 +140,17 @@ struct OnboardingView: View {
                         }
                     }
                     .padding(Layout.screenMargin)
+                    .id(step)
+                    .transition(
+                        reduceMotion
+                            ? .opacity
+                            : .asymmetric(
+                                insertion: .move(edge: slideDirection.insertEdge)
+                                    .combined(with: .opacity),
+                                removal: .move(edge: slideDirection.removeEdge)
+                                    .combined(with: .opacity)
+                            )
+                    )
                 }
 
                 Spacer(minLength: 0)
@@ -387,7 +441,17 @@ struct OnboardingView: View {
                                 .fill(Color.surfaceElevated)
                         )
                 }
-                .buttonStyle(.plain)
+                // Pressable-card style so the Back button compresses
+                // slightly on tap (0.98 scale, 0.3s spring). Same
+                // tactile feedback the rest of the app uses on
+                // tappable card surfaces; consistency reads as
+                // craft, not novelty.
+                .buttonStyle(.pressableCard)
+                .transition(
+                    reduceMotion
+                        ? .opacity
+                        : .move(edge: .leading).combined(with: .opacity)
+                )
             }
 
             Button {
@@ -395,27 +459,42 @@ struct OnboardingView: View {
             } label: {
                 Text(step == .audio ? "Get started" : "Next")
                     .font(.headline)
-                    .foregroundStyle(Color.textPrimary)
+                    .foregroundStyle(Color.onAccent)
                     .frame(maxWidth: .infinity, minHeight: 48)
                     .background(
                         RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
                             .fill(Color.accent)
                     )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.pressableCard)
         }
+        // Animate the Back button's appearance+disappearance — on
+        // step .welcome it doesn't render; on every other step it
+        // does. The button slides in from the leading edge as the
+        // user advances and slides out as they return to welcome.
+        // Tied to the same step-change spring so back/next +
+        // button-row + content panel all move as a coordinated
+        // group.
+        .animation(stepAnimation, value: step)
     }
 
     private func goBack() {
         guard let prev = Step(rawValue: step.rawValue - 1) else { return }
-        withAnimation(.easeInOut(duration: 0.25)) {
+        // Set direction BEFORE the step change so the asymmetric
+        // transition reads the correct insert/remove edges. If we
+        // animated the step first, the transition would still see
+        // the previous (forward) direction and the slide would go
+        // the wrong way.
+        slideDirection = .backward
+        withAnimation(stepAnimation) {
             step = prev
         }
     }
 
     private func goNext() {
         if let next = Step(rawValue: step.rawValue + 1) {
-            withAnimation(.easeInOut(duration: 0.25)) {
+            slideDirection = .forward
+            withAnimation(stepAnimation) {
                 step = next
             }
         } else {
@@ -424,6 +503,17 @@ struct OnboardingView: View {
             profile.hasCompletedOnboarding = true
             dismiss()
         }
+    }
+
+    // Spring matching CLAUDE.md §5's canonical motion shape
+    // (response 0.4, dampingFraction 0.8). Lands with weight,
+    // doesn't bounce. Reduce-Motion users get a quick fade
+    // courtesy of the .opacity transition fallback applied at
+    // the content site.
+    private var stepAnimation: Animation {
+        reduceMotion
+            ? .easeInOut(duration: 0.2)
+            : .spring(response: 0.45, dampingFraction: 0.85)
     }
 }
 #endif
