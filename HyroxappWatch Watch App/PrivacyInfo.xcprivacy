@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+		Privacy Manifest for the Watch target. The Watch app is a
+		mirror + remote — it receives RaceStateSnapshot from the
+		paired iPhone via WCSession, doesn't access HealthKit on
+		its own (deferred to §13.8 Tier 1), doesn't track, doesn't
+		network outside WCSession (which is paired-device-only).
+
+		Same shape as the iPhone target's manifest — local-only,
+		no tracking, no collected data, no required-reason APIs
+		beyond what SwiftUI runtime needs natively.
+
+		When Tier 1 of the sensor roadmap ships (HKWorkoutSession
+		on Watch), this manifest will need updating with HealthKit
+		data type declarations.
+	-->
+
+	<key>NSPrivacyTracking</key>
+	<false/>
+
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array/>
+</dict>
+</plist>

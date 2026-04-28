@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+		Privacy Manifest — required for all App Store submissions
+		since Spring 2024. Declares tracking behavior, collected
+		data types, and use of "required reason" APIs.
+
+		Hyroxapp v1.x is a fully on-device fitness app. No
+		telemetry, no analytics, no network calls outside of
+		Multipeer Connectivity for Duo Mode (which is peer-to-peer,
+		never crosses Apple's servers). Health data stays in the
+		user's HealthKit; race history stays in SwiftData on-device.
+
+		When v2 ships cloud sync via Supabase, this manifest will
+		need updating — every collected data type sent off-device
+		gets declared here.
+	-->
+
+	<!--
+		NSPrivacyTracking: whether the app tracks the user across
+		apps and websites owned by other companies. We don't.
+	-->
+	<key>NSPrivacyTracking</key>
+	<false/>
+
+	<!--
+		NSPrivacyTrackingDomains: domains the app uses for tracking.
+		None — we don't use any third-party SDKs that track.
+	-->
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+
+	<!--
+		NSPrivacyCollectedDataTypes: data types collected and sent
+		off-device. v1 is local-only. HealthKit reads stay in
+		HealthKit; race history stays in on-device SwiftData. The
+		Multipeer Duo bridge transmits race state peer-to-peer
+		but doesn't COLLECT data in the App Store sense (no server
+		receives or stores anything). Empty array is correct here.
+	-->
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+
+	<!--
+		NSPrivacyAccessedAPITypes: declare any "required reason"
+		APIs the app uses. Apple's current list:
+		  - File timestamps
+		  - System boot time
+		  - Disk space
+		  - Active keyboards
+		  - UserDefaults
+
+		We don't directly call any of these. SwiftData manages its
+		own persistence (no NSFileManager timestamps). We don't use
+		UserDefaults / @AppStorage — all settings live on the
+		UserProfile SwiftData model. No third-party SDKs that
+		might use these APIs internally.
+
+		Empty array is the honest declaration for v1.x.
+	-->
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array/>
+</dict>
+</plist>
