@@ -39,6 +39,26 @@ struct HistoryView: View {
     @State private var searchText = ""
     @State private var selectedFilter: HistoryFilter = .all
 
+    // Selected tag (nil = no tag filter). Composes with selectedFilter
+    // — both apply in series, so the user can do "PBs Only" + tag
+    // "zone2" to see PB races that were also zone-2 sessions.
+    @State private var selectedTag: String? = nil
+
+    // All tags ever used across the athlete's race history, sorted
+    // by usage frequency descending so the most-used tags surface
+    // first. Drives the TagFilterRow below the preset filters.
+    private var availableTags: [String] {
+        var counts: [String: Int] = [:]
+        for race in races {
+            for tag in race.tags {
+                counts[tag, default: 0] += 1
+            }
+        }
+        return counts
+            .sorted { ($0.value, $0.key) > ($1.value, $1.key) }
+            .map(\.key)
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -66,6 +86,16 @@ struct HistoryView: View {
                                 filters: HistoryFilter.allCases,
                                 selection: $selectedFilter,
                                 label: \.displayName
+                            )
+                            .padding(.horizontal, -Layout.screenMargin)
+
+                            // Tag filter row sits below the preset
+                            // chips. Composes with the active preset
+                            // — both filters apply in series. Auto-
+                            // hides when no tags exist on any race.
+                            TagFilterRow(
+                                tags: availableTags,
+                                selection: $selectedTag
                             )
                             .padding(.horizontal, -Layout.screenMargin)
 
@@ -162,6 +192,14 @@ struct HistoryView: View {
     // runs against a smaller set.
     private var filteredRaces: [Race] {
         var result = races.filter { selectedFilter.matches($0, allRaces: races) }
+
+        // Tag filter — composes on top of the preset filter. A
+        // race must contain the selected tag to survive (case
+        // already-canonical via the model's setter, so equality
+        // comparison is safe).
+        if let tag = selectedTag {
+            result = result.filter { $0.tags.contains(tag) }
+        }
 
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !query.isEmpty {

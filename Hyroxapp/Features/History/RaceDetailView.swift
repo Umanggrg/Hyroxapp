@@ -391,8 +391,25 @@ struct RaceDetailView: View {
             #endif
             TitleSection(race: race)
             NotesSection(race: race)
+            TagsSection(race: race, suggestedTags: suggestedTagPool)
             PrivacyToggleSection(race: race)
         }
+    }
+
+    // Pool of tags the athlete has used on past races, sorted by
+    // frequency. Drives the suggestion ribbon in TagsSection.
+    // Mirror of RaceSummaryView's same-named property; duplicated
+    // because the two surfaces have different `@Query` race lists.
+    private var suggestedTagPool: [String] {
+        var counts: [String: Int] = [:]
+        for r in allFinishedRaces {
+            for tag in r.tags {
+                counts[tag, default: 0] += 1
+            }
+        }
+        return counts
+            .sorted { ($0.value, $0.key) > ($1.value, $1.key) }
+            .map(\.key)
     }
 
     // Heart rate section — chart only; the parent group's

@@ -159,6 +159,29 @@ final class Race {
     // private races entirely.
     var isPrivate: Bool = false
 
+    // Athlete-defined organizing tags. Free-form lowercase strings
+    // ("zone2", "race-sim", "morning", "brick", "strength-focus")
+    // — the athlete picks their own taxonomy. Stored as a single
+    // comma-separated string rather than a separate Tag @Model so
+    // the schema stays additive-migration-safe and we don't need
+    // a relationship table just to slice History.
+    //
+    // Read/write through the `tags` computed property which handles
+    // CSV split/join + trimming. Direct access to `tagsRaw` is
+    // discouraged — it's `internal` rather than `private` only
+    // because SwiftData's @Model macro rejects private stored
+    // properties.
+    //
+    // Forward-compat: when the social feed lights up in v2, tags
+    // become discoverable filters across athletes ("see other
+    // athletes' Zone 2 sessions"). The data shape doesn't change;
+    // only the visibility layer.
+    //
+    // Empty-string default is migration-safe — pre-existing rows
+    // decode cleanly, same SwiftData additive pattern as
+    // `notes` / `name` / `partner`.
+    var tagsRaw: String = ""
+
     init(
         id: UUID = UUID(),
         startedAt: Date,
@@ -254,5 +277,43 @@ final class Race {
             )
         }
         return .notStarted
+    }
+
+    // MARK: - Tag accessor
+
+    // Typed view onto the comma-separated `tagsRaw` field. Splits
+    // on comma, trims whitespace, drops empties + duplicates,
+    // lowercases for canonical form so "Zone2" and "zone2" merge.
+    //
+    // Setter performs the same cleanup before joining back —
+    // callers don't have to sanitize input. A bad tag input ("  ,
+    // ZONE 2, , zone2 ") becomes ["zone 2", "zone2"] (preserving
+    // first-occurrence order), then back to "zone 2,zone2" on
+    // disk. Always read back through this property; never touch
+    // tagsRaw directly outside the model.
+    //
+    // Maximum cap of 5 tags per race — beyond that the UX gets
+    // cluttered and the categorization stops being meaningful.
+    // Setter trims to 5 silently; UI should also gate at 5.
+    var tags: [String] {
+        get {
+            tagsRaw
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty }
+                .reduce(into: [String]()) { acc, tag in
+                    if !acc.contains(tag) { acc.append(tag) }
+                }
+        }
+        set {
+            let cleaned = newValue
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty }
+                .reduce(into: [String]()) { acc, tag in
+                    if !acc.contains(tag) { acc.append(tag) }
+                }
+                .prefix(5)
+            tagsRaw = cleaned.joined(separator: ",")
+        }
     }
 }

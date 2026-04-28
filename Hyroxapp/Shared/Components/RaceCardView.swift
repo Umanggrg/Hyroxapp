@@ -118,6 +118,32 @@ struct RaceCardView: View {
                         value: badgesRevealed
                     )
                 }
+
+                // Tag chips — small lowercase pills under the
+                // badge row. Capped at 3 visible to avoid
+                // crowding; remaining count shown as "+N".
+                // Hidden when no tags. Match the tint used on
+                // the editor (accent at 0.12 fill).
+                if !race.tags.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(race.tags.prefix(3), id: \.self) { tag in
+                            Text(tag)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(Color.textSecondary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(
+                                    Capsule().fill(Color.accent.opacity(0.10))
+                                )
+                        }
+                        if race.tags.count > 3 {
+                            Text("+\(race.tags.count - 3)")
+                                .font(.caption2.weight(.heavy))
+                                .foregroundStyle(Color.textTertiary)
+                        }
+                        Spacer()
+                    }
+                }
             }
             .padding(Layout.cardPadding)
         }

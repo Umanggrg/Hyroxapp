@@ -66,3 +66,68 @@ struct FilterChipRow<Filter: Hashable & Identifiable>: View {
         .buttonStyle(.plain)
     }
 }
+
+// MARK: - TagFilterRow
+
+// Sibling component for nullable single-select string filters,
+// used today for tag filtering on HistoryView. Tap an unselected
+// chip to filter to that tag; tap a selected chip to clear back
+// to nil ("show all"). Different from FilterChipRow's
+// always-selected model because there isn't a sensible default
+// "all tags" pseudo-tag — nil is the absence of filter.
+//
+// Auto-hides itself when there are no tags to show. Caller
+// doesn't have to gate visibility manually.
+struct TagFilterRow: View {
+
+    let tags: [String]
+    @Binding var selection: String?
+
+    var body: some View {
+        if tags.isEmpty {
+            EmptyView()
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(tags, id: \.self) { tag in
+                        chip(for: tag)
+                    }
+                }
+                .padding(.horizontal, Layout.screenMargin)
+            }
+            .frame(height: 36)
+        }
+    }
+
+    private func chip(for tag: String) -> some View {
+        let isSelected = (tag == selection)
+        return Button {
+            // Tap-to-clear when re-tapping the active tag.
+            // Clearing returns to the "no tag filter" state.
+            if isSelected {
+                selection = nil
+            } else {
+                selection = tag
+            }
+        } label: {
+            Text(tag)
+                .font(.caption.weight(.bold))
+                .tracking(0.3)
+                .foregroundStyle(isSelected ? Color.background : Color.textPrimary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(
+                    Capsule()
+                        .fill(isSelected ? Color.accent : Color.surface)
+                )
+                .overlay(
+                    Capsule()
+                        .stroke(
+                            isSelected ? Color.accent : Color.divider,
+                            lineWidth: 1
+                        )
+                )
+        }
+        .buttonStyle(.plain)
+    }
+}

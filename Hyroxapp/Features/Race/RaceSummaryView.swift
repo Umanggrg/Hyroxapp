@@ -39,6 +39,22 @@ struct RaceSummaryView: View {
         profiles.first?.maxHeartRate ?? 190
     }
 
+    // Pool of tags the athlete has used on previous races. Surfaced
+    // in TagsSection's suggestion ribbon so common tags ("zone2",
+    // "race-sim", "morning") become one-tap repeats. Sorted by
+    // frequency descending — most-used tags surface first.
+    private var suggestedTagPool: [String] {
+        var counts: [String: Int] = [:]
+        for race in allFinishedRaces {
+            for tag in race.tags {
+                counts[tag, default: 0] += 1
+            }
+        }
+        return counts
+            .sorted { ($0.value, $0.key) > ($1.value, $1.key) }
+            .map(\.key)
+    }
+
     // Cached renders of the share card — one per format. ImageRenderer
     // is non-trivial (lays out + rasterizes a SwiftUI view), so we
     // generate each once in `.onAppear` and reuse them for the
@@ -199,6 +215,11 @@ struct RaceSummaryView: View {
                         TitleSection(race: race)
                             .padding(.top, 8)
                         NotesSection(race: race)
+                            .padding(.top, 8)
+                        TagsSection(
+                            race: race,
+                            suggestedTags: suggestedTagPool
+                        )
                             .padding(.top, 8)
                         PrivacyToggleSection(race: race)
                             .padding(.top, 8)
