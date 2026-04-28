@@ -427,11 +427,11 @@ struct SettingsView: View {
     // the user doesn't feel like the form just stops mid-data.
     private var aboutSection: some View {
         Section {
-            // Brand block — Hyroxapp wordmark in display weight,
+            // Brand block — Trakr wordmark in display weight,
             // tagline below. Reads as a quiet signature at the
             // bottom of the screen.
             VStack(spacing: 6) {
-                Text("HYROXAPP")
+                Text("TRAKR")
                     .font(.system(size: 18, weight: .heavy, design: .rounded))
                     .tracking(2.0)
                     .foregroundStyle(Color.accent)

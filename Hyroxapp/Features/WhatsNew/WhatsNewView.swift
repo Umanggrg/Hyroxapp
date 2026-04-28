@@ -12,7 +12,7 @@ import SwiftUI
 // of feature cards. Each card has an icon in a coral halo, a title,
 // and a one-line description. Same brand language as Onboarding's
 // hero icon treatment so the user immediately recognizes "this is
-// Hyroxapp speaking to me."
+// Trakr speaking to me."
 //
 // Content is a static list — features ship as code changes, so the
 // list ships as code too. When v0.3 lands, edit `Self.features` and
@@ -88,7 +88,7 @@ struct WhatsNewView: View {
 
     private var header: some View {
         VStack(spacing: 10) {
-            Text("HYROXAPP")
+            Text("TRAKR")
                 .font(.caption.weight(.heavy))
                 .tracking(2.0)
                 .foregroundStyle(Color.accent)

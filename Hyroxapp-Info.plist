@@ -12,6 +12,8 @@
 	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Trakr</string>
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
@@ -49,13 +51,13 @@
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSHealthShareUsageDescription</key>
-	<string>Hyroxapp reads workout data to display your HYROX races alongside your other Health activity.</string>
+	<string>Trakr reads workout data to display your races alongside your other Health activity.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>Hyroxapp writes completed HYROX races to Apple Health so they appear alongside your other workouts.</string>
+	<string>Trakr writes completed races to Apple Health so they appear alongside your other workouts.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Hyroxapp lets you attach photos to races and pick a profile picture from your photo library.</string>
+	<string>Trakr lets you attach photos to races and pick a profile picture from your photo library.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Hyroxapp uses your local network to find and connect to a partner's iPhone for Duo races. No data leaves your local Wi-Fi or Bluetooth connection.</string>
+	<string>Trakr uses your local network to find and connect to a partner's iPhone for Duo races. No data leaves your local Wi-Fi or Bluetooth connection.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_hyrox-duo._tcp</string>

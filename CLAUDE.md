@@ -1,14 +1,27 @@
-# HYROX App — Project Context for Claude Code
+# Trakr — Project Context for Claude Code
 
 > This document is the source of truth for what we're building and how. Read it before generating code. When in doubt, prioritize what's written here over generic best practices.
 
 ---
 
+## 0. Naming + trademark
+
+**Product name:** Trakr. The app's brand identity is "Trakr" — that's what users see on the home screen, in App Store listings, and in marketing.
+
+**HYROX™** is a registered trademark of HYROX GmbH and we have no affiliation with them. We use "HYROX" only descriptively — to refer to the race format athletes train for, the way a running app might say "5K" or a cycling app might say "criterium." Specifically:
+
+- ✅ OK: "HYROX-style race format," "Race a HYROX simulation," labeling the 16-station race mode as "HYROX Race" inside the app, naming the canonical 16-segment sequence after how the sport names it.
+- ❌ Not OK: Calling our product "HYROXAPP" or anything that implies we ARE HYROX or are endorsed by them. The app's wordmark, App Store name, marketing copy, and bundle ID say "Trakr" — never "HYROXAPP" / "HyroxApp."
+
+This matters because pre-paid-developer-account the project was named "Hyroxapp" — internal target/folder names still carry that legacy. Those don't appear in the App Store listing or to users, but should be cleaned up via Xcode UI in a future pass for consistency.
+
+---
+
 ## 1. What We're Building
 
-A native iOS app (with watchOS companion in a later phase) for HYROX and functional fitness athletes. Think **"Strava for HYROX"** — a competitive performance ecosystem AND a social network for HYROX athletes, not a generic workout logger.
+Trakr is a native iOS app (with watchOS companion) for hybrid-fitness racers — athletes who train for HYROX-style 16-station events, plus custom workouts, plus their own intervals. Think **"Strava for hybrid fitness"** — a competitive performance ecosystem AND a social network for race-format athletes, not a generic workout logger.
 
-**One-line pitch:** The app HYROX athletes open before, during, and after every race to track, compete, share, and prove performance.
+**One-line pitch:** Trakr is the app racers open before, during, and after every session to track, compete, share, and prove performance.
 
 **Primary user (v0.1):** Me. I'm training for HYROX. I will use this app during my actual training sessions. If it doesn't work for me personally, nothing else matters.
 
@@ -513,9 +526,9 @@ The athlete's primary in-session experience.
 - 🟢 Live HR zone chip on RaceView — current zone classification visible mid-race
 - 🟢 **Roxzone (transition) tracking** — opt-in two-step advance (end segment → in-roxzone overlay → start next), per-split `roxzoneSeconds` capture, total + average displayed on summary/detail, discipline insight (≤10s tight / ≤20s solid / >20s actionable). HYROX-specific differentiator — every second outside a station counts on race day.
 - 🟢 **Live Activities scaffolding** — RaceActivityAttributes + LiveActivityService + widget Swift files all shipped. Pending: Widget Extension target via Xcode UI (see `docs/LIVE_ACTIVITY_SETUP.md`).
-- ⚪ **1km Run with manual start/stop** — explicit "Start Run" / "End Run" on the run segments specifically (rather than treating them as generic stations), so athletes can pre-position themselves before starting the timer. Same pattern as Strava's explicit run start.
+- 🟢 **1km Run with manual start/stop** — toggle in Settings; when on, run stations open a Start Run overlay that rebases the segment timer when tapped. `RaceEngine.rebaseCurrentSegmentStart(to:)` + manual run start UI shipped.
 - 🟢 **Calories burned per station** — HealthKit `.activeEnergyBurned` statistics query alongside HR stats
-- ⚪ **Effort level / derived intensity score** — per station + full race rollup. Function of HR (relative to max), station duration, and division benchmark.
+- 🟢 **Effort level / derived intensity score** — full stack shipped. Per-split + per-race scores via `RaceStats.effortScore` (HR-time integration). `EffortCategory` enum (Recovery/Moderate/High/VeryHigh) drives per-station chips on StationDetailView, split-row dots on summary/detail, badge on RaceCardView, EffortTrendView line chart + EffortDistributionView intensity-mix bar on Profile, and `hardestStationInsight` callout. One concept, surfaced everywhere it adds meaning.
 - 🟢 **Manual reps / distance / weight input** — `weightKg`, `repsCompleted`, `rpe` per Split. Tap any split row on summary/detail to edit via StationStatsSheet. Powers race-readiness check + race-day weight projection.
 - 🟢 **Race-day weight projection** — when training at sub-race weight, linear extrapolation projects the same effort to official HYROX weight (`split.duration × raceWeight / loggedWeight`). Surfaced on StationDetailView hero. Coaching honesty signal.
 - 🟢 **Voice / haptic cues on station transitions** — VoiceCueService announces "Next: Sled Push," HR-zone entries also voiced. Toggleable in Settings.
@@ -527,6 +540,8 @@ The athlete's primary in-session experience.
   2. **Benchmarked split** (v2+/v3, depends on §13.4 backend + community data) — once Supabase stores enough race history, derive per-station expected times from aggregated splits across the athlete's division. "You're 12 seconds off the average Men's Open athlete on this station." Much more motivating than a flat 1/16th-of-target split.
 
   Visual sketch: small chevron/arrow on the race screen — green up for ahead, amber flat for on-pace, red down for behind — with a compact `+0:12` / `on pace` / `−0:18` delta vs. expected for the current station. Dependencies: target finish time (shipped), HR/effort capture (in progress), backend historical splits (not started).
+
+- 🟢 **Mid-race predicted finish time** — naive linear extrapolation of current pace (`elapsed × totalSegments / completedSegments`). "Projected H:MM:SS" line under the timer, tinted green when on track to beat target, amber when projecting to miss. Numeric content transition keeps digits smooth as projection updates per tick. Different question than the pace chip: pace says "ahead/behind right now," projected says "when will you actually finish at this rate."
 
 ### 13.2 — Structured workout modes
 
@@ -553,7 +568,8 @@ What the athlete sees after tapping Finish.
 - 🟢 **Narrative insights** — InsightGenerator pumps PB count, HR peak, compromised running, roxzone discipline, run fatigue into RaceInsightsView. Shown on summary + detail.
 - 🟢 **Compromised running analysis** — detects which station hurt the next run most ("Sled Pull cost you — Run 6 was 22% slower"). Cross-race aggregation on Profile.
 - 🟢 **Engine impact view** — Profile-level rollup showing which stations consistently compromise the engine.
-- ⚪ **Recovery score** — post-workout strain estimate (Whoop-style)
+- 🟡 **Recovery score** — `RaceStats.RecoveryDemand` 4-bucket enum (Light / Moderate / Hard / Very Hard) shipped. Computed from effort score + 1.5× Z5-minutes weighting. Each bucket carries typical recovery hours range + coaching guidance one-liner. Surfaced as `RecoveryEstimateView` card on RaceSummaryView + RaceDetailView. Full Whoop-style continuous-strain numerical score still ⚪ — would need overnight HealthKit reads (HRV, sleep) tied to baseline. Tier 3 of §13.8 sensor roadmap.
+- 🟡 **Today's readiness signal** — `RaceStats.ReadinessState` 3-state enum (Fresh / Partial / Recovering) computed from most-recent-race recovery demand + hours elapsed. `ReadinessBanner` on Profile's Next Up section. Will get richer when §13.8 Tier 3 lands (overnight HRV + sleep + skin temp).
 - 🟢 **PBs per station** — StationPersonalBestsView lists best splits per station, surfaced on Profile.
 - 🟢 **Weekly / monthly / yearly performance trends** — PerformanceTrendsView, MonthlyRecap, YearlyRecap with shareable cards.
 - 🟢 **Performance overload chart** — PerformanceOverloadView surfaces volume + intensity trend on Profile.
@@ -576,7 +592,7 @@ The thing that makes this *not* a generic workout logger.
   - (Eventually) official HYROX event times from past races
 
   Powers the "benchmarked split" tier of the pace indicator in §13.1 — once we can say "the average Men's Open athlete finishes Sled Push in 3:45," the mid-race pace readout stops being an arbitrary 1/16th-of-target and starts being genuinely informative.
-- ⚪ **Strain / readiness** — daily check-in using HR variability + sleep data (HealthKit) to tell the athlete if today's a good day for a full simulation vs. a lighter session
+- 🟡 **Strain / readiness** — Today's-readiness pass shipped (see §13.3 above). Daily check-in pulling overnight HRV + sleep + skin temp is queued as Tier 3 of §13.8 sensor roadmap; needs paid Apple Developer activation for the Watch HealthKit reads.
 
 ### 13.5 — Social layer (Strava-style)
 
@@ -593,6 +609,8 @@ How athletes see each other's work and stay accountable.
 - 🟢 **Share to Instagram** — RaceShareCardView in both square and 9:16 story formats, ImageRenderer-backed export, format-picker Menu on summary + detail.
 - 🟢 **Stories-style recap** — MonthlyRecapView + YearlyRecapView with shareable card variants.
 - 🟢 **Race photo gallery** — RaceGalleryView grid of every race that carries a photo.
+- 🟢 **Per-race privacy toggle** — `Race.isPrivate` additive field with default `false`. `PrivacyToggleSection` on RaceSummary + RaceDetail; lock chip on RaceCardView. Forward-compat for v2 social feed: private races stay out of any future leaderboard / feed automatically. Local History + Profile stats always include them.
+- 🟢 **Race tags** — `Race.tagsRaw` CSV-encoded field with `tags: [String]` computed accessor (lowercase canonical, dedupe, max 5). `TagsSection` editor with chip wrap + recent-tags suggestion ribbon. Tags surface as compact pills on RaceCardView and as a filter row on HistoryView (composes with preset filters). Forward-compat for v2 cross-athlete tag discovery.
 
 ### 13.6 — Competition + gamification
 
@@ -603,11 +621,9 @@ Structured reasons to keep coming back.
   - Best per-station times (fastest sled push, lowest wall ball time, etc.)
   - Weekly rankings (best race this week)
   Pending backend.
-- ⚪ **Challenges** — time-boxed goals the athlete opts into:
-  - "7-day HYROX streak" — do something each day
-  - "Improve sled push time by 10% this month"
-  - "Complete 4 full simulations in 4 weeks"
-- 🟢 **Streak tracking** — RaceStreaks helper + StreakBannerView on Profile (current streak, longest streak, days since last race).
+- 🟢 **Challenges** — time-boxed personal goals the athlete picks from preset templates. `Challenge` SwiftData @Model with type / target / dates / completedAt. `ChallengeType` enum (raceCount / fastestRace / streakLength) + `ChallengeProgress` evaluator (race-count, sub-time, longest-streak-in-window). `ActiveChallengeBanner` on Profile with progress bar + days-remaining + auto-completion side effect when fraction hits 100%. `ChallengeSetupSheet` with 6 preset templates ("5 races in 30 days", "Sub-1:30 race in 30 days", "7-day streak", etc.). Single-active-challenge invariant; Replace/Abandon context menu. Forward-compat for v2 social feed (cross-athlete challenges).
+- 🟢 **Streak tracking** — RaceStreaks helper + StreakBannerView on Profile (current streak, longest streak, days since last race). Flame icon pulses gently while the streak is active (1.2s ease-in-out loop). Broken streak shows a static dim flame.
+- 🟢 **Streak-at-risk nudge** — `RaceStreaks.isStreakAtRisk` helper + `StreakAtRiskBanner` on Profile (active streak with last training = yesterday). Sharpened notification copy when at-risk vs routine reminder.
 - 🟢 **Badges** — Badge enum + BadgeAwarder + BadgesView on Profile. Covers first simulation, elite tiers, consistency streaks.
 - ⚪ **Segments / micro-challenges** — like Strava segments but per-station; compete for the fastest Sled Pull within a gym / region / globally
 - 🟢 **Quick Actions (3D Touch / long-press home icon)** — "Start Race" shortcut registered, deep-linked into RaceView.
@@ -701,7 +717,21 @@ Recommended build order (each tier is independent — can be reordered if user f
 5. **Tier 4** — SpO2 + skin temp post-race. Performance-grade positioning.
 6. **Tier 6** — Auto station advance. Last, after rep-counting data exists to train on.
 
-### 13.9 — How items move from §13 into §4
+### 13.9 — Design + motion language (shipped, captured for reference)
+
+The app shares one motion + design language across every surface. Documented here so the next person to add a screen knows what to reach for.
+
+- **Spring shape**: `.spring(response: 0.4–0.45, dampingFraction: 0.8–0.85)` — CLAUDE.md §5's canonical motion. Lands with weight, no bounce. Used for entrances, state changes, transitions.
+- **Press feedback**: `.buttonStyle(.pressableCard)` from `Theme.swift` — scales tappable card surfaces to 0.98 on press with a 0.3s spring. Wired into HistoryView, ProfileView card lists, RaceStartView mode chips, RaceView advance button, OnboardingView action row, ChallengeSetupSheet templates.
+- **Scroll appearance**: `.applyScrollAppearTransition()` from `Theme.swift` — children fade + scale 0.96 + slight blur as they enter the viewport. Wired into ProfileView, HistoryView, RaceDetailView, StationDetailView, RaceComparisonView, MonthlyRecapView, YearlyRecapView. Settings (Form) and RaceSummaryView (custom celebratory cascade) intentionally use their own treatments.
+- **Chart entrances**: line + dots fade in via opacity + symbol-size on first appear (`PerformanceTrendsView`, `EffortTrendView`). Stacked bars grow from zero width (`HRZonesView`, `EffortDistributionView`).
+- **Numeric / symbol transitions**: `.contentTransition(.numericText())` for live-updating digits (HR BPM, predicted finish, pace delta). `.contentTransition(.symbolEffect(.replace))` for SF Symbol glyph swaps.
+- **Halo / flame pulses**: gentle scale loop (0.95↔1.08, 1.2–1.5s ease-in-out) on `ReadinessBanner` `.fresh` halo and `StreakBannerView` active flame. Off when reduce-motion.
+- **In-race motion**: roxzone overlay slides up from bottom + scales to 1.0; station headline scale-fades on advance; pace + HR chips crossfade tints across thresholds; HeartbeatIcon pulses at displayed BPM tempo (clamped 0.3s minimum for photosensitivity safety).
+- **Onboarding transitions**: asymmetric directional slides (forward = trailing edge insertion, backward = leading), single VStack keyed by step so hero icon + body slide as one unit.
+- **Reduce Motion**: every animation gates on `@Environment(\.accessibilityReduceMotion)`. When on, springs become `.none` and dynamic motion is replaced with static reveals or opacity crossfades.
+
+### 13.10 — How items move from §13 into §4
 
 When we commit to building something from this list:
 1. Pick a specific item and give it an estimate (sessions of work)

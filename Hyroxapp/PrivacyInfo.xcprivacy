@@ -7,7 +7,7 @@
 		since Spring 2024. Declares tracking behavior, collected
 		data types, and use of "required reason" APIs.
 
-		Hyroxapp v1.x is a fully on-device fitness app. No
+		Trakr v1.x is a fully on-device fitness app. No
 		telemetry, no analytics, no network calls outside of
 		Multipeer Connectivity for Duo Mode (which is peer-to-peer,
 		never crosses Apple's servers). Health data stays in the

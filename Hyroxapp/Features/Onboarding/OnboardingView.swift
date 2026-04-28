@@ -76,7 +76,7 @@ struct OnboardingView: View {
 
         var title: String {
             switch self {
-            case .welcome:  return "Welcome to HYROX"
+            case .welcome:  return "Welcome to Trakr"
             case .identity: return "Your athlete profile"
             case .division: return "Division & heart rate"
             case .audio:    return "During the race"
@@ -86,7 +86,7 @@ struct OnboardingView: View {
         var subtitle: String {
             switch self {
             case .welcome:
-                return "The training app for HYROX athletes. Track every race, every station, every PB — built like a pro."
+                return "Track every race, every station, every PB — built for the modern hybrid athlete."
             case .identity:
                 return "How should we name you on race cards and your profile?"
             case .division:

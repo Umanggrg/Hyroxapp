@@ -11,15 +11,15 @@ The codebase already covers most of these. Items marked **(verified)** have been
 - [ ] **(action)** Apple Developer Program activation email received
 - [ ] **(action)** Sign in to [developer.apple.com](https://developer.apple.com), accept the latest **Program License Agreement**. App Store Connect refuses uploads until you accept.
 - [ ] **(action)** Open Xcode → Settings → Accounts → confirm your Apple ID team now shows as **paid** (not personal/free).
-- [ ] **(action)** Project's Signing & Capabilities tab — both Hyroxapp and HyroxappWatch targets show "Automatically manage signing" with the paid team selected.
+- [ ] **(action)** Project's Signing & Capabilities tab — both Trakr and TrakrWatch targets show "Automatically manage signing" with the paid team selected.
 
 ## B. Build settings sanity
 
-- [x] **(verified)** Bundle ID = `com.praanshuadiga.hyroxapp` (Debug + Release)
+- [x] **(verified)** Bundle ID = `com.praanshuadiga.trakr` (Debug + Release)
 - [x] **(verified)** `MARKETING_VERSION = 1.0`
 - [x] **(verified)** `CURRENT_PROJECT_VERSION = 1` (build number — bump for each upload)
 - [x] **(verified)** `IPHONEOS_DEPLOYMENT_TARGET = 26.2`
-- [x] **(verified)** `INFOPLIST_FILE = Hyroxapp-Info.plist` (single source of truth)
+- [x] **(verified)** `INFOPLIST_FILE = Trakr-Info.plist` (single source of truth)
 - [x] **(verified)** `GENERATE_INFOPLIST_FILE = NO` (no double-processing)
 
 ## C. Info.plist completeness
@@ -35,8 +35,8 @@ The codebase already covers most of these. Items marked **(verified)** have been
 
 ## D. Privacy
 
-- [x] **(verified)** `Hyroxapp/PrivacyInfo.xcprivacy` — privacy manifest declaring no tracking, no collected data, no required-reason API use. Required for all App Store submissions since Spring 2024.
-- [x] **(verified)** `HyroxappWatch Watch App/PrivacyInfo.xcprivacy` — same shape for the Watch target
+- [x] **(verified)** `Trakr/PrivacyInfo.xcprivacy` — privacy manifest declaring no tracking, no collected data, no required-reason API use. Required for all App Store submissions since Spring 2024.
+- [x] **(verified)** `TrakrWatch Watch App/PrivacyInfo.xcprivacy` — same shape for the Watch target
 - [x] **(verified)** `docs/PRIVACY.md` — full privacy policy text drafted
 - [ ] **(action)** Host the privacy policy at a public URL (GitHub Pages, Netlify, your own site). App Store Connect requires a Privacy Policy URL; TestFlight external testing may also require one. The drafted text in `docs/PRIVACY.md` is ready — just needs hosting.
 
@@ -79,8 +79,8 @@ The codebase already covers most of these. Items marked **(verified)** have been
 
 1. **(action)** appstoreconnect.apple.com → My Apps → "+" → New App
    - iOS platform
-   - Name: "Hyroxapp" (or your preferred display name — can change later)
-   - Bundle ID dropdown: select `com.praanshuadiga.hyroxapp`
+   - Name: "Trakr" (or your preferred display name — can change later)
+   - Bundle ID dropdown: select `com.praanshuadiga.trakr`
    - SKU: `hyroxapp-001` (anything memorable; never shown publicly)
    - Primary language: English (U.S.)
    - User access: Full Access
@@ -94,7 +94,7 @@ The codebase already covers most of these. Items marked **(verified)** have been
 ## K. Suggested test invite copy
 
 **Beta App Description:**
-> Hyroxapp is a HYROX training companion. Track your races station-by-station with live heart rate, recovery insights, and per-station personal bests. Built for the gym, not the road — no GPS, indoor-first.
+> Trakr is a hybrid-fitness training companion. Race a HYROX-style 16-station format, custom workouts, or your own intervals. Track your races station-by-station with live heart rate, recovery insights, and per-station personal bests. Built for the gym, not the road — no GPS, indoor-first.
 
 **What to Test (first build):**
 > First TestFlight build. Things to try:
