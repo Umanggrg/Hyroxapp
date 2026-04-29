@@ -101,6 +101,18 @@ final class LiveActivityService {
     // End the active activity. The optional final state lets
     // the lock-screen render a "FINISHED" state for a brief
     // moment before iOS dismisses it.
+    //
+    // Dismissal policy is derived from `finalState`:
+    //   • non-nil → `.default` (iOS keeps the finished-state
+    //     ribbon on the lock screen for up to ~4h so the
+    //     athlete can glance at their finish time without
+    //     unlocking). This is the FINISH path.
+    //   • nil → `.immediate` (kill the activity now; there's
+    //     no meaningful state to display). This is the
+    //     ABANDON / cancel path — without `.immediate` here,
+    //     iOS would keep the last-received running state on
+    //     the lock screen with its timer happily ticking,
+    //     which is exactly the wrong post-cancel behavior.
     func end(
         finalState: RaceActivityAttributes.ContentState? = nil
     ) {
@@ -108,22 +120,20 @@ final class LiveActivityService {
         activeActivity = nil
 
         let content: ActivityContent<RaceActivityAttributes.ContentState>?
+        let dismissalPolicy: ActivityUIDismissalPolicy
         if let finalState {
             content = ActivityContent(
                 state: finalState,
                 staleDate: nil
             )
+            dismissalPolicy = .default
         } else {
             content = nil
+            dismissalPolicy = .immediate
         }
 
         Task {
-            // .immediate dismissal kills the activity right
-            // away; .default lets iOS show it for ~4h on the
-            // lock screen as a finished-state ribbon. We use
-            // .default so the athlete can see their finish time
-            // on their lock screen post-race without unlocking.
-            await activity.end(content, dismissalPolicy: .default)
+            await activity.end(content, dismissalPolicy: dismissalPolicy)
         }
     }
 

@@ -37,6 +37,22 @@ struct HyroxappApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                // Deep-link receiver. The Live Activity's
+                // `.widgetURL(URL(string: "trakr://race"))` lands
+                // here when a user taps the lock-screen card or
+                // Dynamic Island. We post a NotificationCenter
+                // event the same way QuickActions do, and let
+                // ContentView route by flipping the TabView's
+                // selectedTab. Any future deep-link path (e.g.
+                // trakr://history/<id>) plugs into the same
+                // primitive without changing this scene closure.
+                .onOpenURL { url in
+                    guard url.scheme == "trakr" else { return }
+                    NotificationCenter.default.post(
+                        name: .trakrDeepLink,
+                        object: url
+                    )
+                }
         }
         // Registers a SwiftData container for the app's persisted models —
         // creates the underlying store on first launch and injects a
@@ -47,6 +63,13 @@ struct HyroxappApp: App {
         // will crash with "entity not found."
         .modelContainer(for: [Race.self, UserProfile.self, WorkoutTemplate.self, RaceEvent.self, Challenge.self])
     }
+}
+
+// Deep-link Notification name. Posted by HyroxappApp.onOpenURL,
+// observed by ContentView. Centralized here next to the scene
+// that owns the URL handler.
+extension Notification.Name {
+    static let trakrDeepLink = Notification.Name("com.umanggurung.trakr.deepLink")
 }
 
 #if canImport(UIKit)

@@ -81,6 +81,13 @@ public struct RaceActivityAttributes: ActivityAttributes {
         public var totalStations: Int
         public var currentStationName: String
 
+        // Live heart rate at the time of the last update. Optional
+        // because HR is only available when HealthKit auth is
+        // granted AND a sensor (Apple Watch or paired chest strap)
+        // is publishing samples. The widget should fail-gracefully
+        // when nil — render no HR chip rather than a placeholder.
+        public var currentHR: Int?
+
         public init(
             phase: Phase,
             timerStart: Date,
@@ -90,7 +97,8 @@ public struct RaceActivityAttributes: ActivityAttributes {
             roxzoneStart: Date? = nil,
             currentStationIndex: Int,
             totalStations: Int,
-            currentStationName: String
+            currentStationName: String,
+            currentHR: Int? = nil
         ) {
             self.phase = phase
             self.timerStart = timerStart
@@ -101,6 +109,7 @@ public struct RaceActivityAttributes: ActivityAttributes {
             self.currentStationIndex = currentStationIndex
             self.totalStations = totalStations
             self.currentStationName = currentStationName
+            self.currentHR = currentHR
         }
     }
 

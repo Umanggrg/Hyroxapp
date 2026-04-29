@@ -94,6 +94,18 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .quickActionTriggered)) { note in
             handleQuickAction(note.object as? QuickAction)
         }
+        // Deep-link routing. Posted from HyroxappApp.onOpenURL
+        // when the Live Activity's widgetURL lands. Currently
+        // only the trakr://race path exists — flips the TabView
+        // straight to the Race tab so tapping the lock-screen
+        // activity always returns the athlete to their in-progress
+        // race. New paths (history detail, profile share) plug
+        // in as additional cases without touching the scene-
+        // level handler.
+        .onReceive(NotificationCenter.default.publisher(for: .trakrDeepLink)) { note in
+            guard let url = note.object as? URL else { return }
+            handleDeepLink(url)
+        }
         // Re-schedule the streak reminder whenever the race count
         // changes. After a race finishes, today's training has
         // already protected the streak, so the pending reminder
@@ -262,6 +274,24 @@ struct ContentView: View {
             selectedTab = .race
         case .viewHistory:
             selectedTab = .history
+        }
+    }
+
+    // Route a Trakr deep-link URL. URL host == path determines
+    // destination. Currently only `trakr://race` exists (used by
+    // the Live Activity widgetURL). The host == nil branch covers
+    // both `trakr:race` and `trakr://race` because URLComponents
+    // resolves the latter with `host = "race"`.
+    private func handleDeepLink(_ url: URL) {
+        let route = url.host ?? url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        switch route {
+        case "race":
+            selectedTab = .race
+        default:
+            // Unknown deep-link route — degrade gracefully to
+            // the Race tab. Better than no-op since the user
+            // initiated some interaction with the app.
+            selectedTab = .race
         }
     }
 }

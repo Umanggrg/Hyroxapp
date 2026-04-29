@@ -96,6 +96,11 @@ final class RaceViewModel {
         let stationName = station?.displayName ?? "Race"
         let stationIndex = (station?.rawValue ?? 0) + 1
 
+        // Round HR to the nearest integer for display. nil when
+        // HealthKit is denied or no sensor is publishing — the
+        // widget skips rendering the HR chip in that case.
+        let hr: Int? = currentHeartRateBPM.map { Int($0.rounded()) }
+
         switch engine.state {
         case .notStarted:
             return nil
@@ -106,7 +111,8 @@ final class RaceViewModel {
                 segmentStart: segStart,
                 currentStationIndex: stationIndex,
                 totalStations: engine.sequence.count,
-                currentStationName: stationName
+                currentStationName: stationName,
+                currentHR: hr
             )
         case .paused(let raceStart, let segStart, _, let pausedAt):
             return RaceActivityAttributes.ContentState(
@@ -117,7 +123,8 @@ final class RaceViewModel {
                 frozenSegmentElapsed: pausedAt.timeIntervalSince(segStart),
                 currentStationIndex: stationIndex,
                 totalStations: engine.sequence.count,
-                currentStationName: stationName
+                currentStationName: stationName,
+                currentHR: hr
             )
         case .inRoxzone(let raceStart, _, let roxStart):
             return RaceActivityAttributes.ContentState(
@@ -127,7 +134,8 @@ final class RaceViewModel {
                 roxzoneStart: roxStart,
                 currentStationIndex: stationIndex,
                 totalStations: engine.sequence.count,
-                currentStationName: stationName
+                currentStationName: stationName,
+                currentHR: hr
             )
         case .finished(let raceStart, let endedAt, _):
             return RaceActivityAttributes.ContentState(
@@ -138,7 +146,8 @@ final class RaceViewModel {
                 frozenSegmentElapsed: 0,
                 currentStationIndex: stationIndex,
                 totalStations: engine.sequence.count,
-                currentStationName: stationName
+                currentStationName: stationName,
+                currentHR: hr
             )
         }
     }

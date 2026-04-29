@@ -4,6 +4,8 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Trakr</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -12,17 +14,41 @@
 	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
-	<key>CFBundleDisplayName</key>
-	<string>Trakr</string>
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.umanggurung.trakr</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>trakr</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_hyrox-duo._tcp</string>
+		<string>_hyrox-duo._udp</string>
+	</array>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Trakr reads workout data to display your races alongside your other Health activity.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Trakr writes completed races to Apple Health so they appear alongside your other workouts.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Trakr uses your local network to find and connect to a partner's iPhone for Duo races. No data leaves your local Wi-Fi or Bluetooth connection.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Trakr lets you attach photos to races and pick a profile picture from your photo library.</string>
+	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
@@ -47,21 +73,6 @@
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>NSSupportsLiveActivities</key>
-	<true/>
-	<key>NSHealthShareUsageDescription</key>
-	<string>Trakr reads workout data to display your races alongside your other Health activity.</string>
-	<key>NSHealthUpdateUsageDescription</key>
-	<string>Trakr writes completed races to Apple Health so they appear alongside your other workouts.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Trakr lets you attach photos to races and pick a profile picture from your photo library.</string>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>Trakr uses your local network to find and connect to a partner's iPhone for Duo races. No data leaves your local Wi-Fi or Bluetooth connection.</string>
-	<key>NSBonjourServices</key>
-	<array>
-		<string>_hyrox-duo._tcp</string>
-		<string>_hyrox-duo._udp</string>
 	</array>
 </dict>
 </plist>

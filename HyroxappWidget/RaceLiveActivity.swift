@@ -27,13 +27,18 @@ struct RaceLiveActivity: Widget {
 
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: RaceActivityAttributes.self) { context in
-            // Lock-screen / notification UI.
+            // Lock-screen / notification UI. Tapping anywhere on
+            // the card deep-links back into the active race —
+            // the URL scheme is registered in the main app's
+            // Info.plist + handled by HyroxappApp.onOpenURL,
+            // which flips the TabView to .race.
             LockScreenView(
                 attributes: context.attributes,
                 state: context.state
             )
             .activityBackgroundTint(Color.black.opacity(0.85))
             .activitySystemActionForegroundColor(.white)
+            .widgetURL(URL(string: "trakr://race"))
 
         } dynamicIsland: { context in
             DynamicIsland {
@@ -54,11 +59,28 @@ struct RaceLiveActivity: Widget {
                     .foregroundStyle(islandTimerColor(for: context.state.phase))
 
             } compactTrailing: {
-                // Compact — right side. Station counter "4/16".
-                Text("\(context.state.currentStationIndex)/\(context.state.totalStations)")
+                // Compact — right side. The current station's
+                // abbreviated name (RUN / PUSH / PULL / WALL etc.)
+                // in a phase-colored capsule. Reads more on-brand
+                // than a bare number — HYROX athletes know these
+                // station names by reputation and the abbreviation
+                // signals "this is your current discipline" at a
+                // glance. The capsule tint doubles as a state
+                // signal — coral while running, amber when
+                // paused/in-roxzone, green when finished.
+                Text(stationAbbreviation(for: context.state.currentStationName))
                     .font(.caption2.weight(.heavy))
-                    .monospacedDigit()
-                    .foregroundStyle(.white.opacity(0.85))
+                    .tracking(0.5)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule()
+                            .fill(
+                                islandTimerColor(for: context.state.phase)
+                                    .opacity(0.30)
+                            )
+                    )
 
             } minimal: {
                 // Minimal — single-element view shown when
@@ -223,6 +245,32 @@ struct RaceLiveActivity: Widget {
         }
         return String(format: "%d:%02d", m, s)
     }
+
+    // Map a full station display name to a 3-5 char on-brand
+    // abbreviation for the Dynamic Island compact view. The
+    // 8 unique HYROX disciplines each get a recognizable token
+    // — anything else (custom workouts, future stations) falls
+    // back to the first 4 characters uppercased so the widget
+    // still renders SOMETHING readable.
+    //
+    // Defined here on the Widget side rather than as a property
+    // on the engine's Station enum because abbreviation rules
+    // are a presentation concern of the Live Activity, not a
+    // domain concern of the race itself. Keeps RaceActivityAttributes
+    // free of display logic and lets the abbreviations evolve
+    // without touching the iOS app target.
+    private func stationAbbreviation(for stationName: String) -> String {
+        let lower = stationName.lowercased()
+        if lower.contains("run")             { return "RUN" }
+        if lower.contains("sled push")       { return "PUSH" }
+        if lower.contains("sled pull")       { return "PULL" }
+        if lower.contains("burpee")          { return "BURP" }
+        if lower.contains("row")             { return "ROW" }
+        if lower.contains("farmer")          { return "CARRY" }
+        if lower.contains("lunge") || lower.contains("sandbag") { return "BAG" }
+        if lower.contains("wall")            { return "WALL" }
+        return String(stationName.prefix(4)).uppercased()
+    }
 }
 
 // MARK: - Lock-screen / notification view
@@ -244,6 +292,9 @@ private struct LockScreenView: View {
                     .font(.caption.weight(.heavy))
                     .tracking(1.0)
                 Spacer()
+                if let hr = state.currentHR {
+                    hrChip(hr)
+                }
                 phaseChip
             }
             .foregroundStyle(.white.opacity(0.7))
@@ -280,6 +331,31 @@ private struct LockScreenView: View {
                 Capsule()
                     .fill(phaseColor.opacity(0.15))
             )
+    }
+
+    // Live heart-rate chip — a small heart glyph + BPM value.
+    // Only renders when state.currentHR is non-nil (HealthKit
+    // authorized AND a sensor is publishing). Intentionally
+    // restrained — same visual weight as the phase chip beside
+    // it, so the header reads "race · HR · phase" left to right
+    // without any single chip dominating.
+    @ViewBuilder
+    private func hrChip(_ bpm: Int) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: "heart.fill")
+                .font(.system(size: 8, weight: .heavy))
+                .foregroundStyle(Color.accent)
+            Text("\(bpm)")
+                .font(.system(size: 9, weight: .heavy))
+                .monospacedDigit()
+                .foregroundStyle(.white.opacity(0.85))
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(
+            Capsule()
+                .fill(Color.white.opacity(0.08))
+        )
     }
 
     @ViewBuilder
