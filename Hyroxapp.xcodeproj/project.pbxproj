@@ -7,10 +7,20 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		5F2595FC2FA288E900516723 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5F2595FB2FA288E900516723 /* WidgetKit.framework */; };
+		5F2595FE2FA288E900516723 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5F2595FD2FA288E900516723 /* SwiftUI.framework */; };
+		5F25960F2FA288EA00516723 /* HyroxappWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5F2595F92FA288E900516723 /* HyroxappWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		E100000000000001AAAAAAA1 /* HyroxappWatch Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = D8BC4D412F9B13B2004472F3 /* HyroxappWatch Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		5F25960D2FA288EA00516723 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5FDF83BD2F9A9B160099C6D1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5F2595F82FA288E900516723;
+			remoteInfo = HyroxappWidgetExtension;
+		};
 		5FDF83D32F9A9B1C0099C6D1 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 5FDF83BD2F9A9B160099C6D1 /* Project object */;
@@ -35,6 +45,17 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		5F2596102FA288EA00516723 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				5F25960F2FA288EA00516723 /* HyroxappWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E100000000000003AAAAAAA3 /* Embed Watch Content */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -49,6 +70,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		5F2595F92FA288E900516723 /* HyroxappWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = HyroxappWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		5F2595FB2FA288E900516723 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		5F2595FD2FA288E900516723 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		5FDF83C52F9A9B160099C6D1 /* Hyroxapp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Hyroxapp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5FDF83D22F9A9B1C0099C6D1 /* HyroxappTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HyroxappTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		5FDF83DC2F9A9B1C0099C6D1 /* HyroxappUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HyroxappUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -56,6 +80,21 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		5F2596132FA288EA00516723 /* Exceptions for "HyroxappWidget" folder in "HyroxappWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 5F2595F82FA288E900516723 /* HyroxappWidgetExtension */;
+		};
+		5F2596182FA28A3E00516723 /* Exceptions for "Hyroxapp" folder in "HyroxappWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Shared/RaceActivityAttributes.swift,
+				Shared/Theme.swift,
+			);
+			target = 5F2595F82FA288E900516723 /* HyroxappWidgetExtension */;
+		};
 		D846B5952F9B21B10022C5ED /* Exceptions for "Hyroxapp" folder in "HyroxappWatch Watch App" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -75,10 +114,19 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		5F2595FF2FA288E900516723 /* HyroxappWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				5F2596132FA288EA00516723 /* Exceptions for "HyroxappWidget" folder in "HyroxappWidgetExtension" target */,
+			);
+			path = HyroxappWidget;
+			sourceTree = "<group>";
+		};
 		5FDF83C72F9A9B160099C6D1 /* Hyroxapp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				D846B5952F9B21B10022C5ED /* Exceptions for "Hyroxapp" folder in "HyroxappWatch Watch App" target */,
+				5F2596182FA28A3E00516723 /* Exceptions for "Hyroxapp" folder in "HyroxappWidgetExtension" target */,
 			);
 			path = Hyroxapp;
 			sourceTree = "<group>";
@@ -101,6 +149,15 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		5F2595F62FA288E900516723 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5F2595FE2FA288E900516723 /* SwiftUI.framework in Frameworks */,
+				5F2595FC2FA288E900516723 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		5FDF83C22F9A9B160099C6D1 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -132,6 +189,15 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		5F2595FA2FA288E900516723 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				5F2595FB2FA288E900516723 /* WidgetKit.framework */,
+				5F2595FD2FA288E900516723 /* SwiftUI.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		5FDF83BC2F9A9B160099C6D1 = {
 			isa = PBXGroup;
 			children = (
@@ -139,6 +205,8 @@
 				5FDF83D52F9A9B1C0099C6D1 /* HyroxappTests */,
 				5FDF83DF2F9A9B1C0099C6D1 /* HyroxappUITests */,
 				D8BC4D422F9B13B2004472F3 /* HyroxappWatch Watch App */,
+				5F2595FF2FA288E900516723 /* HyroxappWidget */,
+				5F2595FA2FA288E900516723 /* Frameworks */,
 				5FDF83C62F9A9B160099C6D1 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -150,6 +218,7 @@
 				5FDF83D22F9A9B1C0099C6D1 /* HyroxappTests.xctest */,
 				5FDF83DC2F9A9B1C0099C6D1 /* HyroxappUITests.xctest */,
 				D8BC4D412F9B13B2004472F3 /* HyroxappWatch Watch App.app */,
+				5F2595F92FA288E900516723 /* HyroxappWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -157,6 +226,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		5F2595F82FA288E900516723 /* HyroxappWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5F2596142FA288EA00516723 /* Build configuration list for PBXNativeTarget "HyroxappWidgetExtension" */;
+			buildPhases = (
+				5F2595F52FA288E900516723 /* Sources */,
+				5F2595F62FA288E900516723 /* Frameworks */,
+				5F2595F72FA288E900516723 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				5F2595FF2FA288E900516723 /* HyroxappWidget */,
+			);
+			name = HyroxappWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = HyroxappWidgetExtension;
+			productReference = 5F2595F92FA288E900516723 /* HyroxappWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		5FDF83C42F9A9B160099C6D1 /* Hyroxapp */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 5FDF83E62F9A9B1C0099C6D1 /* Build configuration list for PBXNativeTarget "Hyroxapp" */;
@@ -165,11 +256,13 @@
 				5FDF83C22F9A9B160099C6D1 /* Frameworks */,
 				5FDF83C32F9A9B160099C6D1 /* Resources */,
 				E100000000000003AAAAAAA3 /* Embed Watch Content */,
+				5F2596102FA288EA00516723 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				E100000000000004AAAAAAA4 /* PBXTargetDependency */,
+				5F25960E2FA288EA00516723 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				5FDF83C72F9A9B160099C6D1 /* Hyroxapp */,
@@ -259,6 +352,9 @@
 				LastSwiftUpdateCheck = 2640;
 				LastUpgradeCheck = 2630;
 				TargetAttributes = {
+					5F2595F82FA288E900516723 = {
+						CreatedOnToolsVersion = 26.4.1;
+					};
 					5FDF83C42F9A9B160099C6D1 = {
 						CreatedOnToolsVersion = 26.3;
 					};
@@ -293,11 +389,19 @@
 				5FDF83D12F9A9B1C0099C6D1 /* HyroxappTests */,
 				5FDF83DB2F9A9B1C0099C6D1 /* HyroxappUITests */,
 				D8BC4D402F9B13B2004472F3 /* HyroxappWatch Watch App */,
+				5F2595F82FA288E900516723 /* HyroxappWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		5F2595F72FA288E900516723 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		5FDF83C32F9A9B160099C6D1 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -329,6 +433,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		5F2595F52FA288E900516723 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		5FDF83C12F9A9B160099C6D1 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -360,6 +471,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		5F25960E2FA288EA00516723 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5F2595F82FA288E900516723 /* HyroxappWidgetExtension */;
+			targetProxy = 5F25960D2FA288EA00516723 /* PBXContainerItemProxy */;
+		};
 		5FDF83D42F9A9B1C0099C6D1 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 5FDF83C42F9A9B160099C6D1 /* Hyroxapp */;
@@ -378,6 +494,71 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		5F2596112FA288EA00516723 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3VFDXQ78W5;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = HyroxappWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = HyroxappWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.praanshuadiga.trakr.HyroxappWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		5F2596122FA288EA00516723 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3VFDXQ78W5;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = HyroxappWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = HyroxappWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.praanshuadiga.trakr.HyroxappWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 		5FDF83E42F9A9B1C0099C6D1 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -500,7 +681,7 @@
 				CODE_SIGN_ENTITLEMENTS = Hyroxapp/Hyroxapp.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = QH9Z2JMAP6;
+				DEVELOPMENT_TEAM = 3VFDXQ78W5;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
@@ -535,7 +716,7 @@
 				CODE_SIGN_ENTITLEMENTS = Hyroxapp/Hyroxapp.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = QH9Z2JMAP6;
+				DEVELOPMENT_TEAM = 3VFDXQ78W5;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
@@ -568,6 +749,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3VFDXQ78W5;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
@@ -593,6 +775,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3VFDXQ78W5;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
@@ -617,6 +800,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3VFDXQ78W5;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
@@ -641,6 +825,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3VFDXQ78W5;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
@@ -667,7 +852,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = QH9Z2JMAP6;
+				DEVELOPMENT_TEAM = 3VFDXQ78W5;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = HyroxappWatch;
@@ -700,7 +885,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = QH9Z2JMAP6;
+				DEVELOPMENT_TEAM = 3VFDXQ78W5;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = HyroxappWatch;
@@ -730,6 +915,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		5F2596142FA288EA00516723 /* Build configuration list for PBXNativeTarget "HyroxappWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5F2596112FA288EA00516723 /* Debug */,
+				5F2596122FA288EA00516723 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		5FDF83C02F9A9B160099C6D1 /* Build configuration list for PBXProject "Hyroxapp" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

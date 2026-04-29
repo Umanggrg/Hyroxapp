@@ -24,7 +24,7 @@ export function PrivacyPosture() {
           </p>
           <div className="mt-7 flex flex-wrap gap-3">
             <a
-              href="https://github.com"
+              href="/privacy"
               className="text-sm text-text-secondary hover:text-text-primary underline underline-offset-4"
             >
               Read the Privacy Policy →

@@ -14,18 +14,18 @@ export function Nav() {
           </span>
         </a>
         <nav className="hidden sm:flex items-center gap-7 text-sm text-text-secondary">
-          <a href="#features" className="hover:text-text-primary transition">
+          <a href="/#features" className="hover:text-text-primary transition">
             Features
           </a>
-          <a href="#privacy" className="hover:text-text-primary transition">
+          <a href="/privacy" className="hover:text-text-primary transition">
             Privacy
           </a>
-          <a href="#founder" className="hover:text-text-primary transition">
+          <a href="/#founder" className="hover:text-text-primary transition">
             About
           </a>
         </nav>
         <a
-          href="#testflight"
+          href="/#testflight"
           className="text-xs font-semibold uppercase tracking-caps px-3 sm:px-3.5 py-2 rounded-pill bg-accent text-white hover:bg-accent/90 transition"
         >
           <span className="sm:hidden">Beta</span>

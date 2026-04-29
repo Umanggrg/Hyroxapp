@@ -65,7 +65,7 @@ export function Footer() {
             </span>
           </div>
           <div className="flex items-center gap-5">
-            <a className="hover:text-text-primary transition" href="#privacy">
+            <a className="hover:text-text-primary transition" href="/privacy">
               Privacy
             </a>
             <a
