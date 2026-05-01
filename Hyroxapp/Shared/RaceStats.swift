@@ -504,6 +504,271 @@ enum RaceStats {
         return maxes.max()
     }
 
+    // MARK: - Live coaching cue
+
+    // Real-time pacing cue based on current HR vs the HYROX race-
+    // sustainable band. The intent: while running, an athlete
+    // should hold roughly Z3 — that's the 90-minute pace HYROX is
+    // built around. Above Z3 means they're dipping into anaerobic
+    // territory and won't last; below Z3 means they're leaving time
+    // on the table.
+    //
+    // Workout stations (sled, lunges, wall balls) are deliberately
+    // excluded — those are short tactical efforts where redlining
+    // is normal and useful. Telling someone to "slow down" mid-sled-
+    // push is bad coaching.
+    //
+    // Used on the iPhone race screen as a coaching chip, and shipped
+    // to the Watch via the existing snapshot transport for the same
+    // chip on the wrist (with haptic on cue transitions). One helper
+    // serves both surfaces because RaceStats is already shared with
+    // the watchOS target.
+    enum CoachingCue: String, Equatable, Sendable {
+        // Athlete is at race-sustainable HR during a run. Reads as
+        // affirmation: "you're doing it right, keep it here."
+        case hold
+
+        // Athlete's HR is above Z3 during a run. Tactical push
+        // mid-run is fine for short bursts (final 200m, hill);
+        // a sustained Z4-Z5 mid-run is pacing failure. The cue
+        // doesn't know which it is — it just flags "you can't
+        // hold this for 90 min."
+        case slow
+
+        // Athlete is below Z3 during a run. They've got more in
+        // the tank. Common at the start of races when fresh
+        // legs feel slow, or when athlete is sandbagging out
+        // of fear.
+        case push
+
+        // Currently on a workout station — no pace cue. Workouts
+        // are short tactical bursts; a "hold/slow/push" cue mid-
+        // wall-balls is wrong.
+        case workout
+
+        // No HR data, or race not in an active running/workout
+        // state. UI hides the chip entirely in this case.
+        case none
+
+        var displayText: String {
+            switch self {
+            case .hold:    return "HOLD PACE"
+            case .slow:    return "SLOW DOWN"
+            case .push:    return "PUSH HARDER"
+            case .workout: return "WORK"
+            case .none:    return ""
+            }
+        }
+
+        // Coaching-cue colors map onto the HYROX zone palette so
+        // the chip's color reinforces the same vocabulary the
+        // per-station tag uses. Hold is green (good zone), slow
+        // is red (above sustainable), push is blue (below race
+        // pace), workout is neutral white.
+        var colorHex: UInt {
+            switch self {
+            case .hold:    return 0x32D74B  // success green
+            case .slow:    return 0xFF3B30  // accent red
+            case .push:    return 0x5B9BD5  // calm blue (matches Z1)
+            case .workout: return 0xF5F5F7  // textPrimary off-white
+            case .none:    return 0x000000  // unused
+            }
+        }
+    }
+
+    // Compute the coaching cue from current HR + max HR + current
+    // station. Returns `.none` when any required input is missing —
+    // the UI silently hides the chip rather than showing a stale
+    // or misleading cue.
+    static func coachingCue(
+        currentHR: Double?,
+        maxHR: Int,
+        currentStation: Station?
+    ) -> CoachingCue {
+        guard let hr = currentHR,
+              hr > 0,
+              let station = currentStation,
+              maxHR > 0
+        else { return .none }
+
+        // Workout stations: no pace cue — see note above.
+        if station.kind == .workout {
+            return .workout
+        }
+
+        // Run stations: classify against Z3 (race-sustainable).
+        let zone = HRZone.zone(for: hr, maxBPM: maxHR)
+        switch zone {
+        case .z1, .z2: return .push
+        case .z3:      return .hold
+        case .z4, .z5: return .slow
+        }
+    }
+
+    // MARK: - Efficiency score
+
+    // Per-station + race-wide efficiency = how much output (relative
+    // pace) you produced per unit of cardiovascular cost (HR
+    // intensity). Coaching question: "did I get good results for
+    // the energy I spent?"
+    //
+    // Formula:
+    //
+    //   pace_factor      = priorBest / thisSplit.duration
+    //   intensity_factor = thisSplit.avgHR / maxHR
+    //   efficiency       = pace_factor / intensity_factor
+    //
+    // Reading the math:
+    //   • Match your PB at race-pace HR (~0.85) → ~1.18  (efficient)
+    //   • Match your PB at max HR (1.0)         → 1.00   (par)
+    //   • 10% slower than PB at race-pace HR    → ~1.06
+    //   • 10% slower than PB at max HR          → 0.90   (inefficient)
+    //   • Beat your PB at low HR                → ~1.5+  (highly efficient)
+    //
+    // The "low HR + slow time" case scores around 1.0 too — the
+    // athlete traded time for cardiovascular cost, which is honest
+    // (cruise day vs race day are different intents).
+    //
+    // Categories:
+    //   • highlyEfficient: ≥1.2 — great result for the cost
+    //   • efficient:       1.0–1.2 — typical
+    //   • slightlyInefficient: 0.8–1.0 — paid more than result earned
+    //   • inefficient:     <0.8 — high HR cost for low output
+    struct EfficiencyScore: Equatable {
+        let overall: Double
+        let worstStation: WorstStation?
+        let category: Category
+        let stationsCounted: Int
+
+        struct WorstStation: Equatable {
+            let station: Station
+            let score: Double
+        }
+
+        enum Category: String, Equatable {
+            case highlyEfficient
+            case efficient
+            case slightlyInefficient
+            case inefficient
+
+            var displayName: String {
+                switch self {
+                case .highlyEfficient:     return "Highly Efficient"
+                case .efficient:           return "Efficient"
+                case .slightlyInefficient: return "Slightly Inefficient"
+                case .inefficient:         return "Inefficient"
+                }
+            }
+        }
+
+        static func category(forOverall score: Double) -> Category {
+            switch score {
+            case 1.2...:    return .highlyEfficient
+            case 1.0..<1.2: return .efficient
+            case 0.8..<1.0: return .slightlyInefficient
+            default:        return .inefficient
+            }
+        }
+    }
+
+    // Per-split efficiency. Returns nil when the data needed to
+    // compute it isn't available:
+    //   - avg HR missing (no Watch / no HK auth / no samples)
+    //   - prior PB missing (athlete's first time at this station)
+    //   - max HR not set or invalid
+    //
+    // Same silence-on-missing-data pattern as the rest of RaceStats.
+    static func efficiencyForSplit(
+        _ split: Split,
+        race: Race,
+        history: [Race],
+        maxHR: Int
+    ) -> Double? {
+        guard maxHR > 0,
+              let avgHR = split.heartRateAvgBPM,
+              avgHR > 0,
+              split.duration > 0
+        else { return nil }
+
+        guard let priorBest = bestDuration(
+            for: split.station,
+            before: race,
+            among: history
+        ) else { return nil }
+
+        let paceFactor = priorBest / split.duration
+        let intensityFactor = avgHR / Double(maxHR)
+        guard intensityFactor > 0 else { return nil }
+
+        return paceFactor / intensityFactor
+    }
+
+    // Race-wide efficiency. Duration-weighted average across all
+    // stations with computable per-split efficiency (so a long
+    // wall-ball station with poor efficiency hurts the overall
+    // more than a short station with the same poor score).
+    //
+    // Returns nil when fewer than 4 stations have computable
+    // efficiency — same statistical-significance threshold as
+    // the recovery score. A single noisy station shouldn't tank
+    // the whole race's number.
+    //
+    // Also surfaces the worst-efficiency station so the insight
+    // layer can call out specifically *which* station was the
+    // efficiency drag ("High effort, low output on Wall Balls").
+    static func efficiencyScore(
+        for race: Race,
+        history: [Race],
+        maxHR: Int
+    ) -> EfficiencyScore? {
+        let perStation: [(station: Station, score: Double, weight: Double)] =
+            race.splits.compactMap { split in
+                guard let eff = efficiencyForSplit(
+                    split,
+                    race: race,
+                    history: history,
+                    maxHR: maxHR
+                ) else { return nil }
+                return (split.station, eff, split.duration)
+            }
+
+        guard perStation.count >= 4 else { return nil }
+
+        let totalWeight = perStation.map(\.weight).reduce(0, +)
+        guard totalWeight > 0 else { return nil }
+
+        let weightedSum = perStation
+            .map { $0.score * $0.weight }
+            .reduce(0, +)
+        let overall = weightedSum / totalWeight
+
+        // Worst-station detection. Filter out runs by default —
+        // run efficiency varies wildly with terrain, indoor vs
+        // outdoor treadmill, etc., and the actionable callout is
+        // almost always a workout station the athlete can train
+        // specifically. Skip when no workout stations have data.
+        let workoutOnly = perStation.filter { $0.station.kind == .workout }
+        let worst: EfficiencyScore.WorstStation?
+        if let worstSplit = workoutOnly.min(by: { $0.score < $1.score }),
+           // Only surface as "worst" if it's meaningfully below the
+           // overall race average — otherwise it's noise, not signal.
+           worstSplit.score < overall * 0.85 {
+            worst = EfficiencyScore.WorstStation(
+                station: worstSplit.station,
+                score: worstSplit.score
+            )
+        } else {
+            worst = nil
+        }
+
+        return EfficiencyScore(
+            overall: overall,
+            worstStation: worst,
+            category: EfficiencyScore.category(forOverall: overall),
+            stationsCounted: perStation.count
+        )
+    }
+
     // MARK: - Recovery score
 
     // Race-wide recovery quality score. Aggregates per-station HR

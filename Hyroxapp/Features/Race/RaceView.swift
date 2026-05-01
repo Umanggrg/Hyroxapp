@@ -829,6 +829,32 @@ struct RaceView: View {
             // the athlete can pace by zone color at a glance, not
             // just by BPM number — much faster to read mid-sprint.
             let zone = HRZone.zone(for: bpm, maxBPM: maxHeartRate)
+            // Coaching cue translates the zone into actionable
+            // language while running: HOLD / SLOW / PUSH. Workout
+            // stations get .workout (no pace cue — see RaceStats
+            // comment). Replaces the previous bare "Z3" tag —
+            // coaching language is more useful mid-race than the
+            // training-plan zone number.
+            let cue = RaceStats.coachingCue(
+                currentHR: bpm,
+                maxHR: maxHeartRate,
+                currentStation: viewModel.engine.currentStation
+            )
+            // For run stations the chip tint follows the cue
+            // (green hold / red slow / blue push) so the same
+            // color signal reads at a glance whether you're racing
+            // it right. For workout stations there's no pace cue,
+            // so we fall back to the zone color (still meaningful
+            // — Z5 redline mid-sled-push reads as red without
+            // commanding "slow down").
+            let chipColor: Color = {
+                switch cue {
+                case .hold:    return Color.success
+                case .slow:    return Color.accent
+                case .push:    return Color(hex: 0x5B9BD5)
+                case .workout, .none: return zone.color
+                }
+            }()
 
             HStack(spacing: 4) {
                 // Heartbeat icon — pulses at a tempo synced with
@@ -846,20 +872,23 @@ struct RaceView: View {
                     // the difference visible — without this each
                     // refresh would jump.
                     .contentTransition(.numericText())
-                // Zone label appears as a small "Z3" suffix so the
-                // athlete sees both the raw number and the zone in
-                // one glance. Strava-watch-face style.
-                Text("Z\(zone.rawValue)")
-                    .font(.caption2.weight(.heavy))
-                    .contentTransition(.numericText())
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background(
-                        Capsule()
-                            .fill(zone.color.opacity(0.25))
-                    )
+                // Coaching pill — HOLD / SLOW / PUSH on runs;
+                // WORK on workout stations. Hidden when the cue
+                // is .none (no HR or no station).
+                if cue != .none {
+                    Text(cue.displayText)
+                        .font(.caption2.weight(.heavy))
+                        .tracking(0.3)
+                        .contentTransition(.identity)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(
+                            Capsule()
+                                .fill(chipColor.opacity(0.25))
+                        )
+                }
             }
-            .foregroundStyle(zone.color)
+            .foregroundStyle(chipColor)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(
@@ -872,9 +901,9 @@ struct RaceView: View {
             // down" toward Z2 rather than flicking discretely.
             .animation(
                 reduceMotion ? .none : .smooth(duration: 0.4),
-                value: zone
+                value: cue
             )
-            .accessibilityLabel("Current heart rate \(Int(bpm.rounded())) beats per minute, \(zone.displayName)")
+            .accessibilityLabel("Current heart rate \(Int(bpm.rounded())) beats per minute, \(zone.displayName), \(cue.displayText)")
         }
     }
 

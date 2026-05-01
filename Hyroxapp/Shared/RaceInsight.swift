@@ -112,6 +112,16 @@ enum InsightGenerator {
            let hardest = hardestStationInsight(for: race, maxHR: maxHR) {
             out.append(hardest)
         }
+        // Efficiency-worst-station — names the workout station
+        // where the athlete spent the most HR cost for the
+        // smallest pace return. Coaching-meaningful: this is the
+        // station to train specifically. Different question than
+        // "hardest station" — hardest is about absolute body load,
+        // worst-efficiency is about cost-vs-output ratio.
+        if let maxHR,
+           let efficiencyDrag = efficiencyDragInsight(for: race, allRaces: allRaces, maxHR: maxHR) {
+            out.append(efficiencyDrag)
+        }
 
         return out
     }
@@ -445,6 +455,46 @@ enum InsightGenerator {
 
         return RaceInsight(
             text: "Pace dropped \(pacePct)% from station \(stationNumber) onward (\(stationName)).",
+            symbol: "arrow.down.right.circle.fill",
+            color: .warning
+        )
+    }
+
+    // MARK: - Efficiency drag
+
+    // Surface the worst-efficiency workout station as a coaching
+    // callout. Builds on RaceStats.efficiencyScore which already
+    // applies the workout-only filter and the "must be meaningfully
+    // below the race average" threshold — if a worstStation is
+    // returned, it's already actionable signal.
+    //
+    // Phrased as a coaching diagnosis ("High effort, low output on
+    // X") rather than a raw score so the athlete sees what to
+    // train, not just a number.
+    //
+    // Returns nil when:
+    //   - No prior PB exists for any of this race's stations
+    //     (first race ever — efficiency math has no baseline).
+    //   - efficiencyScore returned no worstStation (no station
+    //     stood meaningfully below the race average).
+    //   - maxHR not provided.
+    private static func efficiencyDragInsight(
+        for race: Race,
+        allRaces: [Race],
+        maxHR: Int
+    ) -> RaceInsight? {
+        guard let efficiency = RaceStats.efficiencyScore(
+            for: race,
+            history: allRaces,
+            maxHR: maxHR
+        ), let worst = efficiency.worstStation else { return nil }
+
+        let stationName = worst.station.displayName
+        let scoreLabel = String(format: "%.2f", worst.score)
+        let text = "High effort, low output on \(stationName) — efficiency \(scoreLabel). Train this station specifically."
+
+        return RaceInsight(
+            text: text,
             symbol: "arrow.down.right.circle.fill",
             color: .warning
         )

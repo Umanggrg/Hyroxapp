@@ -163,6 +163,23 @@ struct RaceSummaryView: View {
                                 .foregroundStyle(Color.accentDim)
                         }
 
+                        // Efficiency score — output (relative pace
+                        // vs your PB) per unit of HR cost. Silent
+                        // when the athlete has no prior PB to
+                        // compare against (first race ever for
+                        // these stations) or no HR data.
+                        if let race = viewModel.activeRace,
+                           let efficiency = RaceStats.efficiencyScore(
+                               for: race,
+                               history: allFinishedRaces,
+                               maxHR: maxHeartRate
+                           ) {
+                            Text("Efficiency \(String(format: "%.2f", efficiency.overall)) · \(efficiency.category.displayName)")
+                                .font(.caption.weight(.semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(Color.accentDim)
+                        }
+
                     // Target outcome — only shown if the athlete set a
                     // goal. "Goal met" + green delta when beaten,
                     // warning delta when missed. Centralized in

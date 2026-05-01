@@ -276,6 +276,20 @@ struct RaceDetailView: View {
                     .foregroundStyle(Color.accentDim)
             }
 
+            // Efficiency score — output per HR cost. Silent when
+            // there's no prior PB baseline (first race for these
+            // stations) or no HR data captured.
+            if let efficiency = RaceStats.efficiencyScore(
+                for: race,
+                history: allFinishedRaces,
+                maxHR: maxHeartRate
+            ) {
+                Text("Efficiency \(String(format: "%.2f", efficiency.overall)) · \(efficiency.category.displayName)")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.accentDim)
+            }
+
             // Target outcome readout — only shown if a target
             // was set on this race. Tucks into the hero so the
             // success/over-target framing reads as part of the
