@@ -293,7 +293,7 @@ private struct LockScreenView: View {
                     .tracking(1.0)
                 Spacer()
                 if let hr = state.currentHR {
-                    hrChip(hr)
+                    hrChip(hr, zone: state.currentHRZone)
                 }
                 phaseChip
             }
@@ -333,22 +333,34 @@ private struct LockScreenView: View {
             )
     }
 
-    // Live heart-rate chip — a small heart glyph + BPM value.
-    // Only renders when state.currentHR is non-nil (HealthKit
-    // authorized AND a sensor is publishing). Intentionally
-    // restrained — same visual weight as the phase chip beside
-    // it, so the header reads "race · HR · phase" left to right
-    // without any single chip dominating.
+    // Live heart-rate chip — a small heart glyph + BPM value, plus
+    // a Z1...Z5 zone indicator when the iOS side has classified the
+    // current HR. Only renders when state.currentHR is non-nil
+    // (HealthKit authorized AND a sensor is publishing). The zone
+    // tints the heart icon + draws a Z-label suffix so the athlete
+    // can pace by zone color at a glance — much faster to read
+    // mid-sprint than a raw BPM number.
+    //
+    // Intentionally restrained — same visual weight as the phase
+    // chip beside it, so the header reads "race · HR · phase" left
+    // to right without any single chip dominating.
     @ViewBuilder
-    private func hrChip(_ bpm: Int) -> some View {
+    private func hrChip(_ bpm: Int, zone: Int?) -> some View {
         HStack(spacing: 3) {
             Image(systemName: "heart.fill")
                 .font(.system(size: 8, weight: .heavy))
-                .foregroundStyle(Color.accent)
+                .foregroundStyle(hrZoneColor(zone))
             Text("\(bpm)")
                 .font(.system(size: 9, weight: .heavy))
                 .monospacedDigit()
                 .foregroundStyle(.white.opacity(0.85))
+            if let zone {
+                Text("Z\(zone)")
+                    .font(.system(size: 9, weight: .heavy))
+                    .tracking(0.4)
+                    .foregroundStyle(hrZoneColor(zone))
+                    .padding(.leading, 1)
+            }
         }
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
@@ -356,6 +368,21 @@ private struct LockScreenView: View {
             Capsule()
                 .fill(Color.white.opacity(0.08))
         )
+    }
+
+    // Map the pre-computed HR zone (1...5) to a color. Mirrors the
+    // canonical palette used by the in-app HRZonesView so the same
+    // zone reads the same color across surfaces. Falls back to
+    // muted accent for unknown / nil zone values.
+    private func hrZoneColor(_ zone: Int?) -> Color {
+        switch zone {
+        case 1: return Color(red: 0.36, green: 0.61, blue: 0.84)  // 0x5B9BD5 — calm blue
+        case 2: return Color.success                              // green
+        case 3: return Color(red: 1.0, green: 0.84, blue: 0.04)   // 0xFFD60A — yellow
+        case 4: return Color.warning                              // orange
+        case 5: return Color.accent                               // red
+        default: return Color.accent                              // fallback
+        }
     }
 
     @ViewBuilder

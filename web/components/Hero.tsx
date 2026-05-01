@@ -8,7 +8,7 @@ import { WatchScreen } from "./screens/WatchScreen";
 // Hero composition — oversized typography on top, three phones
 // + a watch fanned across the bottom with subtle 3D rotation.
 // The composition mirrors Apple's "fanned device family" hero
-// pattern (think the iPhone keynote pages) but uses Trakr's
+// pattern (think the iPhone keynote pages) but uses Trakrr's
 // actual app screens so it doubles as a product showcase.
 export function Hero() {
   return (

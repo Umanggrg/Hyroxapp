@@ -1,4 +1,4 @@
-# Trakr — Project Context for Claude Code
+# Trakrr — Project Context for Claude Code
 
 > This document is the source of truth for what we're building and how. Read it before generating code. When in doubt, prioritize what's written here over generic best practices.
 
@@ -6,12 +6,12 @@
 
 ## 0. Naming + trademark
 
-**Product name:** Trakr. The app's brand identity is "Trakr" — that's what users see on the home screen, in App Store listings, and in marketing.
+**Product name:** Trakrr. The app's brand identity is "Trakrr" — that's what users see on the home screen, in App Store listings, and in marketing.
 
 **HYROX™** is a registered trademark of HYROX GmbH and we have no affiliation with them. We use "HYROX" only descriptively — to refer to the race format athletes train for, the way a running app might say "5K" or a cycling app might say "criterium." Specifically:
 
 - ✅ OK: "HYROX-style race format," "Race a HYROX simulation," labeling the 16-station race mode as "HYROX Race" inside the app, naming the canonical 16-segment sequence after how the sport names it.
-- ❌ Not OK: Calling our product "HYROXAPP" or anything that implies we ARE HYROX or are endorsed by them. The app's wordmark, App Store name, marketing copy, and bundle ID say "Trakr" — never "HYROXAPP" / "HyroxApp."
+- ❌ Not OK: Calling our product "HYROXAPP" or anything that implies we ARE HYROX or are endorsed by them. The app's wordmark, App Store name, marketing copy, and bundle ID say "Trakrr" — never "HYROXAPP" / "HyroxApp."
 
 This matters because pre-paid-developer-account the project was named "Hyroxapp" — internal target/folder names still carry that legacy. Those don't appear in the App Store listing or to users, but should be cleaned up via Xcode UI in a future pass for consistency.
 
@@ -19,9 +19,9 @@ This matters because pre-paid-developer-account the project was named "Hyroxapp"
 
 ## 1. What We're Building
 
-Trakr is a native iOS app (with watchOS companion) for hybrid-fitness racers — athletes who train for HYROX-style 16-station events, plus custom workouts, plus their own intervals. Think **"Strava for hybrid fitness"** — a competitive performance ecosystem AND a social network for race-format athletes, not a generic workout logger.
+Trakrr is a native iOS app (with watchOS companion) for hybrid-fitness racers — athletes who train for HYROX-style 16-station events, plus custom workouts, plus their own intervals. Think **"Strava for hybrid fitness"** — a competitive performance ecosystem AND a social network for race-format athletes, not a generic workout logger.
 
-**One-line pitch:** Trakr is the app racers open before, during, and after every session to track, compete, share, and prove performance.
+**One-line pitch:** Trakrr is the app racers open before, during, and after every session to track, compete, share, and prove performance.
 
 **Primary user (v0.1):** Me. I'm training for HYROX. I will use this app during my actual training sessions. If it doesn't work for me personally, nothing else matters.
 

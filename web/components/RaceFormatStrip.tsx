@@ -45,7 +45,7 @@ export function RaceFormatStrip() {
           ))}
         </div>
         <p className="text-xs text-text-tertiary mt-5 max-w-2xl">
-          Eight runs, eight stations, alternating. Trakr ships the canonical
+          Eight runs, eight stations, alternating. Trakrr ships the canonical
           sequence pre-loaded — start a race in one tap, advance with a single
           giant button, and let the timer never drift.
         </p>

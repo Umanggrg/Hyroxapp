@@ -1,6 +1,6 @@
 // Privacy is a positioning advantage, not a footnote. We give it
 // a full section because every other "fitness social" app runs
-// on tracking, and Trakr deliberately doesn't.
+// on tracking, and Trakrr deliberately doesn't.
 export function PrivacyPosture() {
   return (
     <section
@@ -17,7 +17,7 @@ export function PrivacyPosture() {
             <span className="text-accent">leaves your phone.</span>
           </h2>
           <p className="text-text-secondary mt-5 leading-relaxed">
-            Trakr stores your training data on-device via SwiftData. No
+            Trakrr stores your training data on-device via SwiftData. No
             analytics SDKs. No advertising IDs. No third-party crash reporting.
             HealthKit reads stay in HealthKit. Race history stays in your app.
             Multipeer Duo Mode is peer-to-peer with no server in the middle.

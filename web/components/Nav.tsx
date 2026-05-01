@@ -10,7 +10,7 @@ export function Nav() {
             className="h-2.5 w-2.5 rounded-full bg-accent shadow-glow animate-pulseDot"
           />
           <span className="font-rounded font-bold tracking-caps uppercase text-sm">
-            Trakr
+            Trakrr
           </span>
         </a>
         <nav className="hidden sm:flex items-center gap-7 text-sm text-text-secondary">

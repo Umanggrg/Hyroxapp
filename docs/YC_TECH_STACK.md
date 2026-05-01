@@ -6,7 +6,7 @@ A drafted answer to "What is your tech stack?" tuned for a YC-style application.
 
 ## Short version (~1,200 chars, fits most YC fields)
 
-Trakr is a native iOS app with an Apple Watch companion, built in Swift 6 with strict concurrency and SwiftUI throughout. On-device persistence is SwiftData (iOS 17+). Live race state syncs phone↔watch over WatchConnectivity and phone↔phone for Duo Mode over Apple's MultipeerConnectivity (peer-to-peer, no backend, encrypted by default). Health data integrates via HealthKit + WorkoutKit — heart-rate sampling, active-energy reads, workouts written back to Apple Health. Live Activities surface the race timer on the Lock Screen and Dynamic Island via ActivityKit + WidgetKit.
+Trakrr is a native iOS app with an Apple Watch companion, built in Swift 6 with strict concurrency and SwiftUI throughout. On-device persistence is SwiftData (iOS 17+). Live race state syncs phone↔watch over WatchConnectivity and phone↔phone for Duo Mode over Apple's MultipeerConnectivity (peer-to-peer, no backend, encrypted by default). Health data integrates via HealthKit + WorkoutKit — heart-rate sampling, active-energy reads, workouts written back to Apple Health. Live Activities surface the race timer on the Lock Screen and Dynamic Island via ActivityKit + WidgetKit.
 
 The planned v1 backend is Supabase (Postgres + Auth + Realtime + Storage) — solo-founder-friendly economics, easy path to cloud-synced Duo Mode and a social feed. CoreMotion + Create ML (on-device) is queued for sensor-based rep counting on the Watch — a feature no other hybrid-fitness app offers.
 
@@ -45,7 +45,7 @@ A single founder built the entire codebase (10K+ LOC across iPhone, Watch, and W
 
 ### AI coding tools
 
-The entire codebase was pair-programmed with **Claude (Anthropic's Claude Sonnet) via Claude Code** — architecture, every shipped feature, motion language, copy review, privacy compliance, and the recent rebrand from "Hyroxapp" to "Trakr" to avoid HYROX™ trademark exposure. No third-party AI/ML SDKs in the shipping app itself; the only ML is Apple's Create ML, on-device.
+The entire codebase was pair-programmed with **Claude (Anthropic's Claude Sonnet) via Claude Code** — architecture, every shipped feature, motion language, copy review, privacy compliance, and the recent rebrand from "Hyroxapp" to "Trakrr" to avoid HYROX™ trademark exposure. No third-party AI/ML SDKs in the shipping app itself; the only ML is Apple's Create ML, on-device.
 
 ### Why native, why this stack
 

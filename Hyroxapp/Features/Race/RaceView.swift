@@ -239,14 +239,32 @@ struct RaceView: View {
             // Non-blocking — auth arrives in parallel with the user
             // prepping to tap Start Race.
             requestHealthKitAuthIfNeeded()
+            // Push the athlete's max HR into the view model so
+            // currentLiveActivityState() can pre-compute the HR
+            // zone for the Live Activity. The view-side
+            // `maxHeartRate` reads from the user profile via
+            // @Query; if the profile is loaded by now, that's the
+            // value; otherwise the viewModel keeps its 190 default
+            // until the .onChange below fires.
+            viewModel.maxHeartRate = maxHeartRate
         }
         .onDisappear {
             #if canImport(WatchConnectivity)
             WatchCompanionService.shared.onAction = nil
+            WatchCompanionService.shared.onHeartRate = nil
             #endif
             // Cancel any in-flight speech so a stale "next: sled push"
             // doesn't fire after the user navigates away from Race.
             VoiceCueService.shared.stop()
+        }
+        // Keep the viewModel's maxHR in sync with the profile so
+        // the Live Activity's HR zone classification reflects any
+        // edits the user makes in Settings while a race is in
+        // flight (rare but possible — and harmless to wire).
+        .onChange(of: profiles.first?.maxHeartRate) { _, newValue in
+            if let newValue {
+                viewModel.maxHeartRate = newValue
+            }
         }
         // Fires when the user starts a new race, taps Done after finish,
         // or abandons mid-race — any transition in/out of an active-or-
@@ -1274,6 +1292,17 @@ struct RaceView: View {
                 Haptics.success()
                 viewModel.resumeRace()
             }
+        }
+
+        // HR samples published from the Watch's HKLiveWorkoutBuilder.
+        // The handler forwards each sample into the view model which
+        // writes to `currentHeartRateBPM` (the same property the
+        // phone-side HealthKit poll writes to). Watch samples arrive
+        // at ~1Hz so they dominate the displayed value when active;
+        // the phone poll continues as a fallback when no Watch is
+        // paired or its workout session isn't running.
+        WatchCompanionService.shared.onHeartRate = { update in
+            viewModel.ingestHeartRate(update)
         }
         #endif
     }

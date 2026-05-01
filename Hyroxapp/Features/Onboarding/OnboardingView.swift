@@ -76,7 +76,7 @@ struct OnboardingView: View {
 
         var title: String {
             switch self {
-            case .welcome:  return "Welcome to Trakr"
+            case .welcome:  return "Welcome to Trakrr"
             case .identity: return "Your athlete profile"
             case .division: return "Division & heart rate"
             case .audio:    return "During the race"

@@ -1,6 +1,6 @@
 import type { Config } from "tailwindcss";
 
-// Mirrors Trakr's app design tokens (CLAUDE.md §5).
+// Mirrors Trakrr's app design tokens (CLAUDE.md §5).
 // Keeping this in lock-step with the iOS Color extensions
 // means the website and the app feel like the same product.
 const config: Config = {

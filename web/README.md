@@ -1,6 +1,6 @@
-# Trakr — Marketing Site
+# Trakrr — Marketing Site
 
-Next.js 14 (App Router) + Tailwind landing page for [Trakr](../README.md). Visually mirrors the iOS app's design system (CLAUDE.md §5) so the site feels like the same product.
+Next.js 14 (App Router) + Tailwind landing page for [Trakrr](../README.md). Visually mirrors the iOS app's design system (CLAUDE.md §5) so the site feels like the same product.
 
 ## Local development
 
@@ -30,7 +30,7 @@ web/
 │   ├── PrivacyPosture.tsx    # privacy-as-positioning section
 │   ├── FounderNote.tsx       # first-person founder voice
 │   └── Footer.tsx        # TestFlight CTA + legal strip
-├── tailwind.config.ts    # Trakr color palette + typography tokens
+├── tailwind.config.ts    # Trakrr color palette + typography tokens
 ├── postcss.config.js
 ├── next.config.mjs
 ├── tsconfig.json
@@ -64,7 +64,7 @@ Easiest path is **Vercel**:
 
 1. `npm i -g vercel` (one-time)
 2. From this folder: `vercel`
-3. Accept the defaults. The first deploy gives you a `*.vercel.app` URL; you can attach `trakr.app` (or any custom domain) afterward.
+3. Accept the defaults. The first deploy gives you a `*.vercel.app` URL; you can attach `trakrr.app` (or any custom domain) afterward.
 
 Alternatively, **Cloudflare Pages**, **Netlify**, **Render** — all support Next.js 14 with zero config. Or `npm run build && npm run start` on any Node host.
 

@@ -1,11 +1,11 @@
-# Trakr Privacy Policy
+# Trakrr Privacy Policy
 
-> **Note**: Trakr is an independent app, not affiliated with, endorsed by, or sponsored by HYROX GmbH. "HYROX" is a registered trademark of HYROX GmbH; we use it only descriptively to refer to the race format athletes train for.
+> **Note**: Trakrr is an independent app, not affiliated with, endorsed by, or sponsored by HYROX GmbH. "HYROX" is a registered trademark of HYROX GmbH; we use it only descriptively to refer to the race format athletes train for.
 
 **Last updated:** April 25, 2026
 **Effective date:** April 25, 2026
 
-This is a plain-English privacy policy. The short version: **Trakr stores your training data on your device. It does not collect, transmit, sell, or share your data with anyone.** The longer version follows.
+This is a plain-English privacy policy. The short version: **Trakrr stores your training data on your device. It does not collect, transmit, sell, or share your data with anyone.** The longer version follows.
 
 If anything in this document is unclear, email **umang.gurung35@gmail.com** and we'll fix it.
 
@@ -13,16 +13,16 @@ If anything in this document is unclear, email **umang.gurung35@gmail.com** and 
 
 ## 1. Who runs this app
 
-Trakr is built and maintained by Umang Gurung (the "developer," "we," or "us"). It is a personal project, not a company, and does not operate any servers, accounts, or back-end services at this time.
+Trakrr is built and maintained by Umang Gurung (the "developer," "we," or "us"). It is a personal project, not a company, and does not operate any servers, accounts, or back-end services at this time.
 
-## 2. What data Trakr uses
+## 2. What data Trakrr uses
 
-Trakr is a fitness companion for hybrid-fitness athletes. To do its job, it works with the following kinds of information — all of which stay on your device unless you explicitly export or share them:
+Trakrr is a fitness companion for hybrid-fitness athletes. To do its job, it works with the following kinds of information — all of which stay on your device unless you explicitly export or share them:
 
 - **Race data you create.** Splits, total times, station-level reps and weights, race-day notes, race photos, custom workout templates, target finish times, race-event countdowns. Saved locally via SwiftData.
 - **Profile data you enter.** Display name, handle, location, bio, division (Men's Open / Women's Open / etc.), max heart rate, avatar photo. All saved locally.
-- **HealthKit data you allow.** When you grant access, Trakr reads your heart rate (during a race and as per-station summary statistics) and your active-energy-burned (calorie estimate per station). Apple HealthKit governs that access; you can revoke it at any time in **Settings → Privacy & Security → Health → Trakr**.
-- **Photos you attach.** When you add a photo to a race, Trakr uses the iOS PhotosPicker to receive that single photo. The photo is stored alongside the race in local storage. We do not access any other photos in your library.
+- **HealthKit data you allow.** When you grant access, Trakrr reads your heart rate (during a race and as per-station summary statistics) and your active-energy-burned (calorie estimate per station). Apple HealthKit governs that access; you can revoke it at any time in **Settings → Privacy & Security → Health → Trakrr**.
+- **Photos you attach.** When you add a photo to a race, Trakrr uses the iOS PhotosPicker to receive that single photo. The photo is stored alongside the race in local storage. We do not access any other photos in your library.
 - **App preferences.** Toggles for voice cues, countdowns, notifications, Roxzone (transition) tracking, etc.
 
 We do **not** collect or store: your real name (unless you type it as your display name), email address, phone number, location coordinates, IP address, device identifiers, advertising IDs, or browsing activity inside other apps.
@@ -39,44 +39,44 @@ We do **not** collect or store: your real name (unless you type it as your displ
 
 Apple's HealthKit framework requires a special privacy disclosure. Per Apple's developer policy:
 
-- Trakr uses HealthKit **only** to support the features in §2 (read your heart rate and active-energy-burned values, and write completed races back to Health as workouts so they appear alongside your other Apple Fitness data).
-- Trakr does **not** use HealthKit data for advertising, marketing, or other use-based data mining.
-- Trakr does **not** disclose HealthKit data to any third party.
+- Trakrr uses HealthKit **only** to support the features in §2 (read your heart rate and active-energy-burned values, and write completed races back to Health as workouts so they appear alongside your other Apple Fitness data).
+- Trakrr does **not** use HealthKit data for advertising, marketing, or other use-based data mining.
+- Trakrr does **not** disclose HealthKit data to any third party.
 - HealthKit data never leaves your device.
 
-You can revoke HealthKit permissions at any time in **iOS Settings → Privacy & Security → Health → Trakr**. The app continues to work without HealthKit; heart rate / calorie fields simply remain blank for new races.
+You can revoke HealthKit permissions at any time in **iOS Settings → Privacy & Security → Health → Trakrr**. The app continues to work without HealthKit; heart rate / calorie fields simply remain blank for new races.
 
 ## 5. Live Activities and notifications
 
 If you enable Live Activities, the active race timer can render on your Lock Screen and in the Dynamic Island via Apple's standard ActivityKit. The data shown there (race timer, current station) is delivered locally on your device — no remote server is involved.
 
-If you enable notifications, Trakr uses Apple's local notification system to remind you about training streaks and upcoming race events. These notifications are scheduled on-device. We do **not** send push notifications from any server.
+If you enable notifications, Trakrr uses Apple's local notification system to remind you about training streaks and upcoming race events. These notifications are scheduled on-device. We do **not** send push notifications from any server.
 
 ## 6. Sharing and exporting
 
-Some screens (the post-race summary, monthly/yearly recaps, profile) offer a "Share" button that renders a portable PNG image of your data. When you tap that button, you control where the image goes — it is handed off to iOS's standard share sheet. Trakr does not transmit a copy elsewhere.
+Some screens (the post-race summary, monthly/yearly recaps, profile) offer a "Share" button that renders a portable PNG image of your data. When you tap that button, you control where the image goes — it is handed off to iOS's standard share sheet. Trakrr does not transmit a copy elsewhere.
 
 ## 7. Where your data lives
 
 Right now, on your iPhone (and your paired Apple Watch, when you opt in to the Watch companion). Specifically:
 
 - SwiftData store inside the app's sandbox container.
-- Apple Health (only the workouts you let Trakr write back).
+- Apple Health (only the workouts you let Trakrr write back).
 - Standard iOS application backups via iCloud / Finder, which are encrypted by Apple and managed under Apple's own privacy terms.
 
 If you delete the app, the local database goes with it. Any workouts already written to Apple Health remain in Apple Health under your control.
 
 ## 8. Future cloud sync
 
-A future version of Trakr will offer optional cloud sync (planned via Supabase) so the same account can be used across multiple devices and to support social features. **That capability is not active in the current version.** When it ships, this document will be updated to spell out exactly what gets synced, where it is stored, the legal basis, and how you can delete it. You will be asked to opt in before any data leaves your device.
+A future version of Trakrr will offer optional cloud sync (planned via Supabase) so the same account can be used across multiple devices and to support social features. **That capability is not active in the current version.** When it ships, this document will be updated to spell out exactly what gets synced, where it is stored, the legal basis, and how you can delete it. You will be asked to opt in before any data leaves your device.
 
 ## 9. Children
 
-Trakr is not directed to children under 13 (or the equivalent minimum age in your jurisdiction). If you are a parent or guardian and believe a child has used the app, you can simply uninstall it; no remote data exists to be deleted.
+Trakrr is not directed to children under 13 (or the equivalent minimum age in your jurisdiction). If you are a parent or guardian and believe a child has used the app, you can simply uninstall it; no remote data exists to be deleted.
 
 ## 10. Your rights
 
-Because Trakr does not transmit your data anywhere, the practical mechanism for exercising rights like access, deletion, or portability is the iOS device itself:
+Because Trakrr does not transmit your data anywhere, the practical mechanism for exercising rights like access, deletion, or portability is the iOS device itself:
 
 - **Access / portability.** The Settings screen exposes data export options for your race history.
 - **Deletion.** You can delete individual races from the History screen, or delete the entire app from your home screen to wipe the local database.
@@ -86,9 +86,9 @@ If a future cloud-sync version is released, additional access/deletion mechanism
 
 ## 11. Security
 
-Trakr relies on the security guarantees of iOS — sandboxed file storage, Data Protection class encryption when the device is locked, secure enclave for biometrics. We do not attempt to bypass or weaken these protections.
+Trakrr relies on the security guarantees of iOS — sandboxed file storage, Data Protection class encryption when the device is locked, secure enclave for biometrics. We do not attempt to bypass or weaken these protections.
 
-No system is perfectly secure, and we make no guarantee of absolute security. If you become aware of a security issue affecting Trakr, please email **umang.gurung35@gmail.com**.
+No system is perfectly secure, and we make no guarantee of absolute security. If you become aware of a security issue affecting Trakrr, please email **umang.gurung35@gmail.com**.
 
 ## 12. Changes to this policy
 

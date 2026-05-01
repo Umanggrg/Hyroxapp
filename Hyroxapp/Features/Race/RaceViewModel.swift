@@ -44,6 +44,14 @@ final class RaceViewModel {
     // disappears. Nil outside of an active race.
     private var heartRatePollTask: Task<Void, Never>?
 
+    // Athlete's max heart rate, used to classify the live HR into
+    // a zone (Z1...Z5) for display on the Live Activity. Set by
+    // RaceView via .onAppear / .onChange of the user profile so
+    // the value tracks any in-app edits to "Max HR" in Settings.
+    // Defaults to 190 — a reasonable population average for adults
+    // 30-40 — until the profile loads.
+    var maxHeartRate: Int = 190
+
     // Pre-race countdown state — used to render a 3-2-1-GO overlay
     // on RaceView between the user tapping "Start Race" and the
     // engine timer actually beginning. `countdownValue` is the
@@ -101,6 +109,14 @@ final class RaceViewModel {
         // widget skips rendering the HR chip in that case.
         let hr: Int? = currentHeartRateBPM.map { Int($0.rounded()) }
 
+        // Pre-compute the zone (Z1...Z5) on this side so the widget
+        // doesn't need to import HRZone or know the athlete's max
+        // HR. Only meaningful when bpm is non-nil — widget treats
+        // nil as "no zone chip."
+        let hrZone: Int? = currentHeartRateBPM.map {
+            HRZone.zone(for: $0, maxBPM: maxHeartRate).rawValue
+        }
+
         switch engine.state {
         case .notStarted:
             return nil
@@ -112,7 +128,8 @@ final class RaceViewModel {
                 currentStationIndex: stationIndex,
                 totalStations: engine.sequence.count,
                 currentStationName: stationName,
-                currentHR: hr
+                currentHR: hr,
+                currentHRZone: hrZone
             )
         case .paused(let raceStart, let segStart, _, let pausedAt):
             return RaceActivityAttributes.ContentState(
@@ -124,7 +141,8 @@ final class RaceViewModel {
                 currentStationIndex: stationIndex,
                 totalStations: engine.sequence.count,
                 currentStationName: stationName,
-                currentHR: hr
+                currentHR: hr,
+                currentHRZone: hrZone
             )
         case .inRoxzone(let raceStart, _, let roxStart):
             return RaceActivityAttributes.ContentState(
@@ -135,7 +153,8 @@ final class RaceViewModel {
                 currentStationIndex: stationIndex,
                 totalStations: engine.sequence.count,
                 currentStationName: stationName,
-                currentHR: hr
+                currentHR: hr,
+                currentHRZone: hrZone
             )
         case .finished(let raceStart, let endedAt, _):
             return RaceActivityAttributes.ContentState(
@@ -147,7 +166,8 @@ final class RaceViewModel {
                 currentStationIndex: stationIndex,
                 totalStations: engine.sequence.count,
                 currentStationName: stationName,
-                currentHR: hr
+                currentHR: hr,
+                currentHRZone: hrZone
             )
         }
     }
@@ -475,6 +495,18 @@ final class RaceViewModel {
         // bpm" readout, not the historical per-station aggregates.
         startHeartRatePolling()
 
+        // Tell the Watch to start its HKWorkoutSession. Watch begins
+        // collecting HR + active-energy samples, the race becomes
+        // a real HKWorkout (saved to Health on race finish for
+        // Activity ring credit + Apple Fitness visibility), and the
+        // Watch app stays awake with screen-off because workout
+        // sessions extend runtime on watchOS. Bails silently if no
+        // Watch is paired — the iOS-side HealthKit fallback covers
+        // that case.
+        #if canImport(WatchConnectivity)
+        WatchCompanionService.shared.sendControl(.startWorkout(at: now))
+        #endif
+
         // Kick off the Live Activity (lock screen + Dynamic
         // Island race timer). Initial state from the engine
         // we just started. Failures are silent — the in-app
@@ -503,7 +535,8 @@ final class RaceViewModel {
     // `advance()` directly which keeps the existing semantics.
     func endSegmentRace() {
         let wasInProgress = !engine.isFinished
-        engine.endSegment(at: Date())
+        let endedAt = Date()
+        engine.endSegment(at: endedAt)
         let newSplitIndex = engine.splits.count - 1
         persistActiveRace()
 
@@ -511,6 +544,14 @@ final class RaceViewModel {
         // flipped to .finished — mirror to HealthKit once.
         if wasInProgress, engine.isFinished {
             saveFinishedRaceToHealthKit()
+
+            // Tell the Watch to end + finalize its HKWorkoutSession.
+            // The resulting HKWorkout is persisted on the Watch side,
+            // earning Activity ring credit + Apple Fitness visibility.
+            // No-op when no Watch is paired.
+            #if canImport(WatchConnectivity)
+            WatchCompanionService.shared.sendControl(.endWorkout(at: endedAt))
+            #endif
         }
 
         attachSegmentStats(to: newSplitIndex)
@@ -533,6 +574,14 @@ final class RaceViewModel {
         // No reason to keep polling HR while the race is frozen —
         // the chip would just show a stale value. Restart on resume.
         stopHeartRatePolling()
+
+        // Tell the Watch to pause its HKWorkoutSession so sample
+        // collection halts — Activity ring time stops accumulating
+        // while paused, matching the engine's view that no race
+        // time is being earned.
+        #if canImport(WatchConnectivity)
+        WatchCompanionService.shared.sendControl(.pauseWorkout)
+        #endif
     }
 
     // Resume a paused race. Engine shifts startedAt forward by the
@@ -542,6 +591,13 @@ final class RaceViewModel {
         engine.resume(at: Date())
         persistActiveRace()
         startHeartRatePolling()
+
+        // Tell the Watch to resume its HKWorkoutSession. Sample
+        // collection picks back up; Activity ring time accumulates
+        // again.
+        #if canImport(WatchConnectivity)
+        WatchCompanionService.shared.sendControl(.resumeWorkout)
+        #endif
     }
 
     // Rebase the current segment's start timestamp to `now`. Used
@@ -560,7 +616,8 @@ final class RaceViewModel {
         // Detect the transition to `.finished` so we can mirror the race out
         // to HealthKit exactly once (not on every advance).
         let wasFinished = engine.isFinished
-        engine.advance(at: Date())
+        let advancedAt = Date()
+        engine.advance(at: advancedAt)
         // Capture the index of the split that `engine.advance` just appended
         // so the async HR patch can find and update it below. Must be read
         // before `persistActiveRace` because that's a sync write; the HR
@@ -570,6 +627,13 @@ final class RaceViewModel {
 
         if !wasFinished, engine.isFinished {
             saveFinishedRaceToHealthKit()
+
+            // Same as endSegmentRace: tell the Watch its workout
+            // session is done. The Watch finalizes the HKWorkout
+            // and Activity ring credit posts.
+            #if canImport(WatchConnectivity)
+            WatchCompanionService.shared.sendControl(.endWorkout(at: advancedAt))
+            #endif
         }
 
         // Fire-and-forget: fetch segment-window stats from HealthKit
@@ -714,6 +778,14 @@ final class RaceViewModel {
         LiveActivityService.shared.end(finalState: nil)
         #endif
 
+        // Tell the Watch to discard its HKWorkoutSession (vs end
+        // + finalize). No HKWorkout is persisted, no Activity ring
+        // credit, no clutter in Apple Health from races that didn't
+        // actually happen.
+        #if canImport(WatchConnectivity)
+        WatchCompanionService.shared.sendControl(.discardWorkout)
+        #endif
+
         engine.reset()
         activeRace = nil
         stopHeartRatePolling()
@@ -794,6 +866,52 @@ final class RaceViewModel {
     // will catch up.
     private func saveContextSilently() {
         try? modelContext?.save()
+    }
+
+    // MARK: - Watch-sourced HR ingestion
+
+    // Track the most recent HR sample timestamp from the Watch so we
+    // can reject out-of-order arrivals (WCSession can queue + reorder
+    // when the phone is briefly unreachable). Initialized in the
+    // distant past so the first sample always wins.
+    private var lastWatchHRSampleAt: Date = .distantPast
+
+    // How long after a Watch HR sample we still consider the Watch
+    // the authoritative source. If samples stop coming for longer
+    // than this (Watch app killed, HealthKit denied, out of range),
+    // the phone's polling fallback (which also writes to
+    // `currentHeartRateBPM`) carries on at its own cadence.
+    private static let watchHRStaleThreshold: TimeInterval = 30
+
+    // Receive a heart-rate sample published from the Watch's
+    // HKLiveWorkoutBuilder via WCSession. Wired up by `RaceView` for
+    // the active-race lifetime through `WatchCompanionService.onHeartRate`.
+    //
+    // Writes to `currentHeartRateBPM` — the same property the
+    // existing phone-side HR poll writes to — so all downstream
+    // consumers (race screen chip, Live Activity, snapshot publishing
+    // for duo) keep working unchanged. The Watch's higher cadence
+    // (~1Hz vs the phone's 5s poll) means Watch samples will dominate
+    // the displayed value when both are active.
+    //
+    // Rejects samples older than 30 seconds (likely stale due to
+    // WCSession queuing) and samples older than the last one we
+    // accepted (out-of-order delivery).
+    func ingestHeartRate(_ update: WatchHeartRateUpdate) {
+        // Reject stale samples (queued + delivered late).
+        let age = Date().timeIntervalSince(update.sampledAt)
+        guard age < Self.watchHRStaleThreshold else { return }
+
+        // Reject out-of-order samples.
+        guard update.sampledAt >= lastWatchHRSampleAt else { return }
+        lastWatchHRSampleAt = update.sampledAt
+
+        // Sanity bounds — defense in depth. The Watch side already
+        // filters bogus values, but the WCSession boundary deserves
+        // its own guard.
+        guard update.bpm >= 30, update.bpm <= 230 else { return }
+
+        currentHeartRateBPM = update.bpm
     }
 
     // MARK: - Live HR polling

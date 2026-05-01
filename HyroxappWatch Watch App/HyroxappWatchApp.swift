@@ -28,6 +28,18 @@ struct HyroxappWatchApp: App {
         // Activate before the first view renders so any context already
         // queued by the phone is ingested on launch.
         WatchRaceClient.shared.activate()
+
+        // Request HealthKit authorization on first launch. The
+        // permission prompt appears once and persists across launches;
+        // calling twice is a no-op so this is safe to run on every
+        // app start. We do it here (vs at race-start time) so a user
+        // mid-warmup doesn't get a permission prompt when they tap
+        // Start.
+        //
+        // Only HealthKit reads/writes are gated by this — the rest of
+        // the Watch app (race mirror, advance button) works
+        // independently of HealthKit auth.
+        WatchWorkoutManager.shared.requestAuthorizationIfNeeded()
     }
 
     var body: some Scene {

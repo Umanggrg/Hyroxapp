@@ -58,7 +58,7 @@ export function Footer() {
           <div className="flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-accent" />
             <span className="font-rounded font-bold tracking-caps uppercase text-text-primary">
-              Trakr
+              Trakrr
             </span>
             <span className="ml-3">
               © {new Date().getFullYear()} Umang Gurung
@@ -75,7 +75,7 @@ export function Footer() {
               Contact
             </a>
             <span>
-              HYROX™ is a registered trademark of HYROX GmbH. Trakr is not
+              HYROX™ is a registered trademark of HYROX GmbH. Trakrr is not
               affiliated with HYROX GmbH.
             </span>
           </div>

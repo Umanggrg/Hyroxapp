@@ -52,6 +52,35 @@ final class WatchRaceClient: NSObject {
         print("[WatchClient] activate called — state=\(session.activationState.rawValue) reachable=\(session.isReachable)")
     }
 
+    // Push a heart-rate sample to the paired iPhone. Called from
+    // `WatchWorkoutManager`'s `HKLiveWorkoutBuilderDelegate` whenever
+    // a new HR reading is collected during a race.
+    //
+    // Uses `sendMessage` for low-latency delivery (target ~1Hz cadence
+    // matches the Watch sensor's native rate). Failures are logged
+    // and dropped — stale HR is worse than no HR, so we don't fall
+    // back to `transferUserInfo` queueing here. The next sample (~1s
+    // later) will retry naturally.
+    //
+    // No-op if the session isn't activated yet or the phone isn't
+    // reachable; the phone's existing HR-polling fallback covers the
+    // gap (it polls HealthKit which the Watch is also writing to).
+    func publishHeartRate(_ update: WatchHeartRateUpdate) {
+        let session = WCSession.default
+        guard session.activationState == .activated else { return }
+        guard session.isReachable else { return }
+
+        session.sendMessage(
+            update.toDictionary(),
+            replyHandler: nil,
+            errorHandler: { error in
+                // Log only — HR sample failures are routine (phone
+                // briefly unreachable, locked, etc) and not actionable.
+                print("[WatchClient] publishHeartRate FAILED — \(error.localizedDescription)")
+            }
+        )
+    }
+
     // Send a user-initiated action to the paired iPhone (e.g. "advance
     // to next station" when the Watch's Next button is tapped).
     //
@@ -93,7 +122,14 @@ final class WatchRaceClient: NSObject {
     // Called from both the activation callback (picks up any pending
     // context) and the didReceive callback (live updates). Factored out
     // so both paths share the same decode + main-thread handoff logic.
-    private func ingest(_ dictionary: [String: Any]) {
+    //
+    // `nonisolated` so it can be safely called from the nonisolated
+    // `WCSessionDelegate` callbacks (which fire on an arbitrary background
+    // queue). The decode + log work runs on whatever queue the delegate
+    // hands us; only the final write to the @Observable `snapshot`
+    // property hops to the MainActor via the Task block, which is the
+    // contract @Observable requires.
+    nonisolated private func ingest(_ dictionary: [String: Any]) {
         print("[WatchClient] ingest called — keys: \(dictionary.keys.sorted())")
         guard let snapshot = RaceStateSnapshot(dictionary: dictionary) else {
             print("[WatchClient] ingest FAILED to decode snapshot")
@@ -140,5 +176,31 @@ extension WatchRaceClient: WCSessionDelegate {
     ) {
         print("[WatchClient] didReceiveApplicationContext FIRED — \(applicationContext.count) keys")
         ingest(applicationContext)
+    }
+
+    // Live messages from the phone via `sendMessage`. Today these
+    // are exclusively `WatchControl` lifecycle commands that drive
+    // the Watch's HKWorkoutSession (start, end, pause, resume,
+    // discard). Decoded on the background queue, then dispatched to
+    // the MainActor-isolated `WatchWorkoutManager`.
+    //
+    // Distinct from `didReceiveApplicationContext` which carries
+    // race-state snapshots — that's a different transport
+    // (updateApplicationContext) for different content (state vs.
+    // commands).
+    nonisolated func session(
+        _ session: WCSession,
+        didReceiveMessage message: [String: Any]
+    ) {
+        print("[WatchClient] didReceiveMessage FIRED — keys: \(message.keys.sorted())")
+        guard let control = WatchControl(dictionary: message) else {
+            print("[WatchClient] didReceiveMessage — failed to decode control, ignoring")
+            return
+        }
+        print("[WatchClient] didReceiveMessage decoded control=\(control)")
+
+        Task { @MainActor in
+            WatchWorkoutManager.shared.handle(control)
+        }
     }
 }

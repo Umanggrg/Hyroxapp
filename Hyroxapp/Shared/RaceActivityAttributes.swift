@@ -88,6 +88,20 @@ public struct RaceActivityAttributes: ActivityAttributes {
         // when nil — render no HR chip rather than a placeholder.
         public var currentHR: Int?
 
+        // Current HR zone (1...5) computed on the iOS side from
+        // currentHR + the athlete's max-HR setting. Sent across
+        // pre-computed because (a) the widget would otherwise need
+        // to import the HRZone enum + the user's profile setting,
+        // and (b) it's cheap to compute. Optional because zone is
+        // only meaningful when currentHR is also available.
+        //
+        //   1 = Z1 Recovery       (cool blue)
+        //   2 = Z2 Aerobic        (green)
+        //   3 = Z3 Tempo          (yellow)
+        //   4 = Z4 Threshold      (orange)
+        //   5 = Z5 VO2 Max        (red)
+        public var currentHRZone: Int?
+
         public init(
             phase: Phase,
             timerStart: Date,
@@ -98,7 +112,8 @@ public struct RaceActivityAttributes: ActivityAttributes {
             currentStationIndex: Int,
             totalStations: Int,
             currentStationName: String,
-            currentHR: Int? = nil
+            currentHR: Int? = nil,
+            currentHRZone: Int? = nil
         ) {
             self.phase = phase
             self.timerStart = timerStart
@@ -110,6 +125,7 @@ public struct RaceActivityAttributes: ActivityAttributes {
             self.totalStations = totalStations
             self.currentStationName = currentStationName
             self.currentHR = currentHR
+            self.currentHRZone = currentHRZone
         }
     }
 

@@ -13,7 +13,7 @@ import SwiftUI
 //   • Monthly bar sparkline (12 columns, height = race count)
 //   • Best month + months-active dual callout
 //   • Biggest improving station
-//   • TRAKR wordmark + tagline
+//   • TRAKRR wordmark + tagline
 //
 // Aesthetic: a deeper coral-saturated radial gradient than the
 // monthly card so the year recap feels distinctly "premium / year-
@@ -274,7 +274,7 @@ struct YearlyRecapShareCardView: View {
 
     private var appFooter: some View {
         VStack(spacing: 6) {
-            Text("TRAKR")
+            Text("TRAKRR")
                 .font(.system(size: 11, weight: .heavy))
                 .tracking(2.0)
                 .foregroundStyle(Color.accent)

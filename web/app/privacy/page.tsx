@@ -3,14 +3,14 @@ import Link from "next/link";
 import { Nav } from "@/components/Nav";
 import { Footer } from "@/components/Footer";
 
-// The full Trakr privacy policy. Hosted at /privacy so it can be
+// The full Trakrr privacy policy. Hosted at /privacy so it can be
 // referenced as the canonical URL from App Store Connect, the in-app
 // Settings → Privacy link, and the TestFlight invite. Source of truth
 // is `docs/PRIVACY.md`; if that file changes, update this page too.
 export const metadata: Metadata = {
-  title: "Privacy Policy — Trakr",
+  title: "Privacy Policy — Trakrr",
   description:
-    "How Trakr handles your data. Short version: it doesn't leave your phone.",
+    "How Trakrr handles your data. Short version: it doesn't leave your phone.",
   robots: { index: true, follow: true },
 };
 
@@ -36,7 +36,7 @@ export default function PrivacyPage() {
             <span className="text-accent">leaves your phone.</span>
           </h1>
           <p className="mt-6 text-text-secondary text-lg leading-relaxed">
-            This is a plain-English privacy policy. The short version: Trakr
+            This is a plain-English privacy policy. The short version: Trakrr
             stores your training data on your device. It does not collect,
             transmit, sell, or share your data with anyone.
           </p>
@@ -51,7 +51,7 @@ export default function PrivacyPage() {
           requirements that are easier expressed inline. */}
       <article className="mx-auto max-w-3xl px-6 py-16 sm:py-20 prose-body">
         <Callout>
-          Trakr is an independent app, not affiliated with, endorsed by, or
+          Trakrr is an independent app, not affiliated with, endorsed by, or
           sponsored by HYROX GmbH. &quot;HYROX&quot; is a registered trademark
           of HYROX GmbH; we use it only descriptively to refer to the race
           format athletes train for.
@@ -70,16 +70,16 @@ export default function PrivacyPage() {
 
         <Section number="1" title="Who runs this app">
           <p>
-            Trakr is built and maintained by Umang Gurung (the
+            Trakrr is built and maintained by Umang Gurung (the
             &quot;developer,&quot; &quot;we,&quot; or &quot;us&quot;). It is a
             personal project, not a company, and does not operate any servers,
             accounts, or back-end services at this time.
           </p>
         </Section>
 
-        <Section number="2" title="What data Trakr uses">
+        <Section number="2" title="What data Trakrr uses">
           <p>
-            Trakr is a fitness companion for hybrid-fitness athletes. To do its
+            Trakrr is a fitness companion for hybrid-fitness athletes. To do its
             job, it works with the following kinds of information — all of
             which stay on your device unless you explicitly export or share
             them:
@@ -98,15 +98,15 @@ export default function PrivacyPage() {
             </li>
             <li>
               <strong>HealthKit data you allow.</strong> When you grant access,
-              Trakr reads your heart rate (during a race and as per-station
+              Trakrr reads your heart rate (during a race and as per-station
               summary statistics) and your active-energy-burned (calorie
               estimate per station). Apple HealthKit governs that access; you
               can revoke it at any time in <em>Settings → Privacy &amp;
-              Security → Health → Trakr</em>.
+              Security → Health → Trakrr</em>.
             </li>
             <li>
               <strong>Photos you attach.</strong> When you add a photo to a
-              race, Trakr uses the iOS PhotosPicker to receive that single
+              race, Trakrr uses the iOS PhotosPicker to receive that single
               photo. The photo is stored alongside the race in local storage.
               We do not access any other photos in your library.
             </li>
@@ -155,24 +155,24 @@ export default function PrivacyPage() {
           </p>
           <ul>
             <li>
-              Trakr uses HealthKit <strong>only</strong> to support the
+              Trakrr uses HealthKit <strong>only</strong> to support the
               features in §2 (read your heart rate and active-energy-burned
               values, and write completed races back to Health as workouts so
               they appear alongside your other Apple Fitness data).
             </li>
             <li>
-              Trakr does <strong>not</strong> use HealthKit data for
+              Trakrr does <strong>not</strong> use HealthKit data for
               advertising, marketing, or other use-based data mining.
             </li>
             <li>
-              Trakr does <strong>not</strong> disclose HealthKit data to any
+              Trakrr does <strong>not</strong> disclose HealthKit data to any
               third party.
             </li>
             <li>HealthKit data never leaves your device.</li>
           </ul>
           <p>
             You can revoke HealthKit permissions at any time in <em>iOS
-            Settings → Privacy &amp; Security → Health → Trakr</em>. The app
+            Settings → Privacy &amp; Security → Health → Trakrr</em>. The app
             continues to work without HealthKit; heart rate / calorie fields
             simply remain blank for new races.
           </p>
@@ -187,7 +187,7 @@ export default function PrivacyPage() {
             involved.
           </p>
           <p>
-            If you enable notifications, Trakr uses Apple&apos;s local
+            If you enable notifications, Trakrr uses Apple&apos;s local
             notification system to remind you about training streaks and
             upcoming race events. These notifications are scheduled on-device.
             We do <strong>not</strong> send push notifications from any
@@ -201,7 +201,7 @@ export default function PrivacyPage() {
             profile) offer a &quot;Share&quot; button that renders a portable
             PNG image of your data. When you tap that button, you control where
             the image goes — it is handed off to iOS&apos;s standard share
-            sheet. Trakr does not transmit a copy elsewhere.
+            sheet. Trakrr does not transmit a copy elsewhere.
           </p>
         </Section>
 
@@ -213,7 +213,7 @@ export default function PrivacyPage() {
           <ul>
             <li>SwiftData store inside the app&apos;s sandbox container.</li>
             <li>
-              Apple Health (only the workouts you let Trakr write back).
+              Apple Health (only the workouts you let Trakrr write back).
             </li>
             <li>
               Standard iOS application backups via iCloud / Finder, which are
@@ -230,7 +230,7 @@ export default function PrivacyPage() {
 
         <Section number="8" title="Future cloud sync">
           <p>
-            A future version of Trakr will offer optional cloud sync (planned
+            A future version of Trakrr will offer optional cloud sync (planned
             via Supabase) so the same account can be used across multiple
             devices and to support social features. <strong>That capability
             is not active in the current version.</strong> When it ships, this
@@ -242,7 +242,7 @@ export default function PrivacyPage() {
 
         <Section number="9" title="Children">
           <p>
-            Trakr is not directed to children under 13 (or the equivalent
+            Trakrr is not directed to children under 13 (or the equivalent
             minimum age in your jurisdiction). If you are a parent or guardian
             and believe a child has used the app, you can simply uninstall it;
             no remote data exists to be deleted.
@@ -251,7 +251,7 @@ export default function PrivacyPage() {
 
         <Section number="10" title="Your rights">
           <p>
-            Because Trakr does not transmit your data anywhere, the practical
+            Because Trakrr does not transmit your data anywhere, the practical
             mechanism for exercising rights like access, deletion, or
             portability is the iOS device itself:
           </p>
@@ -277,7 +277,7 @@ export default function PrivacyPage() {
 
         <Section number="11" title="Security">
           <p>
-            Trakr relies on the security guarantees of iOS — sandboxed file
+            Trakrr relies on the security guarantees of iOS — sandboxed file
             storage, Data Protection class encryption when the device is
             locked, secure enclave for biometrics. We do not attempt to bypass
             or weaken these protections.
@@ -285,7 +285,7 @@ export default function PrivacyPage() {
           <p>
             No system is perfectly secure, and we make no guarantee of
             absolute security. If you become aware of a security issue
-            affecting Trakr, please email{" "}
+            affecting Trakrr, please email{" "}
             <a
               href="mailto:umang.gurung35@gmail.com"
               className="text-text-primary underline underline-offset-4 hover:text-accent transition"
@@ -327,7 +327,7 @@ export default function PrivacyPage() {
             href="/"
             className="inline-flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary transition"
           >
-            <span aria-hidden>←</span> Back to Trakr
+            <span aria-hidden>←</span> Back to Trakrr
           </Link>
         </div>
       </article>

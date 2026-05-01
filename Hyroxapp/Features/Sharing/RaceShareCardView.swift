@@ -431,10 +431,10 @@ struct RaceShareCardView: View {
             Spacer()
 
             // Branded wordmark on the right so the card reads as
-            // unmistakably "from Trakr" when it lands in someone
+            // unmistakably "from Trakrr" when it lands in someone
             // else's feed. Coral over pill for visual weight without
             // shouting.
-            Text("TRAKR")
+            Text("TRAKRR")
                 .font(.system(size: 9, weight: .heavy))
                 .tracking(1.4)
                 .foregroundStyle(Color.accent)

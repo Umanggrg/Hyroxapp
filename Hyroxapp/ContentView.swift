@@ -277,7 +277,7 @@ struct ContentView: View {
         }
     }
 
-    // Route a Trakr deep-link URL. URL host == path determines
+    // Route a Trakrr deep-link URL. URL host == path determines
     // destination. Currently only `trakr://race` exists (used by
     // the Live Activity widgetURL). The host == nil branch covers
     // both `trakr:race` and `trakr://race` because URLComponents

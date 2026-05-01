@@ -50,6 +50,21 @@ final class WatchCompanionService: NSObject {
     // onAction?(action) }` without concurrency warnings.
     var onAction: (@MainActor @Sendable (WatchAction) -> Void)?
 
+    // Callback invoked on MainActor when the Watch publishes a new
+    // heart-rate sample during a race. Set by `RaceView` for the
+    // active-race lifetime; the handler typically forwards the
+    // sample into `RaceViewModel.ingestHeartRate(_:)` which writes
+    // to `currentHeartRateBPM` (the same property the existing
+    // phone-side HR poll writes to, so all downstream consumers —
+    // race screen chip, Live Activity, snapshot publishing to the
+    // duo partner — keep working unchanged).
+    //
+    // When the Watch isn't paired or isn't running the workout
+    // session (no HKWorkoutSession active), this callback simply
+    // never fires and the phone's existing HealthKit-poll path
+    // continues to populate `currentHeartRateBPM` as a fallback.
+    var onHeartRate: (@MainActor @Sendable (WatchHeartRateUpdate) -> Void)?
+
     private override init() {
         super.init()
     }
@@ -121,6 +136,57 @@ final class WatchCompanionService: NSObject {
             print("[WatchCompanion] publish FAILED — \(error.localizedDescription)")
         }
     }
+
+    // Push a workout-lifecycle control to the Watch. Uses
+    // `sendMessage(_:replyHandler:errorHandler:)` (not
+    // `updateApplicationContext`) because:
+    //   - These are discrete events that should fire promptly. A
+    //     delayed `startWorkout` would mean the workout session
+    //     begins minutes after the race actually started.
+    //   - We don't want stale commands queued and replayed on a
+    //     later launch (could blow away an in-progress workout).
+    //
+    // Bails silently when the Watch app isn't installed or the
+    // session isn't reachable — phone-side race continues unaffected,
+    // and the existing iOS-side HealthKit fallback (poll + write
+    // workout on finish) covers the no-Watch case.
+    func sendControl(_ control: WatchControl) {
+        let session = WCSession.default
+
+        guard session.isWatchAppInstalled else {
+            // No Watch installed — phone-side race continues without
+            // a Watch workout session. Phone's HealthKit polling +
+            // saveRace fallback handles HR + workout persistence in
+            // this case.
+            return
+        }
+
+        guard session.activationState == .activated else {
+            print("[WatchCompanion] sendControl SKIPPED — not activated")
+            return
+        }
+
+        guard session.isReachable else {
+            // Reachable means the watch app is reachable (typically
+            // foregrounded or with a recent app session). For
+            // workout lifecycle commands, immediate delivery is
+            // strongly preferred over queued — a `startWorkout`
+            // delivered 5 minutes late is worse than not delivered.
+            // We log + drop. If this becomes a real issue, fall
+            // through to `transferUserInfo` for queued delivery.
+            print("[WatchCompanion] sendControl SKIPPED — watch not reachable control=\(control)")
+            return
+        }
+
+        session.sendMessage(
+            control.toDictionary(),
+            replyHandler: nil,
+            errorHandler: { error in
+                print("[WatchCompanion] sendControl FAILED — \(error.localizedDescription)")
+            }
+        )
+        print("[WatchCompanion] sendControl dispatched control=\(control)")
+    }
 }
 
 // MARK: - WCSessionDelegate
@@ -160,29 +226,46 @@ extension WatchCompanionService: WCSessionDelegate {
         WCSession.default.activate()
     }
 
-    // Watch → iPhone action receiver. Fired when the Watch calls
-    // `sendMessage(_:...)` with a payload that decodes into a WatchAction.
-    // Decodes on the background queue, then hops to MainActor to invoke
-    // the callback (which will typically mutate the race view model).
+    // Watch → iPhone message receiver. Fired when the Watch calls
+    // `sendMessage(_:...)`. Two payload types flow over this channel:
     //
-    // This version has no replyHandler parameter — the Watch sends
-    // actions fire-and-forget. If we later need acknowledgements
-    // (e.g. "did the phone actually advance?"), we'd add a paired
-    // delegate method with a replyHandler.
+    //   • WatchAction — user intent ("advance to next station") from
+    //     the Watch's race screen buttons.
+    //   • WatchHeartRateUpdate — live HR samples from the Watch's
+    //     HKLiveWorkoutBuilder, throttled to ~1Hz.
+    //
+    // Disambiguated by the dictionary's `kind` / `action` discriminator
+    // keys. Decoded on the background queue, then dispatched to the
+    // appropriate MainActor callback.
+    //
+    // Fire-and-forget — no replyHandler. If we later need
+    // acknowledgements (e.g. "did the phone actually advance?"),
+    // we'd add a paired delegate method with a replyHandler.
     nonisolated func session(
         _ session: WCSession,
         didReceiveMessage message: [String: Any]
     ) {
         print("[WatchCompanion] didReceiveMessage FIRED — keys: \(message.keys.sorted())")
-        guard let action = WatchAction(dictionary: message) else {
-            print("[WatchCompanion] didReceiveMessage — failed to decode action, ignoring")
+
+        // HR updates first because they're the high-frequency case —
+        // the typecast attempt is cheap and most messages during a
+        // race will be HR samples.
+        if let hrUpdate = WatchHeartRateUpdate(dictionary: message) {
+            Task { @MainActor in
+                Self.shared.onHeartRate?(hrUpdate)
+            }
             return
         }
 
-        Task { @MainActor in
-            print("[WatchCompanion] dispatching action=\(action) — handler \(Self.shared.onAction == nil ? "NOT set" : "set")")
-            Self.shared.onAction?(action)
+        if let action = WatchAction(dictionary: message) {
+            Task { @MainActor in
+                print("[WatchCompanion] dispatching action=\(action) — handler \(Self.shared.onAction == nil ? "NOT set" : "set")")
+                Self.shared.onAction?(action)
+            }
+            return
         }
+
+        print("[WatchCompanion] didReceiveMessage — unrecognized payload, ignoring")
     }
 }
 

@@ -12,7 +12,7 @@ import SwiftUI
 //   • 2×2 grid of stat tiles: races, total time, PBs, streak peak
 //   • Biggest mover callout (when applicable)
 //   • Hero number: fastest race or fastest run for the month
-//   • TRAKR wordmark footer
+//   • TRAKRR wordmark footer
 //
 // Designed to feel different from the per-race share card —
 // celebratory + reflective rather than data-dense + competitive.
@@ -202,7 +202,7 @@ struct MonthlyRecapShareCardView: View {
 
     private var appFooter: some View {
         VStack(spacing: 6) {
-            Text("TRAKR")
+            Text("TRAKRR")
                 .font(.system(size: 11, weight: .heavy))
                 .tracking(2.0)
                 .foregroundStyle(Color.accent)

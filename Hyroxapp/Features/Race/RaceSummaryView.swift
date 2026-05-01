@@ -514,14 +514,29 @@ struct RaceSummaryView: View {
                     .foregroundStyle(Color.textSecondary)
                 // HR subtitle appears only when HealthKit had samples
                 // in the segment window. Three shapes:
-                //   both avg + max  →  "168 / 184 bpm"
-                //   only avg        →  "168 bpm"
+                //   both avg + max  →  "168 / 184 bpm"  + "Z3" tag
+                //   only avg        →  "168 bpm"        + "Z3" tag
                 //   neither         →  row has just the time, no subtitle
+                //
+                // The trailing Z<n> tag is tinted in the canonical
+                // HR-zone color (Z1 blue → Z5 red) so the athlete
+                // can read intensity at a glance, not just BPM number.
+                // Same palette as HRZonesView + the live HR chip on
+                // RaceView, so the same zone reads the same color
+                // across surfaces.
                 if let hrText = Self.heartRateSubtitle(for: split) {
-                    Text(hrText)
-                        .font(.caption2)
-                        .monospacedDigit()
-                        .foregroundStyle(Color.accentDim)
+                    HStack(spacing: 5) {
+                        Text(hrText)
+                            .font(.caption2)
+                            .monospacedDigit()
+                            .foregroundStyle(Color.accentDim)
+                        if let avg = split.heartRateAvgBPM {
+                            let zone = HRZone.zone(for: avg, maxBPM: maxHeartRate)
+                            Text("Z\(zone.rawValue)")
+                                .font(.caption2.weight(.heavy))
+                                .foregroundStyle(zone.color)
+                        }
+                    }
                 }
             }
             // Edit chevron — small visual cue that the row is

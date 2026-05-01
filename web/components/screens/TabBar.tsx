@@ -1,4 +1,4 @@
-// iOS tab bar mock — three tabs matching Trakr's actual tab
+// iOS tab bar mock — three tabs matching Trakrr's actual tab
 // layout (Home / History / Profile). The active tab is `accent`.
 type Tab = "home" | "history" | "profile";
 

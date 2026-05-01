@@ -14,7 +14,7 @@ import SwiftUI
 //   • 4-tile stat grid: races, PB time, PBs set count, streak peak
 //   • HYROX Performance pillar strip (Strength / Endurance / Engine)
 //   • Top earned badge callout (when athlete has any badges)
-//   • TRAKR wordmark footer
+//   • TRAKRR wordmark footer
 //
 // Hidden gracefully on cold start (no races, no badges) — every
 // section that depends on data is conditional. Worst case the card
@@ -283,7 +283,7 @@ struct ProfileShareCardView: View {
 
     private var appFooter: some View {
         VStack(spacing: 6) {
-            Text("TRAKR")
+            Text("TRAKRR")
                 .font(.system(size: 11, weight: .heavy))
                 .tracking(2.0)
                 .foregroundStyle(Color.accent)

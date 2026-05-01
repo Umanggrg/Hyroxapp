@@ -24,7 +24,7 @@ export function FounderNote() {
             <span className="text-text-tertiary">"</span>
           </p>
           <p className="text-text-secondary mt-6 sm:mt-7 text-base sm:text-lg leading-relaxed max-w-2xl">
-            I&apos;m Umang. I train HYROX, I race the Doubles format, and Trakr
+            I&apos;m Umang. I train HYROX, I race the Doubles format, and Trakrr
             is what I built — evenings and weekends, native iOS and watchOS,
             pair-programmed end-to-end with Claude. Every screen is something
             I open during my own sessions.

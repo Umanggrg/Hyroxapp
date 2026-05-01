@@ -124,7 +124,7 @@ export function IntroAnimation() {
       ref={sectionRef}
       className="relative bg-background"
       style={{ height: isMobile ? "220vh" : "300vh" }}
-      aria-label="Trakr product introduction"
+      aria-label="Trakrr product introduction"
     >
       {/* Sticky stage — pins for 100vh while the section's slack
           scrolls past beneath it. */}

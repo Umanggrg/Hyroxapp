@@ -615,11 +615,22 @@ struct RaceDetailView: View {
                 // HR subtitle format is centralized on RaceSummaryView
                 // so both surfaces stay in sync. Returns nil when no
                 // HR data is available; UI omits the line in that case.
+                // Trailing Z<n> tag is tinted in the canonical HR-zone
+                // color (Z1 blue → Z5 red) so intensity reads at a
+                // glance.
                 if let hrText = RaceSummaryView.heartRateSubtitle(for: split) {
-                    Text(hrText)
-                        .font(.caption2)
-                        .monospacedDigit()
-                        .foregroundStyle(Color.accentDim)
+                    HStack(spacing: 5) {
+                        Text(hrText)
+                            .font(.caption2)
+                            .monospacedDigit()
+                            .foregroundStyle(Color.accentDim)
+                        if let avg = split.heartRateAvgBPM {
+                            let zone = HRZone.zone(for: avg, maxBPM: maxHeartRate)
+                            Text("Z\(zone.rawValue)")
+                                .font(.caption2.weight(.heavy))
+                                .foregroundStyle(zone.color)
+                        }
+                    }
                 }
                 // Delta vs prior best. Non-PB splits get a warning-
                 // colored "+X:XX slower" readout; PB splits get a
