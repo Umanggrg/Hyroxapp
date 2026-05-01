@@ -175,6 +175,67 @@ final class HealthKitService {
         }
     }
 
+    // MARK: - Point-in-time heart rate
+
+    // Fetch the heart-rate sample closest to a specific moment in time.
+    // Used by RaceViewModel to capture station-boundary HR values:
+    //   • HR at the moment a station started (entry)
+    //   • HR at the moment a station ended (end)
+    //   • HR 30s after the station ended (recovery 30s)
+    //   • HR 60s after the station ended (recovery 60s)
+    //
+    // Strategy: look for samples in a small window around the target
+    // (±tolerance seconds), pick the one with the closest end-date.
+    // If multiple samples land in the window, the closest wins; if
+    // none, return nil so the caller can leave the field empty.
+    //
+    // tolerance defaults to 10s — wide enough to catch the Watch's
+    // ~1Hz live-workout cadence reliably, narrow enough that the
+    // returned value still represents "HR at that moment" rather
+    // than a far-flung average.
+    //
+    // Returns nil when HealthKit is unavailable, no samples are in
+    // the window, or read access was denied.
+    func heartRate(
+        at target: Date,
+        tolerance: TimeInterval = 10
+    ) async -> Double? {
+        guard isAvailable else { return nil }
+        guard let hrType = HKObjectType.quantityType(forIdentifier: .heartRate) else {
+            return nil
+        }
+
+        let predicate = HKQuery.predicateForSamples(
+            withStart: target.addingTimeInterval(-tolerance),
+            end: target.addingTimeInterval(tolerance),
+            options: []
+        )
+
+        return await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(
+                sampleType: hrType,
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: nil
+            ) { _, samples, _ in
+                guard let samples = samples as? [HKQuantitySample], !samples.isEmpty else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+
+                // Pick the sample with end-date closest to the target.
+                let bpmUnit = HKUnit.count().unitDivided(by: .minute())
+                let closest = samples.min { lhs, rhs in
+                    abs(lhs.endDate.timeIntervalSince(target)) <
+                    abs(rhs.endDate.timeIntervalSince(target))
+                }
+                let bpm = closest?.quantity.doubleValue(for: bpmUnit)
+                continuation.resume(returning: bpm)
+            }
+            store.execute(query)
+        }
+    }
+
     // MARK: - Heart rate read
 
     // Fetch the most recent heart-rate sample from HealthKit, if one

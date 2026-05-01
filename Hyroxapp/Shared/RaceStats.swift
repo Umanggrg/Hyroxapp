@@ -472,6 +472,153 @@ enum RaceStats {
         }
     }
 
+    // Race-wide average heart rate. Duration-weighted across splits
+    // that have HR data — a 5-minute station with avg 170 contributes
+    // more to the race average than a 30-second station with avg 140.
+    // This matches what an athlete intuitively means by "my race
+    // average HR was X" (time-weighted, not equal-weighted).
+    //
+    // Returns nil when no splits have HR data — the UI shows nothing
+    // rather than a misleading 0 or an over-confident average from a
+    // single segment.
+    static func averageHeartRate(for race: Race) -> Double? {
+        var weightedSum: Double = 0
+        var totalDuration: TimeInterval = 0
+        for split in race.splits {
+            guard let avg = split.heartRateAvgBPM, split.duration > 0 else { continue }
+            weightedSum += avg * split.duration
+            totalDuration += split.duration
+        }
+        guard totalDuration > 0 else { return nil }
+        return weightedSum / totalDuration
+    }
+
+    // Race-wide peak heart rate. Max of all splits' max HR readings —
+    // since each split's `heartRateMaxBPM` is already the peak in
+    // that segment's time window, the race peak is simply the max
+    // across them.
+    //
+    // Returns nil when no splits have max HR data.
+    static func peakHeartRate(for race: Race) -> Double? {
+        let maxes = race.splits.compactMap { $0.heartRateMaxBPM }
+        return maxes.max()
+    }
+
+    // MARK: - Recovery score
+
+    // Race-wide recovery quality score. Aggregates per-station HR
+    // drops in the 30s + 60s after each segment ends, then
+    // categorizes the athlete's typical drop into a four-bucket
+    // recovery quality scale.
+    //
+    // The 30s window is the more discriminating signal — fast
+    // post-segment HR drop within 30s reflects parasympathetic
+    // tone and aerobic conditioning. The 60s number is included
+    // for the slower-decay tail. Both averages are computed
+    // independently across whichever splits have non-nil
+    // recovery samples.
+    //
+    // Categories anchored to HYROX-realistic thresholds:
+    //   • excellent: ≥25 bpm drop in 30s — elite-level conditioning
+    //   • good:      15–25 bpm — solid race-fit
+    //   • average:   10–15 bpm — typical recreational athlete
+    //   • slow:      <10 bpm — conditioning gap; transition under
+    //                 fatigue probably hurt your finish
+    //
+    // Returns nil when fewer than 4 splits have recovery30 data —
+    // a single noisy sample can swing the average wildly. Four
+    // splits is the threshold where a mean starts feeling
+    // representative without artificially excluding races where
+    // the Watch dropped a couple of recovery captures.
+    struct RecoveryScore: Equatable {
+        let averageDrop30s: Double
+        let averageDrop60s: Double?
+        let category: Category
+        let stationsCounted: Int
+
+        enum Category: String, Equatable {
+            case excellent
+            case good
+            case average
+            case slow
+
+            var displayName: String {
+                switch self {
+                case .excellent: return "Excellent"
+                case .good:      return "Good"
+                case .average:   return "Average"
+                case .slow:      return "Slow"
+                }
+            }
+
+            // Coaching cue per category — used by the insight card
+            // when this category is excellent or slow. Average and
+            // good fire no insight (silence on the unactionable
+            // middle).
+            var coachingCue: String {
+                switch self {
+                case .excellent:
+                    return "Excellent conditioning — recovery between stations is elite-level."
+                case .good:
+                    return "Good recovery — race-fit conditioning."
+                case .average:
+                    return "Average recovery — room to build the engine."
+                case .slow:
+                    return "Slow recovery — conditioning gap. Add easy-pace volume."
+                }
+            }
+        }
+
+        // Threshold table: which 30s-drop range maps to which
+        // category. Centralized here so the insight, hero readout,
+        // and any future surface use the same boundaries.
+        static func category(forDrop30s drop: Double) -> Category {
+            switch drop {
+            case 25...:    return .excellent
+            case 15..<25:  return .good
+            case 10..<15:  return .average
+            default:       return .slow
+            }
+        }
+    }
+
+    static func recoveryScore(for race: Race) -> RecoveryScore? {
+        // Compute per-split drops only when both endHR and
+        // recovery30s are present — without endHR we can't compute
+        // the drop. Falling back to peakHR would inflate the drop
+        // (peak is usually higher than endHR in HYROX since intensity
+        // crests mid-station), making recovery look better than it
+        // actually was. Honesty over flattery.
+        let drops30: [Double] = race.splits.compactMap { split in
+            guard let endHR = split.heartRateEndBPM,
+                  let r30 = split.heartRateRecovery30sBPM else { return nil }
+            return endHR - r30
+        }
+        let drops60: [Double] = race.splits.compactMap { split in
+            guard let endHR = split.heartRateEndBPM,
+                  let r60 = split.heartRateRecovery60sBPM else { return nil }
+            return endHR - r60
+        }
+
+        // Need at least 4 stations with recovery data — single-
+        // segment-noise tolerance. Below this, an aberrant sample
+        // (Watch off wrist for one station, etc.) skews the mean
+        // enough to mislead.
+        guard drops30.count >= 4 else { return nil }
+
+        let avg30 = drops30.reduce(0, +) / Double(drops30.count)
+        let avg60: Double? = drops60.isEmpty
+            ? nil
+            : drops60.reduce(0, +) / Double(drops60.count)
+
+        return RecoveryScore(
+            averageDrop30s: avg30,
+            averageDrop60s: avg60,
+            category: RecoveryScore.category(forDrop30s: avg30),
+            stationsCounted: drops30.count
+        )
+    }
+
     // Per-split effort score — same intensity-weighted-minutes
     // formula as the whole-race version, but applied to a single
     // segment. Used by StationDetailView's physiology row + the

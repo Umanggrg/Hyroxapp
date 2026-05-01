@@ -485,19 +485,30 @@ struct RaceEngine: Sendable {
     mutating func setSegmentStats(
         heartRateAvg: Double?,
         heartRateMax: Double?,
+        heartRateEntry: Double? = nil,
+        heartRateEnd: Double? = nil,
         activeCalories: Double?,
         atSplitIndex index: Int
     ) {
+        // Helper to apply the patch in any state. Capturing entry/end
+        // alongside avg/max lets the four boundary samples and the
+        // segment-window aggregate land in the same Split mutation.
+        func patch(_ split: Split) -> Split {
+            split.withSegmentStats(
+                heartRateAvg: heartRateAvg,
+                heartRateMax: heartRateMax,
+                heartRateEntry: heartRateEntry,
+                heartRateEnd: heartRateEnd,
+                activeCalories: activeCalories
+            )
+        }
+
         switch state {
         case .notStarted:
             return
         case .inProgress(let startedAt, let segmentStart, var splits):
             guard splits.indices.contains(index) else { return }
-            splits[index] = splits[index].withSegmentStats(
-                heartRateAvg: heartRateAvg,
-                heartRateMax: heartRateMax,
-                activeCalories: activeCalories
-            )
+            splits[index] = patch(splits[index])
             state = .inProgress(
                 startedAt: startedAt,
                 currentSegmentStartedAt: segmentStart,
@@ -509,11 +520,7 @@ struct RaceEngine: Sendable {
             // still in flight). Patch through unchanged — pausing
             // doesn't invalidate already-completed splits' stats.
             guard splits.indices.contains(index) else { return }
-            splits[index] = splits[index].withSegmentStats(
-                heartRateAvg: heartRateAvg,
-                heartRateMax: heartRateMax,
-                activeCalories: activeCalories
-            )
+            splits[index] = patch(splits[index])
             state = .paused(
                 startedAt: startedAt,
                 currentSegmentStartedAt: segmentStart,
@@ -525,11 +532,7 @@ struct RaceEngine: Sendable {
             // batch from the just-completed segment may resolve
             // while the user is in roxzone. Patch through.
             guard splits.indices.contains(index) else { return }
-            splits[index] = splits[index].withSegmentStats(
-                heartRateAvg: heartRateAvg,
-                heartRateMax: heartRateMax,
-                activeCalories: activeCalories
-            )
+            splits[index] = patch(splits[index])
             state = .inRoxzone(
                 startedAt: startedAt,
                 splits: splits,
@@ -537,11 +540,68 @@ struct RaceEngine: Sendable {
             )
         case .finished(let startedAt, let endedAt, var splits):
             guard splits.indices.contains(index) else { return }
-            splits[index] = splits[index].withSegmentStats(
-                heartRateAvg: heartRateAvg,
-                heartRateMax: heartRateMax,
-                activeCalories: activeCalories
+            splits[index] = patch(splits[index])
+            state = .finished(
+                startedAt: startedAt,
+                endedAt: endedAt,
+                splits: splits
             )
+        }
+    }
+
+    // Patch the split at the given index with post-segment recovery
+    // HR samples (30s and 60s after segment end). Called by the
+    // delayed Task in RaceViewModel.attachSegmentStats — fires ~70s
+    // after a segment completes, by which point HealthKit has had
+    // time to receive the Watch's recovery-window samples.
+    //
+    // State-symmetric with setSegmentStats — recovery patches can
+    // land in any race state including .finished (most common: the
+    // final station's recovery window completes after the user has
+    // already crossed the finish line).
+    mutating func setRecoveryStats(
+        heartRateRecovery30s: Double?,
+        heartRateRecovery60s: Double?,
+        atSplitIndex index: Int
+    ) {
+        func patch(_ split: Split) -> Split {
+            split.withRecoveryStats(
+                heartRateRecovery30s: heartRateRecovery30s,
+                heartRateRecovery60s: heartRateRecovery60s
+            )
+        }
+
+        switch state {
+        case .notStarted:
+            return
+        case .inProgress(let startedAt, let segmentStart, var splits):
+            guard splits.indices.contains(index) else { return }
+            splits[index] = patch(splits[index])
+            state = .inProgress(
+                startedAt: startedAt,
+                currentSegmentStartedAt: segmentStart,
+                splits: splits
+            )
+        case .paused(let startedAt, let segmentStart, var splits, let pausedAt):
+            guard splits.indices.contains(index) else { return }
+            splits[index] = patch(splits[index])
+            state = .paused(
+                startedAt: startedAt,
+                currentSegmentStartedAt: segmentStart,
+                splits: splits,
+                pausedAt: pausedAt
+            )
+        case .inRoxzone(let startedAt, var splits, let roxzoneStart):
+            guard splits.indices.contains(index) else { return }
+            splits[index] = patch(splits[index])
+            state = .inRoxzone(
+                startedAt: startedAt,
+                splits: splits,
+                roxzoneStartedAt: roxzoneStart
+            )
+        case .finished(let startedAt, let endedAt, var splits):
+            guard splits.indices.contains(index) else { return }
+            splits[index] = patch(splits[index])
             state = .finished(
                 startedAt: startedAt,
                 endedAt: endedAt,

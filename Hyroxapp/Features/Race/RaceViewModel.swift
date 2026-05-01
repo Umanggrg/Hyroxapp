@@ -702,31 +702,80 @@ final class RaceViewModel {
         Task { @MainActor [weak self] in
             guard let self else { return }
 
-            // Run both HealthKit queries in parallel — HR stats and
-            // calories sum are independent, so awaiting them
-            // sequentially would just double the wall-clock latency.
+            // Run all queries in parallel — HR aggregate, entry HR,
+            // end HR, and calories sum are independent. Sequential
+            // awaits would 4x the wall-clock latency before the
+            // station's stats appear on screen.
             async let heartRate = HealthKitService.shared.heartRateStats(
                 from: segmentStart,
                 to: segmentEnd
             )
+            async let entryHR = HealthKitService.shared.heartRate(at: segmentStart)
+            async let endHR = HealthKitService.shared.heartRate(at: segmentEnd)
             async let calories = HealthKitService.shared.activeCalories(
                 from: segmentStart,
                 to: segmentEnd
             )
             let hr = await heartRate
+            let entry = await entryHR
+            let end = await endHR
             let kcal = await calories
 
             // Skip the persist round-trip if HealthKit had nothing
             // for this segment — common for indoor sessions without
             // a Watch streaming any of these metrics.
-            guard hr.avg != nil || hr.max != nil || kcal != nil else {
+            guard hr.avg != nil || hr.max != nil || entry != nil || end != nil || kcal != nil else {
                 return
             }
 
             self.engine.setSegmentStats(
                 heartRateAvg: hr.avg,
                 heartRateMax: hr.max,
+                heartRateEntry: entry,
+                heartRateEnd: end,
                 activeCalories: kcal,
+                atSplitIndex: index
+            )
+            self.persistActiveRace()
+        }
+
+        // Schedule a delayed recovery-HR capture. The 30s and 60s
+        // post-segment samples don't exist at advance-time — we wait
+        // 70 seconds (60s + 10s buffer for HealthKit to receive the
+        // Watch's last live-workout sample) then query for HR at
+        // segmentEnd+30 and segmentEnd+60. Patches the split via a
+        // separate engine.setRecoveryStats call so the original
+        // setSegmentStats above can land immediately without
+        // blocking on a 70s sleep.
+        //
+        // Fire-and-forget Task — if the user kills the app or starts
+        // a new race within the window, the Task is cancelled and
+        // recovery data simply doesn't get captured for that split.
+        // Acceptable: missing recovery data is harmless (UI hides
+        // the field), and forcing the capture to complete would
+        // require background-mode plumbing for marginal benefit.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(70))
+            guard let self else { return }
+            guard self.engine.splits.indices.contains(index) else { return }
+
+            async let recovery30 = HealthKitService.shared.heartRate(
+                at: segmentEnd.addingTimeInterval(30)
+            )
+            async let recovery60 = HealthKitService.shared.heartRate(
+                at: segmentEnd.addingTimeInterval(60)
+            )
+            let r30 = await recovery30
+            let r60 = await recovery60
+
+            // Skip the persist if HealthKit had nothing — common
+            // when the user finished their workout and took the
+            // Watch off, or when phone reachability dropped.
+            guard r30 != nil || r60 != nil else { return }
+
+            self.engine.setRecoveryStats(
+                heartRateRecovery30s: r30,
+                heartRateRecovery60s: r60,
                 atSplitIndex: index
             )
             self.persistActiveRace()

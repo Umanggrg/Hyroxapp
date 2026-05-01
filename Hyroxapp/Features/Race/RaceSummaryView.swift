@@ -134,6 +134,35 @@ struct RaceSummaryView: View {
                                 .foregroundStyle(Color.accent)
                         }
 
+                        // Race-wide HR aggregate — duration-weighted
+                        // avg + peak across the whole race. Silent
+                        // when no HR data was captured (matches the
+                        // per-station HR rows' missing-data
+                        // treatment).
+                        if let race = viewModel.activeRace,
+                           let avgHR = RaceStats.averageHeartRate(for: race),
+                           let peakHR = RaceStats.peakHeartRate(for: race) {
+                            Text("HR \(Int(avgHR.rounded())) avg · \(Int(peakHR.rounded())) peak")
+                                .font(.caption.weight(.semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(Color.accentDim)
+                        }
+
+                        // Recovery score — 30s post-segment HR drop
+                        // averaged across all stations with capture.
+                        // The HYROX-specific conditioning signal:
+                        // tight transitions are about getting your
+                        // HR back under control between efforts.
+                        // Silent when fewer than 4 stations have
+                        // recovery data captured.
+                        if let race = viewModel.activeRace,
+                           let recovery = RaceStats.recoveryScore(for: race) {
+                            Text("Recovery -\(Int(recovery.averageDrop30s.rounded())) bpm avg · \(recovery.category.displayName)")
+                                .font(.caption.weight(.semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(Color.accentDim)
+                        }
+
                     // Target outcome — only shown if the athlete set a
                     // goal. "Goal met" + green delta when beaten,
                     // warning delta when missed. Centralized in
@@ -532,8 +561,14 @@ struct RaceSummaryView: View {
                             .foregroundStyle(Color.accentDim)
                         if let avg = split.heartRateAvgBPM {
                             let zone = HRZone.zone(for: avg, maxBPM: maxHeartRate)
-                            Text("Z\(zone.rawValue)")
+                            // HYROX-coded label ("Race" / "Hard" /
+                            // "Redline") instead of the generic Zn —
+                            // reads as coaching guidance, not a
+                            // training-plan abstraction. Same zone
+                            // color so visual continuity is preserved.
+                            Text(zone.hyroxLabel.uppercased())
                                 .font(.caption2.weight(.heavy))
+                                .tracking(0.4)
                                 .foregroundStyle(zone.color)
                         }
                     }

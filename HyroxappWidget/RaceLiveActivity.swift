@@ -354,8 +354,8 @@ private struct LockScreenView: View {
                 .font(.system(size: 9, weight: .heavy))
                 .monospacedDigit()
                 .foregroundStyle(.white.opacity(0.85))
-            if let zone {
-                Text("Z\(zone)")
+            if let zone, let label = hrZoneHyroxLabel(zone) {
+                Text(label.uppercased())
                     .font(.system(size: 9, weight: .heavy))
                     .tracking(0.4)
                     .foregroundStyle(hrZoneColor(zone))
@@ -382,6 +382,23 @@ private struct LockScreenView: View {
         case 4: return Color.warning                              // orange
         case 5: return Color.accent                               // red
         default: return Color.accent                              // fallback
+        }
+    }
+
+    // Map the pre-computed HR zone (1...5) to its HYROX-coded label.
+    // Mirrors HRZone.hyroxLabel on the iOS side; duplicated here
+    // because the widget target doesn't include HRZone.swift in its
+    // member list. Five short labels chosen to fit the same lock-
+    // screen / Dynamic Island space as the previous "Z<n>" tag while
+    // reading as coaching guidance instead of training-plan jargon.
+    private func hrZoneHyroxLabel(_ zone: Int?) -> String? {
+        switch zone {
+        case 1: return "Easy"
+        case 2: return "Steady"
+        case 3: return "Race"
+        case 4: return "Hard"
+        case 5: return "Redline"
+        default: return nil
         }
     }
 

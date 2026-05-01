@@ -28,6 +28,37 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
     let endedAt: Date
     let heartRateAvgBPM: Double?
     let heartRateMaxBPM: Double?
+
+    // Station-boundary HR samples. Where avg/max characterize the
+    // segment as a whole, these characterize the *transitions* —
+    // the HYROX-specific signal that a sled push was easier than
+    // the previous run was hard, or that you started a station
+    // already redlined.
+    //
+    //   • heartRateEntryBPM — HR at (or closest to) startedAt.
+    //     "How fatigued were you when you began this station?"
+    //   • heartRateEndBPM — HR at (or closest to) endedAt.
+    //     "Where did your HR end up by the time you finished?"
+    //   • heartRateRecovery30sBPM — HR sample 30s after endedAt.
+    //   • heartRateRecovery60sBPM — HR sample 60s after endedAt.
+    //     "How fast did your HR drop in the transition?"
+    //
+    // Recovery samples are captured by a delayed Task that fires
+    // 70s after segment end (60s + 10s buffer for HealthKit to
+    // catch up). All four are optional because:
+    //   1. The race may have ended before the recovery window
+    //      elapsed (final station has no follow-up segment;
+    //      recovery samples still meaningful as cooldown HR).
+    //   2. The user backgrounded / killed the app during the
+    //      recovery window, cancelling the delayed Task.
+    //   3. Older races persisted before these fields existed —
+    //      Codable decodes missing keys as nil, so old races
+    //      simply don't carry this data.
+    let heartRateEntryBPM: Double?
+    let heartRateEndBPM: Double?
+    let heartRateRecovery30sBPM: Double?
+    let heartRateRecovery60sBPM: Double?
+
     // Active calories burned during this segment, queried from
     // HealthKit's `.activeEnergyBurned` cumulative sum over the
     // segment window. Optional for the same reasons HR is optional:
@@ -96,6 +127,10 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
         case endedAt
         case heartRateAvgBPM = "heartRateBPM"
         case heartRateMaxBPM
+        case heartRateEntryBPM
+        case heartRateEndBPM
+        case heartRateRecovery30sBPM
+        case heartRateRecovery60sBPM
         case activeCaloriesKcal
         case weightKg
         case repsCompleted
@@ -104,13 +139,19 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
     }
 
     // Convenience initializer preserving the pre-HR API so all existing
-    // call sites (engine, tests) keep working unchanged.
+    // call sites (engine, tests) keep working unchanged. The new
+    // boundary-HR fields all default to nil so existing call sites
+    // that don't know about them stay source-compatible.
     init(
         station: Station,
         startedAt: Date,
         endedAt: Date,
         heartRateAvgBPM: Double? = nil,
         heartRateMaxBPM: Double? = nil,
+        heartRateEntryBPM: Double? = nil,
+        heartRateEndBPM: Double? = nil,
+        heartRateRecovery30sBPM: Double? = nil,
+        heartRateRecovery60sBPM: Double? = nil,
         activeCaloriesKcal: Double? = nil,
         weightKg: Double? = nil,
         repsCompleted: Int? = nil,
@@ -122,6 +163,10 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
         self.endedAt = endedAt
         self.heartRateAvgBPM = heartRateAvgBPM
         self.heartRateMaxBPM = heartRateMaxBPM
+        self.heartRateEntryBPM = heartRateEntryBPM
+        self.heartRateEndBPM = heartRateEndBPM
+        self.heartRateRecovery30sBPM = heartRateRecovery30sBPM
+        self.heartRateRecovery60sBPM = heartRateRecovery60sBPM
         self.activeCaloriesKcal = activeCaloriesKcal
         self.weightKg = weightKg
         self.repsCompleted = repsCompleted
@@ -134,9 +179,16 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
     // patch the just-completed split with all the segment-window
     // metrics that are HR/HK-derived. Manual-entry fields
     // (weight/reps/RPE) are preserved as-is.
+    //
+    // Entry/end HR are optional because they may not be available
+    // even when avg/max are: HealthKit might have samples in the
+    // segment window for aggregation but no sample at the exact
+    // start or end timestamp.
     func withSegmentStats(
         heartRateAvg: Double?,
         heartRateMax: Double?,
+        heartRateEntry: Double? = nil,
+        heartRateEnd: Double? = nil,
         activeCalories: Double?
     ) -> Split {
         Split(
@@ -145,7 +197,42 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
             endedAt: endedAt,
             heartRateAvgBPM: heartRateAvg,
             heartRateMaxBPM: heartRateMax,
+            heartRateEntryBPM: heartRateEntry,
+            heartRateEndBPM: heartRateEnd,
+            heartRateRecovery30sBPM: heartRateRecovery30sBPM,
+            heartRateRecovery60sBPM: heartRateRecovery60sBPM,
             activeCaloriesKcal: activeCalories,
+            weightKg: weightKg,
+            repsCompleted: repsCompleted,
+            rpe: rpe,
+            roxzoneSeconds: roxzoneSeconds
+        )
+    }
+
+    // Return a new Split patched with post-segment recovery HR
+    // samples. Called by the delayed Task that fires ~70s after a
+    // segment ends so HealthKit has had time to receive +30s and
+    // +60s samples from the Watch's live workout builder.
+    //
+    // Preserves all other fields including the segment-window
+    // stats already attached by withSegmentStats. Either / both
+    // recovery values may be nil if HealthKit had no sample close
+    // to the target time (Watch out of range, app killed, etc).
+    func withRecoveryStats(
+        heartRateRecovery30s: Double?,
+        heartRateRecovery60s: Double?
+    ) -> Split {
+        Split(
+            station: station,
+            startedAt: startedAt,
+            endedAt: endedAt,
+            heartRateAvgBPM: heartRateAvgBPM,
+            heartRateMaxBPM: heartRateMaxBPM,
+            heartRateEntryBPM: heartRateEntryBPM,
+            heartRateEndBPM: heartRateEndBPM,
+            heartRateRecovery30sBPM: heartRateRecovery30s,
+            heartRateRecovery60sBPM: heartRateRecovery60s,
+            activeCaloriesKcal: activeCaloriesKcal,
             weightKg: weightKg,
             repsCompleted: repsCompleted,
             rpe: rpe,
@@ -172,6 +259,10 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
             endedAt: endedAt,
             heartRateAvgBPM: heartRateAvgBPM,
             heartRateMaxBPM: heartRateMaxBPM,
+            heartRateEntryBPM: heartRateEntryBPM,
+            heartRateEndBPM: heartRateEndBPM,
+            heartRateRecovery30sBPM: heartRateRecovery30sBPM,
+            heartRateRecovery60sBPM: heartRateRecovery60sBPM,
             activeCaloriesKcal: activeCaloriesKcal,
             weightKg: newWeight ?? weightKg,
             repsCompleted: newReps ?? repsCompleted,
@@ -190,6 +281,10 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
             endedAt: endedAt,
             heartRateAvgBPM: heartRateAvgBPM,
             heartRateMaxBPM: heartRateMaxBPM,
+            heartRateEntryBPM: heartRateEntryBPM,
+            heartRateEndBPM: heartRateEndBPM,
+            heartRateRecovery30sBPM: heartRateRecovery30sBPM,
+            heartRateRecovery60sBPM: heartRateRecovery60sBPM,
             activeCaloriesKcal: activeCaloriesKcal,
             weightKg: weightKg,
             repsCompleted: repsCompleted,

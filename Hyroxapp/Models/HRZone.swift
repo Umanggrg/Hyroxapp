@@ -63,6 +63,62 @@ enum HRZone: Int, CaseIterable, Sendable {
         }
     }
 
+    // Short HYROX-coded label — replaces the generic Z1...Z5 lingo
+    // (which is borrowed from cycling/running training literature)
+    // with vocabulary that maps to how athletes actually pace a
+    // HYROX race. "Race" is the sustainable-tempo zone you want to
+    // hold for 90 minutes; "Redline" is where you spend a tactical
+    // 30-second push at sled push then back off.
+    //
+    // Used on the Live Activity HR chip and per-station tag where
+    // brevity matters — fits the same space as "Z3" but reads as
+    // coaching guidance rather than a zone number.
+    var hyroxLabel: String {
+        switch self {
+        case .z1: return "Easy"
+        case .z2: return "Steady"
+        case .z3: return "Race"
+        case .z4: return "Hard"
+        case .z5: return "Redline"
+        }
+    }
+
+    // Three-bucket grouping that maps onto how HYROX racers think
+    // about pacing strategy: below race pace, at race pace, above
+    // race pace. The 5-zone model under the hood preserves precision
+    // for time-in-zone analytics; this band groups them for the
+    // simpler "are you holding race effort right now?" question.
+    //
+    //   • .easy    — Z1 + Z2 (warmup / cooldown / easy days)
+    //   • .race    — Z3      (sustainable HYROX race tempo)
+    //   • .redline — Z4 + Z5 (max-effort tactical pushes only)
+    //
+    // Surfaces in the live HR chip on Watch / Live Activity as a
+    // quick coaching cue ("⚠️ Above race pace" / "✅ Race pace").
+    enum HyroxBand: Sendable {
+        case easy
+        case race
+        case redline
+
+        // Display label for the coarse band — same coaching-vocab
+        // strategy as the per-zone hyroxLabel above.
+        var displayName: String {
+            switch self {
+            case .easy:    return "Easy"
+            case .race:    return "Race Pace"
+            case .redline: return "Redline"
+            }
+        }
+    }
+
+    var hyroxBand: HyroxBand {
+        switch self {
+        case .z1, .z2: return .easy
+        case .z3:      return .race
+        case .z4, .z5: return .redline
+        }
+    }
+
     // Canonical HR zone palette: cool → hot. Z1 muted blue,
     // Z5 hot red. Maps onto our existing theme colors where
     // possible (success/warning/accent) and falls back to system

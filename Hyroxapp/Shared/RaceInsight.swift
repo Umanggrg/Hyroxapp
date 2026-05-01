@@ -77,6 +77,23 @@ enum InsightGenerator {
         if let fatigueInsight = runFatigueInsight(for: race) {
             out.append(fatigueInsight)
         }
+        // Fatigue inflection — looks for the SPECIFIC station where
+        // the wheels fell off, vs. run-fatigue's blunt first-half /
+        // second-half comparison. The two coexist intentionally:
+        // run-fatigue answers "did you fade?", inflection answers
+        // "where did you fade?", and they layer different
+        // granularities of the same diagnosis.
+        if let inflection = fatigueInflectionInsight(for: race) {
+            out.append(inflection)
+        }
+        // Recovery quality — fires for excellent or slow categories
+        // only. Average and good are silenced because they're not
+        // actionable ("you're typical, keep it up" reads as filler).
+        // Excellent gets a positive callout; slow flags a real
+        // training gap.
+        if let recoveryInsight = recoveryInsight(for: race) {
+            out.append(recoveryInsight)
+        }
         // Effort insight needs maxHR to compute scores; when the
         // caller doesn't have it, the insight is skipped silently.
         // All current call sites have a UserProfile and pass
@@ -315,6 +332,165 @@ enum InsightGenerator {
             symbol: delta > 0 ? "tortoise.fill" : "hare.fill",
             color: delta > 0 ? .warning : .success
         )
+    }
+
+    // MARK: - Fatigue inflection
+
+    // Find the specific station after which the rest of the race got
+    // meaningfully slower — the "wheels-fell-off" moment. Different
+    // question than run-fatigue (first-half vs second-half runs),
+    // and different from compromised running (which run did one
+    // workout hurt). This one walks every possible split-index
+    // pivot, computes pre-pivot and post-pivot averages for both
+    // duration and HR, and finds the pivot with the largest
+    // pace-decline that still passes a meaningfulness threshold.
+    //
+    // Classification by HR direction:
+    //
+    //   • HR rising (>3% jump, post vs pre) — classic fatigue.
+    //     Body's working harder for less output. Coaching cue:
+    //     conditioning gap, or the prior station drained the
+    //     engine.
+    //
+    //   • HR flat or falling (<-2% drop) — pacing issue. Output
+    //     dropped without intensity rising — the gas tank emptied,
+    //     went out too hard. Coaching cue: pace your front half.
+    //
+    //   • HR ambiguous (between -2% and +3%, or no data) — flag
+    //     the slowdown without naming a cause. The athlete still
+    //     gets the "started fading at station X" callout without
+    //     a misleading diagnosis.
+    //
+    // Returns nil when:
+    //   - The race has fewer than 6 splits (need 3 pre, 3 post for
+    //     the comparison to mean anything statistically).
+    //   - No pivot's pace decline reaches 8% (small slowdowns are
+    //     normal pacing variation, not actionable).
+    //   - The pre-pivot duration is zero (degenerate; shouldn't
+    //     happen in practice but defensive).
+    private static func fatigueInflectionInsight(for race: Race) -> RaceInsight? {
+        let splits = race.splits
+        guard splits.count >= 6 else { return nil }
+
+        // Walk pivots from index 2 to count-3 — guarantees ≥2 splits
+        // on each side. Anchored away from the very ends because
+        // a single station near the start or end inflating an
+        // average isn't a real fatigue signal, just noise.
+        var bestPivot: (
+            index: Int,
+            paceDecline: Double,
+            hrDelta: Double?
+        )?
+
+        for pivot in 2..<(splits.count - 2) {
+            let pre = Array(splits[0..<pivot])
+            let post = Array(splits[pivot...])
+
+            let preAvgDuration = pre.map(\.duration).reduce(0, +) / Double(pre.count)
+            let postAvgDuration = post.map(\.duration).reduce(0, +) / Double(post.count)
+            guard preAvgDuration > 0 else { continue }
+
+            let paceDecline = (postAvgDuration - preAvgDuration) / preAvgDuration
+            // 8% threshold — small enough to catch real fades, big
+            // enough to ignore typical inter-segment pacing noise.
+            guard paceDecline >= 0.08 else { continue }
+
+            // HR delta — only computed when both pre and post have
+            // at least one HR sample. Nil otherwise; the consumer
+            // falls back to the unclassified "pace dropped" message.
+            let preHRs = pre.compactMap(\.heartRateAvgBPM)
+            let postHRs = post.compactMap(\.heartRateAvgBPM)
+            var hrDelta: Double?
+            if !preHRs.isEmpty, !postHRs.isEmpty {
+                let preAvgHR = preHRs.reduce(0, +) / Double(preHRs.count)
+                let postAvgHR = postHRs.reduce(0, +) / Double(postHRs.count)
+                if preAvgHR > 0 {
+                    hrDelta = (postAvgHR - preAvgHR) / preAvgHR
+                }
+            }
+
+            if bestPivot == nil || paceDecline > bestPivot!.paceDecline {
+                bestPivot = (pivot, paceDecline, hrDelta)
+            }
+        }
+
+        guard let pivot = bestPivot else { return nil }
+
+        let stationName = splits[pivot.index].station.displayName
+        // 1-indexed for display so it matches the "Station 7 of 16"
+        // language used everywhere else in the app.
+        let stationNumber = pivot.index + 1
+        let pacePct = Int((pivot.paceDecline * 100).rounded())
+
+        // Three-mode classification by HR direction.
+        if let hrDelta = pivot.hrDelta {
+            let hrPct = Int((Swift.abs(hrDelta) * 100).rounded())
+            if hrDelta > 0.03 {
+                return RaceInsight(
+                    text: "Fatigue point at station \(stationNumber) (\(stationName)) — pace dropped \(pacePct)% with HR up \(hrPct)%.",
+                    symbol: "flame.fill",
+                    color: .warning
+                )
+            } else if hrDelta < -0.02 {
+                return RaceInsight(
+                    text: "Started fading at station \(stationNumber) (\(stationName)) — pace dropped \(pacePct)% and HR dropped too. Pacing issue: went out too hard.",
+                    symbol: "tortoise.fill",
+                    color: .warning
+                )
+            }
+            // Ambiguous HR delta — fall through to the unclassified
+            // message rather than forcing a diagnosis the data
+            // doesn't support.
+        }
+
+        return RaceInsight(
+            text: "Pace dropped \(pacePct)% from station \(stationNumber) onward (\(stationName)).",
+            symbol: "arrow.down.right.circle.fill",
+            color: .warning
+        )
+    }
+
+    // MARK: - Recovery quality
+
+    // Surface a recovery-quality callout when the athlete's
+    // post-station HR drop is at either tail of the distribution.
+    // Excellent recovery is praise-worthy ("elite-level
+    // conditioning"); slow recovery is a real coaching signal
+    // ("conditioning gap, build the engine"). The middle two
+    // categories (average / good) intentionally fire no insight
+    // — calling out "you're roughly average" reads as filler.
+    //
+    // The hero already shows the raw drop number for athletes
+    // who want it; this insight is the narrative layer that turns
+    // the number into a story the athlete can act on.
+    //
+    // Returns nil when:
+    //   - The race has fewer than 4 stations with recovery data
+    //     (silenced upstream by RaceStats.recoveryScore).
+    //   - The category is .average or .good (no actionable signal).
+    private static func recoveryInsight(for race: Race) -> RaceInsight? {
+        guard let recovery = RaceStats.recoveryScore(for: race) else {
+            return nil
+        }
+
+        switch recovery.category {
+        case .excellent:
+            let drop = Int(recovery.averageDrop30s.rounded())
+            return RaceInsight(
+                text: "Elite recovery — HR dropped \(drop) bpm avg in 30s between stations.",
+                symbol: "wind",
+                color: .success
+            )
+        case .slow:
+            let drop = Int(recovery.averageDrop30s.rounded())
+            return RaceInsight(
+                text: "Slow recovery — HR only dropped \(drop) bpm avg in 30s. Add easy-pace volume.",
+                symbol: "tortoise.fill",
+                color: .warning
+            )
+        case .average, .good:
+            return nil
+        }
     }
 
     // MARK: - Effort score

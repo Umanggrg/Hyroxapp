@@ -253,6 +253,29 @@ struct RaceDetailView: View {
                     .foregroundStyle(Color.accent)
             }
 
+            // Race-wide HR aggregate. Avg is duration-weighted across
+            // all splits (a long station with high HR matters more
+            // than a short one with low HR). Peak is the max of all
+            // splits' segment-window peaks. Hidden when no splits
+            // have HR data — silence pattern matches the per-station
+            // HR rows: missing data → no row, not "—".
+            if let avgHR = RaceStats.averageHeartRate(for: race),
+               let peakHR = RaceStats.peakHeartRate(for: race) {
+                Text("HR \(Int(avgHR.rounded())) avg · \(Int(peakHR.rounded())) peak")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.accentDim)
+            }
+
+            // Recovery score — same line treatment as RaceSummary.
+            // Hidden when fewer than 4 stations have recovery data.
+            if let recovery = RaceStats.recoveryScore(for: race) {
+                Text("Recovery -\(Int(recovery.averageDrop30s.rounded())) bpm avg · \(recovery.category.displayName)")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.accentDim)
+            }
+
             // Target outcome readout — only shown if a target
             // was set on this race. Tucks into the hero so the
             // success/over-target framing reads as part of the
@@ -626,8 +649,12 @@ struct RaceDetailView: View {
                             .foregroundStyle(Color.accentDim)
                         if let avg = split.heartRateAvgBPM {
                             let zone = HRZone.zone(for: avg, maxBPM: maxHeartRate)
-                            Text("Z\(zone.rawValue)")
+                            // HYROX-coded label same as RaceSummaryView
+                            // — keeps the row's vocabulary consistent
+                            // across post-race summary and history.
+                            Text(zone.hyroxLabel.uppercased())
                                 .font(.caption2.weight(.heavy))
+                                .tracking(0.4)
                                 .foregroundStyle(zone.color)
                         }
                     }

@@ -347,6 +347,90 @@ struct StationDetailView: View {
             ) {
                 effortChip(category: category)
             }
+
+            // Boundary HR row — entry / end / 30s drop / 60s drop.
+            // The HYROX-specific signal: how fatigued did you start
+            // this station, where did your HR end up, and how fast
+            // did it drop afterwards? Hidden entirely when none of
+            // the four boundary samples exist. Each individual cell
+            // shows "—" if its specific sample is missing while
+            // others render — finer-grained silence than the whole-
+            // section hide.
+            if hasAnyBoundaryHR {
+                boundaryHRRow
+            }
+        }
+    }
+
+    // True when at least one boundary HR sample is present —
+    // gates the boundary row's visibility so we don't show four
+    // dashes on legacy races that never captured this data.
+    private var hasAnyBoundaryHR: Bool {
+        split.heartRateEntryBPM != nil
+            || split.heartRateEndBPM != nil
+            || split.heartRateRecovery30sBPM != nil
+            || split.heartRateRecovery60sBPM != nil
+    }
+
+    // Four small tiles: entry HR, end HR, 30s recovery drop, 60s
+    // recovery drop. The drops are computed relative to the END
+    // HR (not to peak), since that's the moment recovery clocks
+    // start ticking. A bigger drop in the same time window =
+    // better cardiovascular conditioning.
+    private var boundaryHRRow: some View {
+        let recovery30Drop: Int? = {
+            guard let endHR = split.heartRateEndBPM,
+                  let r30 = split.heartRateRecovery30sBPM else { return nil }
+            return Int((endHR - r30).rounded())
+        }()
+        let recovery60Drop: Int? = {
+            guard let endHR = split.heartRateEndBPM,
+                  let r60 = split.heartRateRecovery60sBPM else { return nil }
+            return Int((endHR - r60).rounded())
+        }()
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Boundaries").capsLabelStyle()
+                Spacer()
+            }
+            .padding(.horizontal, 4)
+            .padding(.top, 4)
+
+            HStack(spacing: 8) {
+                physiologyTile(
+                    value: split.heartRateEntryBPM
+                        .map { "\(Int($0.rounded()))" } ?? "—",
+                    unit: "bpm",
+                    label: "ENTRY"
+                )
+                physiologyTile(
+                    value: split.heartRateEndBPM
+                        .map { "\(Int($0.rounded()))" } ?? "—",
+                    unit: "bpm",
+                    label: "END"
+                )
+                physiologyTile(
+                    value: recovery30Drop.map { drop in
+                        // Display as a delta — e.g. "-12" — so
+                        // the sign reads naturally. Negative drops
+                        // (HR went UP after segment ended) are
+                        // physiologically rare but possible during
+                        // a heavy roxzone — we show the actual
+                        // value rather than clamping to zero.
+                        drop > 0 ? "-\(drop)" : "\(drop)"
+                    } ?? "—",
+                    unit: "30s",
+                    label: "RECOVER"
+                )
+                physiologyTile(
+                    value: recovery60Drop.map { drop in
+                        drop > 0 ? "-\(drop)" : "\(drop)"
+                    } ?? "—",
+                    unit: "60s",
+                    label: "RECOVER"
+                )
+            }
         }
     }
 
