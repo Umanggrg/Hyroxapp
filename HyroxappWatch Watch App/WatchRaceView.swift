@@ -31,6 +31,19 @@ struct WatchRaceView: View {
 
     @Environment(WatchRaceClient.self) private var client
 
+    // Tracks the last seen coaching cue so we can fire a haptic on
+    // every transition (hold→slow, push→hold, etc.) without firing
+    // continuously on every snapshot push at the same cue. Stored as
+    // the enum's rawValue String because @State + Equatable on
+    // associated-value-free enums is fine, but rawValue makes the
+    // initial-state encoding unambiguous and decouples this State
+    // from the enum itself in case its cases get reordered later.
+    //
+    // Initialized to nil so the very first cue we receive doesn't
+    // fire a haptic on its own — we only buzz on actual transitions
+    // mid-race, not on race start.
+    @State private var lastCueRaw: String?
+
     var body: some View {
         ZStack {
             Color.background.ignoresSafeArea()
@@ -54,6 +67,72 @@ struct WatchRaceView: View {
             } else {
                 waitingView
             }
+        }
+        // Coaching-cue transition haptic. Computes the current cue
+        // from the snapshot; when it changes (and we're mid-race),
+        // fires a haptic distinct to the new state so the athlete
+        // feels the shift without looking at the wrist:
+        //   • .hold (you found race pace)        → success haptic
+        //   • .slow (above sustainable pace)     → failure / warning
+        //   • .push (below race pace, more gas)  → light click
+        //   • .workout / .none (no actionable signal) → silent
+        //
+        // The only-mid-race gate is important: we don't want a buzz
+        // on the very first HR sample after race start (.none → .hold
+        // is fine but .none → .slow shouldn't startle), nor on
+        // race-end transitions when the snapshot phase flips to
+        // .finished. Both are handled by the `lastCueRaw == nil`
+        // first-fire skip + by only computing the cue while phase
+        // is .inProgress.
+        .onChange(of: currentCoachingCueRaw) { _, newRaw in
+            handleCoachingCueChange(to: newRaw)
+        }
+    }
+
+    // Re-derives the current coaching cue from whatever the latest
+    // snapshot says. Returns the rawValue String for use as a
+    // .onChange identity (Equatable, plist-friendly). Returns nil
+    // outside an active race so the .onChange handler can skip
+    // pre-race / post-race phase transitions.
+    private var currentCoachingCueRaw: String? {
+        guard let snapshot = client.snapshot,
+              snapshot.phase == .inProgress,
+              let hr = snapshot.currentHeartRateBPM
+        else { return nil }
+        // Centralized cue resolver on RaceStateSnapshot uses the
+        // personal HR band carried on the snapshot when present
+        // (athlete-specific Z3 from RaceStats.personalHRBaseline)
+        // and falls back to textbook Z3 when not — same logic
+        // as the iPhone race screen.
+        return snapshot.coachingCue(forCurrentHR: hr).rawValue
+    }
+
+    private func handleCoachingCueChange(to newRaw: String?) {
+        defer { lastCueRaw = newRaw }
+        // First-ever cue we see this race — no haptic. The athlete
+        // is just settling in; buzzing on the first BPM sample
+        // would be noise, not signal.
+        guard lastCueRaw != nil else { return }
+        guard let newRaw, let newCue = RaceStats.CoachingCue(rawValue: newRaw) else { return }
+        switch newCue {
+        case .hold:
+            // You hit the zone — affirming double-tap.
+            Haptics.success()
+        case .slow:
+            // Pull back — failure pattern is the strongest "stop"
+            // signal watchOS exposes without going to .notification
+            // (which is too loud for an in-race nudge).
+            Haptics.warning()
+        case .push:
+            // Gentle "more gas" tap. Light click, easy to miss
+            // mid-stride which is the right tradeoff — pushing is
+            // less urgent than pulling back.
+            Haptics.impact(.light)
+        case .workout, .none:
+            // Workout stations and no-cue states get no buzz. Mid
+            // sled push the wrist is loaded; an unsolicited tap
+            // there reads as a malfunction, not coaching.
+            break
         }
     }
 
@@ -387,13 +466,36 @@ struct WatchRaceView: View {
                     .monospacedDigit()
                     .foregroundStyle(Color.textSecondary)
 
-                // HR chip — small heart + bpm digits. Visible only
-                // when the host is publishing HR samples; absent
-                // when HealthKit isn't authorized or no Watch
-                // hardware is feeding samples. We render the chip
-                // on the same line as the segment timer so the
-                // hero block stays compact.
+                // HR chip — small heart + bpm digits + coaching cue
+                // color. Mirrors the iPhone race screen's live HR chip
+                // so the wrist surface speaks the same language. Cue
+                // is computed locally from the snapshot fields the
+                // phone already sends (HR, max HR, current station) —
+                // no schema change needed. Tint follows the cue:
+                // green hold, red slow, blue push, zone-color on
+                // workout stations (no pace cue mid-sled-push).
+                //
+                // The cue itself drives a haptic on transition further
+                // down via `.onChange(of: coachingCue)` — that's
+                // attached at the inProgressView level so the haptic
+                // fires once per state change rather than per frame.
                 if let hr = snapshot.currentHeartRateBPM {
+                    let zone = HRZone.zone(for: hr, maxBPM: snapshot.maxHeartRate)
+                    // Personalized cue when the snapshot carries
+                    // the personal HR band (RaceStats.personalHR-
+                    // Baseline IQR bounds); textbook Z3 fallback
+                    // when not. Centralized in
+                    // `RaceStateSnapshot.coachingCue(forCurrentHR:)`
+                    // so iPhone + Watch classify identically.
+                    let cue = snapshot.coachingCue(forCurrentHR: hr)
+                    let cueColor: Color = {
+                        switch cue {
+                        case .hold:    return Color.success
+                        case .slow:    return Color.accent
+                        case .push:    return Color(hex: 0x5B9BD5)
+                        case .workout, .none: return zone.color
+                        }
+                    }()
                     HStack(spacing: 3) {
                         Image(systemName: "heart.fill")
                             .font(.system(size: 9, weight: .heavy))
@@ -401,7 +503,7 @@ struct WatchRaceView: View {
                             .font(.system(size: 11, weight: .heavy))
                             .monospacedDigit()
                     }
-                    .foregroundStyle(Color.accent)
+                    .foregroundStyle(cueColor)
                 }
 
                 // Effort chip — running HR-time integration across

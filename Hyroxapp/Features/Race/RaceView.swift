@@ -29,6 +29,28 @@ struct RaceView: View {
     @Query(sort: [SortDescriptor(\UserProfile.createdAt, order: .forward)])
     private var profiles: [UserProfile]
 
+    // Historical races — needed to derive the personal HR baseline
+    // for the live coaching cue. Sorted descending so the baseline
+    // helper's "recent N races" prefix grabs the most recent ones.
+    // Wrapped in a @Query rather than passed in because the cue is
+    // used from many entrypoints (live race, finished race summary
+    // peek, etc.) and each consumer would otherwise have to thread
+    // the array through manually. SwiftData @Query is cheap enough
+    // for tens of races that we don't bother memoizing.
+    @Query(sort: [SortDescriptor(\Race.createdAt, order: .reverse)])
+    private var allRaces: [Race]
+
+    // Personalized HR band — derived once per render from
+    // `allRaces`. Returns nil until the athlete has 8+ run-split
+    // HR samples (roughly one full HYROX race with HR data); the
+    // coaching cue falls back to textbook Z3 in that case. We
+    // recompute on every body re-evaluation; the underlying
+    // helper is O(N runs * sort) which is microseconds for any
+    // realistic history size.
+    private var personalHRBaseline: RaceStats.PersonalHRBaseline? {
+        RaceStats.personalHRBaseline(across: allRaces)
+    }
+
     // Safe accessor — `resolvedDivision` coalesces the optional-stored
     // division to `.mensOpen` for rows that predate the field. Reading
     // `profile.division` directly would crash on old rows post-migration.
@@ -838,7 +860,9 @@ struct RaceView: View {
             let cue = RaceStats.coachingCue(
                 currentHR: bpm,
                 maxHR: maxHeartRate,
-                currentStation: viewModel.engine.currentStation
+                currentStation: viewModel.engine.currentStation,
+                personalLowerHR: personalHRBaseline?.lowerQuartile,
+                personalUpperHR: personalHRBaseline?.upperQuartile
             )
             // For run stations the chip tint follows the cue
             // (green hold / red slow / blue push) so the same
@@ -1374,7 +1398,11 @@ struct RaceView: View {
         // means engine is .notStarted (nothing meaningful to
         // publish); we still send a stub for the watch's idle
         // state so it transitions out of .finished cleanly.
-        if let snapshot = viewModel.makeRaceStateSnapshot(division: division, maxHR: maxHeartRate) {
+        if let snapshot = viewModel.makeRaceStateSnapshot(
+            division: division,
+            maxHR: maxHeartRate,
+            personalHRBaseline: personalHRBaseline
+        ) {
             WatchCompanionService.shared.publish(snapshot)
         } else {
             // Engine is in .notStarted — synthesize a minimal

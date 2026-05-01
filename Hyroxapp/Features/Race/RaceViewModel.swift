@@ -193,7 +193,11 @@ final class RaceViewModel {
     // sites (RaceView for watch sync, DuoRaceController for duo
     // broadcast) have the user's profile already and pass them
     // through.
-    func makeRaceStateSnapshot(division: Division, maxHR: Int = 190) -> RaceStateSnapshot? {
+    func makeRaceStateSnapshot(
+        division: Division,
+        maxHR: Int = 190,
+        personalHRBaseline: RaceStats.PersonalHRBaseline? = nil
+    ) -> RaceStateSnapshot? {
         let phase: RaceStateSnapshot.Phase
         let startedAt: Date?
         let segmentStartedAt: Date?
@@ -256,7 +260,9 @@ final class RaceViewModel {
             pausedAt: pausedAt,
             splits: serializedSplits,
             currentHeartRateBPM: currentHeartRateBPM,
-            maxHeartRate: maxHR
+            maxHeartRate: maxHR,
+            personalHRLowerQuartile: personalHRBaseline?.lowerQuartile,
+            personalHRUpperQuartile: personalHRBaseline?.upperQuartile
         )
     }
 

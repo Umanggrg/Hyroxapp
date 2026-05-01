@@ -134,6 +134,27 @@ struct RaceSummaryView: View {
                                 .foregroundStyle(Color.accent)
                         }
 
+                        // Engine Quality — single-number rollup of
+                        // this race's drift + recovery +
+                        // efficiency + decoupling. Sits at the top
+                        // of the HR-derived hero block because it
+                        // frames every metric below it ("Engine 72
+                        // · Steady" tells the story; the lines
+                        // beneath are the breakdown). Tinted
+                        // semibold + monospaced score to read like
+                        // a performance number, not a stat row.
+                        if let race = viewModel.activeRace,
+                           let engine = RaceStats.engineScore(
+                               forRace: race,
+                               history: allFinishedRaces,
+                               maxHR: maxHeartRate
+                           ) {
+                            Text("Engine \(Int(engine.overall.rounded())) · \(engine.tier.displayName)")
+                                .font(.caption.weight(.heavy))
+                                .monospacedDigit()
+                                .foregroundStyle(engineTint(engine.tier))
+                        }
+
                         // Race-wide HR aggregate — duration-weighted
                         // avg + peak across the whole race. Silent
                         // when no HR data was captured (matches the
@@ -175,6 +196,41 @@ struct RaceSummaryView: View {
                                maxHR: maxHeartRate
                            ) {
                             Text("Efficiency \(String(format: "%.2f", efficiency.overall)) · \(efficiency.category.displayName)")
+                                .font(.caption.weight(.semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(Color.accentDim)
+                        }
+
+                        // Cardiac drift — avg HR climb across the
+                        // 8 runs (first half vs second half). Sign
+                        // is intentionally rendered with explicit
+                        // "+" so a climb reads as a climb, not as
+                        // a neutral number. Silent when fewer than
+                        // 6 runs have HR data captured.
+                        if let race = viewModel.activeRace,
+                           let drift = RaceStats.heartRateDrift(for: race) {
+                            let signed = drift.driftBPM >= 0
+                                ? "+\(Int(drift.driftBPM.rounded()))"
+                                : "\(Int(drift.driftBPM.rounded()))"
+                            Text("HR drift \(signed) bpm · \(drift.category.displayName)")
+                                .font(.caption.weight(.semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(Color.accentDim)
+                        }
+
+                        // Aerobic decoupling — pace-per-HR ratio
+                        // change across run halves. Sport-science
+                        // gold standard for engine quality. The
+                        // percentage is signed so an athlete who
+                        // somehow improves in the back half (rare,
+                        // possible) sees a negative value. Silent
+                        // when fewer than 6 runs have HR + pace
+                        // data captured.
+                        if let race = viewModel.activeRace,
+                           let decoupling = RaceStats.aerobicDecoupling(for: race) {
+                            let pct = Int((decoupling.decouplingFraction * 100).rounded())
+                            let signed = pct >= 0 ? "+\(pct)%" : "\(pct)%"
+                            Text("Decoupling \(signed) · \(decoupling.category.displayName)")
                                 .font(.caption.weight(.semibold))
                                 .monospacedDigit()
                                 .foregroundStyle(Color.accentDim)
@@ -444,6 +500,18 @@ struct RaceSummaryView: View {
                 RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
                     .stroke(Color.accent, lineWidth: 1.5)
             )
+        }
+    }
+
+    // Engine-tier tint contract — green for elite, primary for
+    // steady, amber for building. Mirrors the tint used on
+    // `EngineScoreView`'s hero score so the per-race line and
+    // the Profile rollup card speak the same color language.
+    private func engineTint(_ tier: RaceStats.EngineScore.Tier) -> Color {
+        switch tier {
+        case .elite:    return .success
+        case .steady:   return .textPrimary
+        case .building: return .warning
         }
     }
 

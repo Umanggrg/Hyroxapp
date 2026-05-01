@@ -418,22 +418,39 @@ struct ProfileView: View {
     // sufficiency at the component level.
     @ViewBuilder
     private var performanceSection: some View {
+        let maxHR = profiles.first?.maxHeartRate ?? 190
         let hasPerf = HyroxPerformanceScoreView.hasAnyData(in: races)
         let hasReady = RaceReadyView.shouldShow(in: races)
         let hasOverload = PerformanceOverloadView.hasMeaningfulTrends(in: races)
         let hasEngine = EngineImpactView.shouldShow(in: races)
+        let hasHRBaseline = PersonalHRBaselineView.hasEnoughData(in: races)
+        let hasEngineScore = EngineScoreView.hasEnoughData(in: races, maxHR: maxHR)
 
-        if hasPerf || hasReady || hasOverload || hasEngine {
+        if hasPerf || hasReady || hasOverload || hasEngine || hasHRBaseline || hasEngineScore {
             VStack(alignment: .leading, spacing: 12) {
                 ProfileSectionHeader(
                     title: "Performance",
                     icon: "bolt.fill"
                 )
+                // Engine Quality score sits at the top of the
+                // Performance section because it's the single
+                // headline rollup — the "where am I right now"
+                // number that frames everything else below it.
+                // First-time users without HR data don't see
+                // the section header (no sub-metric available);
+                // once any HR-derived metric exists, this card
+                // appears and anchors the section.
+                if hasEngineScore {
+                    engineScoreSection
+                }
                 if hasPerf {
                     hyroxScoreSection
                 }
                 if hasReady {
                     raceReadySection
+                }
+                if hasHRBaseline {
+                    hrBaselineSection
                 }
                 if hasOverload {
                     overloadSection
@@ -443,6 +460,48 @@ struct ProfileView: View {
                 }
             }
             .padding(.horizontal, Layout.screenMargin)
+        }
+    }
+
+    // Engine Quality composite score — single-number rollup
+    // (drift + recovery + efficiency + decoupling). Top-of-
+    // Performance positioning because it's the headline number;
+    // the cards below break the rollup into specific surfaces
+    // (HYROX score = pillar split, Race-Ready = race-weight
+    // diagnostic, HR Baseline = athlete-specific Z3, etc.).
+    private var engineScoreSection: some View {
+        let maxHR = profiles.first?.maxHeartRate ?? 190
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Engine Quality")
+                    .capsLabelStyle()
+                Spacer()
+            }
+            .padding(.horizontal, 4)
+
+            EngineScoreView(races: races, maxHR: maxHR)
+        }
+    }
+
+    // Personal HR baseline — athlete-specific race-pace HR band
+    // (IQR + median) computed from their actual run splits across
+    // recent races. Sits between Race-Ready (which talks about
+    // weights) and the Overload trends so the Performance section
+    // reads top-down: how am I built (pillars) → am I lifting
+    // race-weight (race-ready) → what's my actual race HR target
+    // (this) → how is volume + intensity trending (overload) →
+    // which station hurts the engine most (engine impact). Hidden
+    // when fewer than 8 run-split HR samples exist.
+    private var hrBaselineSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Race HR Target")
+                    .capsLabelStyle()
+                Spacer()
+            }
+            .padding(.horizontal, 4)
+
+            PersonalHRBaselineView(races: races)
         }
     }
 
@@ -963,8 +1022,31 @@ struct ProfileView: View {
         let maxHR = profiles.first?.maxHeartRate ?? 190
         let hasEffortTrend = EffortTrendView.hasEnoughData(in: races, maxHR: maxHR)
         let hasEffortDistribution = EffortDistributionView.hasEnoughData(in: races, maxHR: maxHR)
+        let hasDriftTrend = HRDriftTrendView.hasEnoughData(in: races)
+        let hasRecoveryTrend = RecoveryTrendView.hasEnoughData(in: races)
+        let hasEngineTrend = EngineScoreTrendView.hasEnoughData(in: races, maxHR: maxHR)
 
         return VStack(alignment: .leading, spacing: 12) {
+            // Engine Score Trend — the headline rollup curve. Sits
+            // at the top of the trend family because it's the
+            // composite of every other trend below it (drift,
+            // recovery, efficiency, decoupling). The athlete
+            // looking at trends starts here for the "where is my
+            // engine going" answer; the metric-specific trends
+            // beneath break down the why.
+            if hasEngineTrend {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Engine Score Trend")
+                            .capsLabelStyle()
+                        Spacer()
+                    }
+                    .padding(.horizontal, 4)
+
+                    EngineScoreTrendView(races: races, maxHR: maxHR)
+                }
+            }
+
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("Time Trend")
@@ -986,6 +1068,49 @@ struct ProfileView: View {
                     .padding(.horizontal, 4)
 
                     EffortTrendView(races: races, maxHR: maxHR)
+                }
+            }
+
+            // HR drift trend — tracks aerobic-engine progression
+            // across the athlete's full race history. Sits below
+            // Effort Trend because they answer different questions:
+            // effort = "am I training harder?", drift = "is my
+            // engine getting better at the same intensity?". The
+            // drift line should slope DOWN over a training block
+            // even when effort holds flat — that's the engine
+            // adaptation arrow. Hidden when fewer than 3 races
+            // have HR data on 6+ runs each.
+            if hasDriftTrend {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("HR Drift Trend")
+                            .capsLabelStyle()
+                        Spacer()
+                    }
+                    .padding(.horizontal, 4)
+
+                    HRDriftTrendView(races: races)
+                }
+            }
+
+            // Recovery trend — between-station 30s HR drop across
+            // the athlete's race history. Different question from
+            // drift: drift = "is HR holding steady WITHIN a race?",
+            // recovery = "is the engine getting faster at dropping
+            // HR BETWEEN stations?" Both should improve with
+            // training, but they answer different conditioning
+            // questions. Hidden when fewer than 3 races have
+            // recovery data captured.
+            if hasRecoveryTrend {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Recovery Trend")
+                            .capsLabelStyle()
+                        Spacer()
+                    }
+                    .padding(.horizontal, 4)
+
+                    RecoveryTrendView(races: races)
                 }
             }
 

@@ -101,6 +101,23 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
     // assume a non-zero value.
     let maxHeartRate: Int
 
+    // Personalized race-pace HR band — IQR bounds from the
+    // athlete's historical run splits via
+    // `RaceStats.personalHRBaseline(across:)`. When both are
+    // present, the Watch's coaching cue classifies HR against
+    // these (athlete's observed Z3) instead of textbook Z3 (70-
+    // 80% of max). Nil for first-race users / those without
+    // enough history (8+ run-split HR samples). Both must be
+    // non-nil and ordered (upper > lower) for the personalized
+    // path to fire — defensive guard lives in
+    // `RaceStats.coachingCue`.
+    //
+    // Watch transport (WCSession dictionary) stores these as
+    // optional Double; absent = no personal band, equivalent to
+    // the textbook fallback.
+    let personalHRLowerQuartile: Double?
+    let personalHRUpperQuartile: Double?
+
     // 0-based index into `Station.raceSequence`. The watch resolves this
     // to a `Station` case and uses `station.displayName` /
     // `station.target(for: division)` for the header + subtitle.
@@ -140,7 +157,9 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         pausedAt: Date? = nil,
         splits: [SerializedSplit] = [],
         currentHeartRateBPM: Double? = nil,
-        maxHeartRate: Int = 190
+        maxHeartRate: Int = 190,
+        personalHRLowerQuartile: Double? = nil,
+        personalHRUpperQuartile: Double? = nil
     ) {
         self.phase = phase
         self.startedAt = startedAt
@@ -154,6 +173,8 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         self.splits = splits
         self.currentHeartRateBPM = currentHeartRateBPM
         self.maxHeartRate = maxHeartRate
+        self.personalHRLowerQuartile = personalHRLowerQuartile
+        self.personalHRUpperQuartile = personalHRUpperQuartile
     }
 
     // MARK: - Dictionary encoding (WCSession transport)
@@ -173,6 +194,8 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         static let pausedAt = "pausedAt"
         static let currentHeartRateBPM = "currentHeartRateBPM"
         static let maxHeartRate = "maxHeartRate"
+        static let personalHRLowerQuartile = "personalHRLowerQuartile"
+        static let personalHRUpperQuartile = "personalHRUpperQuartile"
     }
 
     // Build a plist-compatible dictionary suitable for
@@ -202,6 +225,12 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         }
         if let currentHeartRateBPM {
             dict[Key.currentHeartRateBPM] = currentHeartRateBPM
+        }
+        if let personalHRLowerQuartile {
+            dict[Key.personalHRLowerQuartile] = personalHRLowerQuartile
+        }
+        if let personalHRUpperQuartile {
+            dict[Key.personalHRUpperQuartile] = personalHRUpperQuartile
         }
         return dict
     }
@@ -262,11 +291,37 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         // before we re-encode with the new field.
         self.maxHeartRate = (dictionary[Key.maxHeartRate] as? Int) ?? 190
 
+        // Personal HR band — both fields are optional and missing
+        // from old-version snapshots. Receivers (Watch + duo
+        // guest) treat absence as "no personal band, use textbook
+        // fallback" — `RaceStats.coachingCue` already does that.
+        self.personalHRLowerQuartile = dictionary[Key.personalHRLowerQuartile] as? Double
+        self.personalHRUpperQuartile = dictionary[Key.personalHRUpperQuartile] as? Double
+
         // Splits aren't carried over the WCSession dictionary path.
         // The watch doesn't render per-split detail; the duo/Codable
         // path is the only consumer of `splits`. Initialize empty
         // here so receivers don't see junk data.
         self.splits = []
+    }
+
+    // MARK: - Snapshot helpers
+
+    // Resolves the personal HR band carried on this snapshot and
+    // computes the `RaceStats.CoachingCue` that the consuming
+    // surface should display. Centralizes the cue computation here
+    // so both the iPhone (for the live HR chip) and the Watch
+    // (for the wrist chip + haptic) classify HR identically. Same
+    // semantics apply: when both bounds are present and ordered,
+    // use the personal band; otherwise fall back to textbook Z3.
+    func coachingCue(forCurrentHR currentHR: Double?) -> RaceStats.CoachingCue {
+        RaceStats.coachingCue(
+            currentHR: currentHR,
+            maxHR: maxHeartRate,
+            currentStation: currentStation,
+            personalLowerHR: personalHRLowerQuartile,
+            personalUpperHR: personalHRUpperQuartile
+        )
     }
 
     // MARK: - Convenience derived values

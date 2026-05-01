@@ -94,6 +94,25 @@ enum InsightGenerator {
         if let recoveryInsight = recoveryInsight(for: race) {
             out.append(recoveryInsight)
         }
+        // Cardiac drift — chronic version of fatigue inflection.
+        // Fires for moderate or severe drift only; minimal drift
+        // is the goal and not noteworthy. Pairs naturally with
+        // fatigue inflection (which catches the single pivot
+        // station) and run-fatigue (first-half-vs-second pace).
+        if let driftInsight = heartRateDriftInsight(for: race) {
+            out.append(driftInsight)
+        }
+        // Aerobic decoupling — the sport-science cousin of drift.
+        // Drift watches HR; decoupling watches the HR-to-pace
+        // ratio. Fires only on moderate-gap or large-gap; the
+        // .conditioned bucket is the goal and silent. Together
+        // with drift, the two surface a complete engine story
+        // — drift says "what happened to your HR," decoupling
+        // says "did your engine actually fade or did you just
+        // slow down."
+        if let decouplingInsight = aerobicDecouplingInsight(for: race) {
+            out.append(decouplingInsight)
+        }
         // Effort insight needs maxHR to compute scores; when the
         // caller doesn't have it, the insight is skipped silently.
         // All current call sites have a UserProfile and pass
@@ -121,6 +140,17 @@ enum InsightGenerator {
         if let maxHR,
            let efficiencyDrag = efficiencyDragInsight(for: race, allRaces: allRaces, maxHR: maxHR) {
             out.append(efficiencyDrag)
+        }
+        // Engine-score interpretation — the rollup-level insight.
+        // Reads "did this race break through, regress, or hold
+        // steady against my recent baseline?" + which sub-metric
+        // drove the change. Sits last in the insight list because
+        // it's the meta-callout that frames everything above it
+        // (the drift / recovery / decoupling insights are the
+        // sub-metric stories; this one is the rollup).
+        if let maxHR,
+           let engineInsight = engineScoreInsight(for: race, allRaces: allRaces, maxHR: maxHR) {
+            out.append(engineInsight)
         }
 
         return out
@@ -539,6 +569,163 @@ enum InsightGenerator {
                 color: .warning
             )
         case .average, .good:
+            return nil
+        }
+    }
+
+    // MARK: - Aerobic decoupling insight
+    //
+    // Surfaces moderate-gap or large-gap aerobic decoupling. The
+    // .conditioned bucket is the goal and silent — no insight
+    // earns less screen real estate than "good news that's not
+    // news." Phrasing leans on the sport-science vocabulary
+    // ("aerobic gap," "decoupling") so the athlete encounters the
+    // language they'll see in any serious endurance training
+    // resource.
+    private static func aerobicDecouplingInsight(for race: Race) -> RaceInsight? {
+        guard let decoupling = RaceStats.aerobicDecoupling(for: race) else {
+            return nil
+        }
+        guard decoupling.category != .conditioned else { return nil }
+
+        let pct = Int((decoupling.decouplingFraction * 100).rounded())
+
+        switch decoupling.category {
+        case .moderateGap:
+            return RaceInsight(
+                text: "\(pct)% aerobic decoupling — pace-per-HR ratio faded. Add Z2 volume.",
+                symbol: "chart.line.downtrend.xyaxis",
+                color: .warning
+            )
+        case .largeGap:
+            return RaceInsight(
+                text: "\(pct)% aerobic decoupling — significant engine gap. Long Z2 weeks needed.",
+                symbol: "chart.line.downtrend.xyaxis",
+                color: .accent
+            )
+        case .conditioned:
+            return nil
+        }
+    }
+
+    // MARK: - Engine Score insight
+    //
+    // Per-race rollup interpretation. The decoupling / drift /
+    // recovery insights above are sub-metric stories ("your
+    // recovery was elite", "decoupling was 8%"). This is the
+    // rollup story: "how did this race land against your recent
+    // baseline, and what drove that?" Sits at the bottom of the
+    // insight list because it's the meta-callout — the others
+    // give the breakdown, this gives the headline.
+    //
+    // Three flavors fire:
+    //   • All-time best (strictly highest engine score ever)
+    //   • Breakthrough (10+ above recent 5-race avg, or all-time
+    //     best). Names the dominant sub-metric driver.
+    //   • Regression (10+ below recent 5-race avg). Names the
+    //     dominant sub-metric drag.
+    // Normal-range races (within ±10) silently skip — no insight
+    // earns less screen real estate than "you raced normally."
+    //
+    // Requires maxHR for engine-score computation; without it the
+    // helper returns nil and the insight skips. First-race users
+    // also see no insight (no baseline to compare against).
+    private static func engineScoreInsight(
+        for race: Race,
+        allRaces: [Race],
+        maxHR: Int
+    ) -> RaceInsight? {
+        guard let context = RaceStats.engineScoreContext(
+            forRace: race,
+            history: allRaces,
+            maxHR: maxHR
+        ) else { return nil }
+
+        let score = Int(context.thisRaceScore.rounded())
+        let absDelta = Int(abs(context.delta).rounded())
+        let driverName = context.dominantSubMetric?.displayName
+
+        // All-time-best is the strongest positive callout — it
+        // takes precedence over breakthrough phrasing even though
+        // breakthrough is implied. The ATB string reads as
+        // celebration, breakthrough as observation.
+        if context.isAllTimeBest {
+            let driverSuffix = driverName.map { " — \($0) led the way." } ?? ""
+            return RaceInsight(
+                text: "Best engine race ever — \(score).\(driverSuffix)",
+                symbol: "trophy.fill",
+                color: .success
+            )
+        }
+
+        switch context.position {
+        case .breakthrough:
+            let driverSuffix = driverName.map { " \($0) powered it." } ?? ""
+            return RaceInsight(
+                text: "Breakthrough engine — \(score), +\(absDelta) above your recent average.\(driverSuffix)",
+                symbol: "chart.line.uptrend.xyaxis",
+                color: .success
+            )
+        case .regression:
+            let driverSuffix = driverName.map { " \($0) was the drag." } ?? ""
+            return RaceInsight(
+                text: "Off-day engine — \(score), \(absDelta) below your recent average.\(driverSuffix)",
+                symbol: "chart.line.downtrend.xyaxis",
+                color: .warning
+            )
+        case .normal:
+            return nil
+        }
+    }
+
+    // MARK: - Cardiac drift insight
+    //
+    // Surfaces moderate or severe cardiac drift across the run sequence.
+    // Phrasing also accounts for whether pace held — drifting HR while
+    // pace held is the strongest underprepared-engine signal, while
+    // drifting HR with substantially slower pace is a more complex
+    // story (you slowed AND your HR climbed, which suggests both
+    // pacing failure and fitness gap).
+    //
+    // Returns nil when:
+    //   • RaceStats.heartRateDrift returns nil (insufficient run HR data),
+    //   • the category is `.minimal` (good news but not insight-worthy
+    //     — keeps the insight pane focused on actionable callouts).
+    private static func heartRateDriftInsight(for race: Race) -> RaceInsight? {
+        guard let drift = RaceStats.heartRateDrift(for: race) else {
+            return nil
+        }
+        guard drift.category != .minimal else { return nil }
+
+        let bpm = Int(drift.driftBPM.rounded())
+        // Pace-held threshold: ≤4% slowdown across halves counts
+        // as "pace held" for our purposes — that's roughly the
+        // intra-race pacing variance you'd expect from a steady
+        // effort. Above 4%, we acknowledge the slowdown so the
+        // takeaway doesn't read as accusatory ("you didn't even
+        // slow down" when in fact they did).
+        let paceHeld = drift.paceChangeFraction <= 0.04
+
+        switch drift.category {
+        case .moderate:
+            let suffix = paceHeld
+                ? "Add zone-2 volume to build the engine."
+                : "Pace also faded — pacing + engine both have room."
+            return RaceInsight(
+                text: "HR climbed \(bpm) bpm across the runs. \(suffix)",
+                symbol: "waveform.path.ecg",
+                color: .warning
+            )
+        case .severe:
+            let suffix = paceHeld
+                ? "Aerobic capacity gap — long easy runs are the fix."
+                : "Engine and pacing both broke down — long easy volume first."
+            return RaceInsight(
+                text: "HR drifted \(bpm) bpm across the runs. \(suffix)",
+                symbol: "waveform.path.ecg",
+                color: .accent
+            )
+        case .minimal:
             return nil
         }
     }

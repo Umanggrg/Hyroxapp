@@ -504,107 +504,6 @@ enum RaceStats {
         return maxes.max()
     }
 
-    // MARK: - Live coaching cue
-
-    // Real-time pacing cue based on current HR vs the HYROX race-
-    // sustainable band. The intent: while running, an athlete
-    // should hold roughly Z3 — that's the 90-minute pace HYROX is
-    // built around. Above Z3 means they're dipping into anaerobic
-    // territory and won't last; below Z3 means they're leaving time
-    // on the table.
-    //
-    // Workout stations (sled, lunges, wall balls) are deliberately
-    // excluded — those are short tactical efforts where redlining
-    // is normal and useful. Telling someone to "slow down" mid-sled-
-    // push is bad coaching.
-    //
-    // Used on the iPhone race screen as a coaching chip, and shipped
-    // to the Watch via the existing snapshot transport for the same
-    // chip on the wrist (with haptic on cue transitions). One helper
-    // serves both surfaces because RaceStats is already shared with
-    // the watchOS target.
-    enum CoachingCue: String, Equatable, Sendable {
-        // Athlete is at race-sustainable HR during a run. Reads as
-        // affirmation: "you're doing it right, keep it here."
-        case hold
-
-        // Athlete's HR is above Z3 during a run. Tactical push
-        // mid-run is fine for short bursts (final 200m, hill);
-        // a sustained Z4-Z5 mid-run is pacing failure. The cue
-        // doesn't know which it is — it just flags "you can't
-        // hold this for 90 min."
-        case slow
-
-        // Athlete is below Z3 during a run. They've got more in
-        // the tank. Common at the start of races when fresh
-        // legs feel slow, or when athlete is sandbagging out
-        // of fear.
-        case push
-
-        // Currently on a workout station — no pace cue. Workouts
-        // are short tactical bursts; a "hold/slow/push" cue mid-
-        // wall-balls is wrong.
-        case workout
-
-        // No HR data, or race not in an active running/workout
-        // state. UI hides the chip entirely in this case.
-        case none
-
-        var displayText: String {
-            switch self {
-            case .hold:    return "HOLD PACE"
-            case .slow:    return "SLOW DOWN"
-            case .push:    return "PUSH HARDER"
-            case .workout: return "WORK"
-            case .none:    return ""
-            }
-        }
-
-        // Coaching-cue colors map onto the HYROX zone palette so
-        // the chip's color reinforces the same vocabulary the
-        // per-station tag uses. Hold is green (good zone), slow
-        // is red (above sustainable), push is blue (below race
-        // pace), workout is neutral white.
-        var colorHex: UInt {
-            switch self {
-            case .hold:    return 0x32D74B  // success green
-            case .slow:    return 0xFF3B30  // accent red
-            case .push:    return 0x5B9BD5  // calm blue (matches Z1)
-            case .workout: return 0xF5F5F7  // textPrimary off-white
-            case .none:    return 0x000000  // unused
-            }
-        }
-    }
-
-    // Compute the coaching cue from current HR + max HR + current
-    // station. Returns `.none` when any required input is missing —
-    // the UI silently hides the chip rather than showing a stale
-    // or misleading cue.
-    static func coachingCue(
-        currentHR: Double?,
-        maxHR: Int,
-        currentStation: Station?
-    ) -> CoachingCue {
-        guard let hr = currentHR,
-              hr > 0,
-              let station = currentStation,
-              maxHR > 0
-        else { return .none }
-
-        // Workout stations: no pace cue — see note above.
-        if station.kind == .workout {
-            return .workout
-        }
-
-        // Run stations: classify against Z3 (race-sustainable).
-        let zone = HRZone.zone(for: hr, maxBPM: maxHR)
-        switch zone {
-        case .z1, .z2: return .push
-        case .z3:      return .hold
-        case .z4, .z5: return .slow
-        }
-    }
-
     // MARK: - Efficiency score
 
     // Per-station + race-wide efficiency = how much output (relative
@@ -884,6 +783,504 @@ enum RaceStats {
         )
     }
 
+    // MARK: - Cardiac drift across the 8 runs
+
+    // Cardiac drift = how much average HR climbs across the race at
+    // similar prescribed work. HYROX is uniquely 8 × 1km runs
+    // interleaved with 8 workouts; each run is the same prescribed
+    // distance, so a rising HR across the run sequence at flat-or-
+    // similar pace is a clean signal of aerobic fatigue / engine
+    // capacity gap. (Fatigue inflection in #3 catches a single
+    // pivot point; this catches the chronic, gradual climb across
+    // the whole race.)
+    //
+    // Method:
+    //   1. Pull the splits for run stations, in race order.
+    //   2. Split into "first half" (first 4 runs) vs "second half"
+    //      (last 4 runs) — using halves rather than R1-vs-R8 alone
+    //      averages out single-run sample noise (one bad run from
+    //      a sip of water doesn't blow up the score).
+    //   3. driftBPM = avg(secondHalf) - avg(firstHalf).
+    //   4. Bucket by magnitude: <5 minimal, 5–10 moderate, >10
+    //      severe. Thresholds match coaching literature on
+    //      cardiovascular drift in trained vs untrained athletes —
+    //      well-conditioned runners show <5 bpm of drift across
+    //      moderate-intensity efforts of this duration.
+    //
+    // Pace context: we also report the second-half-vs-first-half
+    // pace ratio. If pace also slowed substantially (>10%), the
+    // drift signal weakens — slowing protects HR. If pace held or
+    // improved while HR climbed, that's the strongest underprepared
+    // signal. The insight surface uses both numbers to phrase the
+    // takeaway honestly.
+    struct HRDrift: Equatable {
+        let firstHalfAvgHR: Double
+        let secondHalfAvgHR: Double
+        let driftBPM: Double                  // second - first
+        let firstHalfAvgPace: Double          // sec/km
+        let secondHalfAvgPace: Double         // sec/km
+        let paceChangeFraction: Double        // (second - first) / first; +ve = slowing
+        let runsCounted: Int                  // total runs with HR data
+        let category: Category
+
+        enum Category: String, Equatable {
+            case minimal
+            case moderate
+            case severe
+
+            var displayName: String {
+                switch self {
+                case .minimal:  return "Minimal"
+                case .moderate: return "Moderate"
+                case .severe:   return "Severe"
+                }
+            }
+
+            // Coaching cue strings used by the insight card. We
+            // surface insights only on `.moderate` and `.severe` —
+            // minimal drift is the goal, not news.
+            var coachingCue: String {
+                switch self {
+                case .minimal:
+                    return "Minimal HR drift — engine held steady across all 8 runs."
+                case .moderate:
+                    return "Moderate HR drift — engine fading in the back half. Add zone-2 volume."
+                case .severe:
+                    return "Severe HR drift — aerobic capacity gap. Long easy runs are the fix."
+                }
+            }
+        }
+
+        static func category(forDrift bpm: Double) -> Category {
+            switch bpm {
+            case ..<5:   return .minimal
+            case 5..<10: return .moderate
+            default:     return .severe
+            }
+        }
+    }
+
+    static func heartRateDrift(for race: Race) -> HRDrift? {
+        // Order matters — pull runs in the order they happened in
+        // the race so we can split by halves correctly. The
+        // canonical race sequence interleaves runs and workouts;
+        // sorting by startedAt is the safest way to recover the
+        // run order independent of station enum rawValues (which
+        // are positional but the array order isn't guaranteed
+        // SwiftData-side).
+        let runSplits = race.splits
+            .filter { $0.station.kind == .run }
+            .sorted { $0.startedAt < $1.startedAt }
+
+        // Need HR + duration on each run to compute the score.
+        // We're conservative — drop runs missing either field
+        // rather than imputing.
+        let runs: [(hr: Double, paceSecPerKm: Double)] = runSplits.compactMap { split in
+            guard let avg = split.heartRateAvgBPM, avg > 0,
+                  split.duration > 0 else { return nil }
+            // 1 km is the prescribed run distance for every HYROX
+            // run station, so duration in seconds == sec/km pace.
+            // No distance lookup needed — by sport definition.
+            return (hr: avg, paceSecPerKm: split.duration)
+        }
+
+        // Need at least 6 runs split into 3+3 halves to make the
+        // signal meaningful. Below that, the second-half average
+        // is essentially one or two splits and noise dominates.
+        guard runs.count >= 6 else { return nil }
+
+        let mid = runs.count / 2
+        let firstHalf = Array(runs.prefix(mid))
+        let secondHalf = Array(runs.suffix(runs.count - mid))
+
+        let firstHRAvg = firstHalf.map(\.hr).reduce(0, +) / Double(firstHalf.count)
+        let secondHRAvg = secondHalf.map(\.hr).reduce(0, +) / Double(secondHalf.count)
+        let firstPaceAvg = firstHalf.map(\.paceSecPerKm).reduce(0, +) / Double(firstHalf.count)
+        let secondPaceAvg = secondHalf.map(\.paceSecPerKm).reduce(0, +) / Double(secondHalf.count)
+
+        let drift = secondHRAvg - firstHRAvg
+        let paceChange = firstPaceAvg > 0
+            ? (secondPaceAvg - firstPaceAvg) / firstPaceAvg
+            : 0
+
+        return HRDrift(
+            firstHalfAvgHR: firstHRAvg,
+            secondHalfAvgHR: secondHRAvg,
+            driftBPM: drift,
+            firstHalfAvgPace: firstPaceAvg,
+            secondHalfAvgPace: secondPaceAvg,
+            paceChangeFraction: paceChange,
+            runsCounted: runs.count,
+            category: HRDrift.category(forDrift: drift)
+        )
+    }
+
+    // MARK: - Aerobic decoupling
+
+    // Sport-science classic for aerobic conditioning. Where #8
+    // cardiac drift just measures HR climb across runs, this
+    // normalizes by pace — a more honest engine signal.
+    //
+    // Coaching question: "did my pace-per-HR ratio hold steady
+    // through the race, or did it deteriorate?" If pace held while
+    // HR climbed, the ratio degraded. If HR held while pace
+    // dropped, the ratio also degraded. Either way, the pace-per-
+    // HR ratio falling = engine fading.
+    //
+    // Method:
+    //   1. For each run split, compute pacePerHR = (1/pace) / HR.
+    //      Higher = more efficient (more output per HR cost).
+    //      Equivalent to "speed per heartbeat-per-minute," scaled.
+    //   2. Average pacePerHR across the first half of runs.
+    //   3. Average pacePerHR across the second half of runs.
+    //   4. decoupling = (firstHalf - secondHalf) / firstHalf.
+    //      Positive = ratio deteriorated (engine faded).
+    //      Negative = ratio improved (rare, but possible — e.g.
+    //      negative-split races where late efficiency rises).
+    //
+    // Threshold convention straight from sport science literature
+    // (Friel, Daniels): under 5% across same-effort steady work is
+    // the marker of "aerobically conditioned." 5-10% is moderate
+    // aerobic gap. Over 10% is a real engine deficiency that
+    // shows up in race performance.
+    //
+    // Why a separate metric from drift: drift is a single
+    // dimension (HR up/down). Decoupling is a 2D ratio that
+    // catches the case where pace and HR both drop or rise. An
+    // athlete who slows their second half by 15% will have low
+    // drift but high decoupling. The combination tells the
+    // truer story — drift says what happened to HR, decoupling
+    // says whether the engine worked harder for the same pace.
+    struct AerobicDecoupling: Equatable {
+        let firstHalfPacePerHR: Double      // (1/sec-per-km) / bpm, first half avg
+        let secondHalfPacePerHR: Double     // same, second half
+        let decouplingFraction: Double      // (first - second) / first; +ve = degradation
+        let runsCounted: Int                // total runs with HR + pace data
+        let category: Category
+
+        // Sport-science threshold convention (Friel, Daniels).
+        // Coaching language is gentler than the literature's —
+        // "aerobic gap" lands better than "aerobically deficient."
+        enum Category: String, Equatable {
+            case conditioned    // <5%, the goal
+            case moderateGap    // 5-10%
+            case largeGap       // >10%
+
+            var displayName: String {
+                switch self {
+                case .conditioned: return "Conditioned"
+                case .moderateGap: return "Moderate gap"
+                case .largeGap:    return "Large gap"
+                }
+            }
+
+            var coachingCue: String {
+                switch self {
+                case .conditioned:
+                    return "Aerobic engine held steady — well-conditioned for race distance."
+                case .moderateGap:
+                    return "Pace-per-HR ratio faded — moderate aerobic gap. Easy-pace volume helps."
+                case .largeGap:
+                    return "Significant decoupling — engine couldn't hold output. Long Z2 weeks needed."
+                }
+            }
+        }
+
+        // Decoupling category boundaries — the literature's
+        // standard buckets. Negative decoupling (rare, ratio
+        // improved) maps to .conditioned because it's strictly
+        // better than holding steady.
+        static func category(forFraction fraction: Double) -> Category {
+            switch fraction {
+            case ..<0.05:  return .conditioned
+            case 0.05..<0.10: return .moderateGap
+            default:       return .largeGap
+            }
+        }
+    }
+
+    static func aerobicDecoupling(for race: Race) -> AerobicDecoupling? {
+        // Pull runs in chronological order — same approach as
+        // heartRateDrift uses. Sorting by startedAt is the safest
+        // recovery of run order independent of station enum
+        // raw values.
+        let runSplits = race.splits
+            .filter { $0.station.kind == .run }
+            .sorted { $0.startedAt < $1.startedAt }
+
+        // For each run, compute the pace-per-HR efficiency ratio.
+        // 1km is the prescribed distance for every HYROX run, so
+        // duration in seconds is sec/km pace; speed = 1/duration
+        // (in 1/seconds, which is fine — we only care about the
+        // ratio, not absolute units). Drop runs missing HR or
+        // duration.
+        let ratios: [Double] = runSplits.compactMap { split -> Double? in
+            guard let avg = split.heartRateAvgBPM, avg > 0,
+                  split.duration > 0 else { return nil }
+            // pace-per-HR. Inverse-second per bpm; the absolute
+            // unit doesn't matter — only the ratio change does.
+            let speed = 1.0 / split.duration
+            return speed / avg
+        }
+
+        // Same 6-run minimum as heartRateDrift — below that, the
+        // halves are too small for the average to be stable.
+        guard ratios.count >= 6 else { return nil }
+
+        let mid = ratios.count / 2
+        let firstHalfAvg = ratios.prefix(mid).reduce(0, +) / Double(mid)
+        let secondHalfCount = ratios.count - mid
+        let secondHalfAvg = ratios.suffix(secondHalfCount).reduce(0, +) / Double(secondHalfCount)
+
+        guard firstHalfAvg > 0 else { return nil }
+        let decoupling = (firstHalfAvg - secondHalfAvg) / firstHalfAvg
+
+        return AerobicDecoupling(
+            firstHalfPacePerHR: firstHalfAvg,
+            secondHalfPacePerHR: secondHalfAvg,
+            decouplingFraction: decoupling,
+            runsCounted: ratios.count,
+            category: AerobicDecoupling.category(forFraction: decoupling)
+        )
+    }
+
+    // MARK: - Personal HR baseline
+
+    // Athlete-specific race-pace HR band, derived from their own
+    // historical run splits. Coaching question this answers: "given
+    // how *I* race, what's the HR I should hold during the runs?"
+    //
+    // Why personal vs textbook: every athlete's race-sustainable HR
+    // sits in a different spot inside the textbook Z3 band (70-80%
+    // of max). One athlete might cruise at 158, another at 172 —
+    // both at the same RPE, both at "race pace." Telling them both
+    // "Z3 is 70-80% of max" is generic; telling each of them their
+    // own observed band is coaching.
+    //
+    // Method:
+    //   1. Pull avg HR from every run split across the athlete's
+    //      finished races (limited to recent N for relevance).
+    //   2. Compute median (the band center) + IQR (the band edges
+    //      = 25th percentile and 75th percentile).
+    //   3. Return nil when fewer than 8 run-split HR samples exist
+    //      — below that, percentile estimates are too noisy. Eight
+    //      runs is roughly one full HYROX race, so this kicks in
+    //      after the first race with full HR capture.
+    //
+    // The IQR specifically (not min/max) is chosen because race
+    // splits include some outliers — a run where the athlete eased
+    // up for fluid, a final-run sprint, etc. IQR cuts those off the
+    // tails and reports the band the athlete actually lives in.
+    //
+    // Cue-integration consumers compare current HR to (lowerQuartile,
+    // upperQuartile): below = push, inside = hold, above = slow.
+    // Cleaner than the textbook 70-80% rule, especially for
+    // athletes whose physiology lives at the edges of the textbook
+    // band.
+    struct PersonalHRBaseline: Equatable {
+        let median: Double             // band center (50th percentile)
+        let lowerQuartile: Double      // band lower edge (25th percentile)
+        let upperQuartile: Double      // band upper edge (75th percentile)
+        let sampleCount: Int           // total run-splits contributing
+        let racesCounted: Int          // races contributing
+    }
+
+    static func personalHRBaseline(
+        across races: [Race],
+        recentRaceLimit: Int = 10
+    ) -> PersonalHRBaseline? {
+        // Pull recent finished races first — older races may pre-
+        // date HR sampling or have noisy data. Sorting by createdAt
+        // descending and prefixing N gives the most-recent window.
+        let recentRaces = races
+            .filter { $0.isFinished }
+            .sorted { $0.createdAt > $1.createdAt }
+            .prefix(recentRaceLimit)
+
+        // Collect every run split's avg HR across this window.
+        let runHRSamples: [Double] = recentRaces.flatMap { race in
+            race.splits.compactMap { split -> Double? in
+                guard split.station.kind == .run,
+                      let avg = split.heartRateAvgBPM,
+                      avg > 0 else { return nil }
+                return avg
+            }
+        }
+
+        // Need at least 8 samples for a stable percentile estimate.
+        // Below this, single-noisy-split skews the median enough to
+        // mislead the cue downstream.
+        guard runHRSamples.count >= 8 else { return nil }
+
+        let sorted = runHRSamples.sorted()
+        let median = percentile(sorted, p: 0.50)
+        let q1 = percentile(sorted, p: 0.25)
+        let q3 = percentile(sorted, p: 0.75)
+
+        return PersonalHRBaseline(
+            median: median,
+            lowerQuartile: q1,
+            upperQuartile: q3,
+            sampleCount: runHRSamples.count,
+            racesCounted: recentRaces.count
+        )
+    }
+
+    // MARK: - Per-station HR signature
+
+    // Per-station HR fingerprint, derived from the athlete's
+    // historical splits at THAT station type. Coaching question:
+    // "for this specific movement, what's normal HR for me?"
+    //
+    // Why per-station vs the personal baseline (#10): the global
+    // baseline aggregates run splits — meaningful for runs because
+    // they're all the same prescribed work. But sled push lives at
+    // one HR cost, wall balls another, rowing somewhere else,
+    // because muscle recruitment + breathing constraints differ
+    // per movement. Reading today's sled-push HR against the
+    // run-average median is meaningless. Per-station signatures
+    // give each movement its own band.
+    //
+    // Classification surface: when today's split's avg HR is
+    // outside the IQR (25th-75th percentile) of the athlete's
+    // history at that station, surface a callout — "today's sled
+    // push HR was 12 bpm above your usual." That's the kind of
+    // observation a coach makes mid-block ("you looked heavy
+    // today, were you OK?") and that no current HYROX tracker
+    // surfaces.
+    //
+    // Returns nil when fewer than 3 prior splits at this station
+    // exist — too noisy below that for a percentile estimate.
+    struct StationHRSignature: Equatable {
+        let station: Station
+        let median: Double
+        let lowerQuartile: Double
+        let upperQuartile: Double
+        let sampleCount: Int
+        let racesCounted: Int
+    }
+
+    // Anomaly classification — where today's HR sits against the
+    // historical band for this station. The "well above" / "well
+    // below" buckets fire only when today's reading is more than
+    // 1.5× the IQR width past the band edges, the same outlier
+    // threshold used in classical box-plot whisker detection.
+    // That keeps the call-out from firing on routine sample noise.
+    enum StationHRAnomaly: Equatable {
+        case wellBelowUsual  // HR much lower than typical for this station
+        case belowUsual      // below Q1 but within whiskers
+        case typical         // inside the IQR
+        case aboveUsual      // above Q3 but within whiskers
+        case wellAboveUsual  // HR much higher than typical for this station
+
+        var displayName: String {
+            switch self {
+            case .wellBelowUsual: return "Well below usual"
+            case .belowUsual:     return "Below usual"
+            case .typical:        return "Typical"
+            case .aboveUsual:     return "Above usual"
+            case .wellAboveUsual: return "Well above usual"
+            }
+        }
+
+        // Coaching cue strings — `aboveUsual` and `wellAboveUsual`
+        // are the actionable signals (something might be off).
+        // Below-usual is rarely a problem (you're more efficient
+        // today, or going easy). Typical is the silent default.
+        var coachingCue: String? {
+            switch self {
+            case .wellAboveUsual:
+                return "Well above your usual HR for this station — heavier load, fatigue, or off-day."
+            case .aboveUsual:
+                return "Above your usual HR for this station — worth noting."
+            case .wellBelowUsual:
+                return "Well below your usual HR — efficient day or easy effort."
+            case .belowUsual, .typical:
+                return nil
+            }
+        }
+    }
+
+    static func stationHRSignature(
+        for station: Station,
+        across races: [Race],
+        excludingRace: Race? = nil
+    ) -> StationHRSignature? {
+        // Pull this athlete's historical avg HR samples for the
+        // requested station only. Excluding the current race lets
+        // the caller compute "today vs my historical signature"
+        // without the current sample biasing its own baseline —
+        // important when classifying anomalies on a freshly-
+        // finished race.
+        let samples: [Double] = races
+            .filter { $0.isFinished }
+            .filter { excludingRace == nil ? true : $0.id != excludingRace!.id }
+            .flatMap { race in
+                race.splits.compactMap { split -> Double? in
+                    guard split.station == station,
+                          let avg = split.heartRateAvgBPM,
+                          avg > 0 else { return nil }
+                    return avg
+                }
+            }
+
+        // Need at least 3 prior splits — below that, percentile
+        // estimates are essentially "min/median/max of 2 numbers"
+        // and the IQR isn't meaningful. Three is the smallest
+        // sample where the box-plot framing reads as a real
+        // distribution, not just point estimates.
+        guard samples.count >= 3 else { return nil }
+
+        let sorted = samples.sorted()
+        return StationHRSignature(
+            station: station,
+            median: percentile(sorted, p: 0.50),
+            lowerQuartile: percentile(sorted, p: 0.25),
+            upperQuartile: percentile(sorted, p: 0.75),
+            sampleCount: samples.count,
+            racesCounted: races.filter { $0.isFinished && $0.splits.contains { $0.station == station } }.count
+        )
+    }
+
+    // Classify a single split's avg HR against the historical
+    // signature for that station. Returns nil when the split has
+    // no avg HR data; the UI silently hides the callout in that
+    // case rather than showing "—".
+    static func classifyStationHR(
+        currentHR: Double,
+        signature: StationHRSignature
+    ) -> StationHRAnomaly {
+        let iqr = signature.upperQuartile - signature.lowerQuartile
+        // Box-plot whisker thresholds — 1.5× IQR past each band
+        // edge. Below lowerWhisker = wellBelow; above upperWhisker
+        // = wellAbove. The classic outlier definition from
+        // exploratory data analysis; not arbitrary.
+        let lowerWhisker = signature.lowerQuartile - 1.5 * iqr
+        let upperWhisker = signature.upperQuartile + 1.5 * iqr
+
+        if currentHR < lowerWhisker { return .wellBelowUsual }
+        if currentHR < signature.lowerQuartile { return .belowUsual }
+        if currentHR > upperWhisker { return .wellAboveUsual }
+        if currentHR > signature.upperQuartile { return .aboveUsual }
+        return .typical
+    }
+
+    // Linear-interpolated percentile on a pre-sorted array. p in
+    // [0, 1]. Empty array returns 0; single-element array returns
+    // that element. Used by personalHRBaseline; kept fileprivate-
+    // adjacent (private to RaceStats) so other helpers needing
+    // percentile arithmetic can share it later.
+    private static func percentile(_ sorted: [Double], p: Double) -> Double {
+        guard !sorted.isEmpty else { return 0 }
+        guard sorted.count > 1 else { return sorted[0] }
+        let rank = p * Double(sorted.count - 1)
+        let lowerIndex = Int(rank.rounded(.down))
+        let upperIndex = Int(rank.rounded(.up))
+        if lowerIndex == upperIndex { return sorted[lowerIndex] }
+        let weight = rank - Double(lowerIndex)
+        return sorted[lowerIndex] * (1 - weight) + sorted[upperIndex] * weight
+    }
+
     // Per-split effort score — same intensity-weighted-minutes
     // formula as the whole-race version, but applied to a single
     // segment. Used by StationDetailView's physiology row + the
@@ -986,6 +1383,454 @@ enum RaceStats {
             .compactMap { effortScore(for: $0, maxHR: maxHR) }
         guard !scores.isEmpty else { return nil }
         return scores.reduce(0, +) / Double(scores.count)
+    }
+
+    // MARK: - Engine Quality composite score
+    //
+    // Single-number rollup (0-100) of the athlete's HR-derived
+    // engine quality, computed across their last N finished races.
+    // The Whoop strain / Apple Activity ring equivalent for HYROX
+    // — frames every HR metric we compute (drift, recovery,
+    // efficiency, decoupling) into one coaching readout.
+    //
+    // Composition: each sub-metric is normalized to 0-100 against
+    // research-grounded thresholds, then averaged. Sub-scores that
+    // can't be computed (insufficient data, missing HR captures)
+    // are dropped from the average rather than treated as zero —
+    // a brand-new athlete with two races shouldn't see "37" just
+    // because one of three signals is unavailable.
+    //
+    // Sub-score normalizations (each clamped 0-100):
+    //
+    //   • Drift:        0bpm → 100, 15bpm → 0     (linear, less is better)
+    //   • Recovery:     0bpm → 0,   30bpm → 100   (linear, more is better)
+    //   • Efficiency:   0.6  → 0,   1.2  → 100    (linear, more is better)
+    //   • Decoupling:   0%   → 100, 15%  → 0      (linear, less is better)
+    //
+    // Tier mapping:
+    //   <40 = Building (engine has real work to do)
+    //   40-70 = Steady (race-fit conditioning)
+    //   >70 = Elite (everything firing)
+    //
+    // Athlete-level rollup vs per-race: the score uses the AVG of
+    // each sub-metric across the recent races, not the most-recent
+    // race alone. A single bad race shouldn't tank the engine
+    // score; a single great race shouldn't inflate it. Five-race
+    // window strikes the balance — long enough to smooth noise,
+    // short enough to reflect current fitness rather than
+    // historical.
+    struct EngineScore: Equatable {
+        let overall: Double          // 0-100
+        let driftSubScore: Double?
+        let recoverySubScore: Double?
+        let efficiencySubScore: Double?
+        let decouplingSubScore: Double?
+        let racesCounted: Int
+        let tier: Tier
+
+        enum Tier: String, Equatable {
+            case building
+            case steady
+            case elite
+
+            var displayName: String {
+                switch self {
+                case .building: return "Building"
+                case .steady:   return "Steady"
+                case .elite:    return "Elite"
+                }
+            }
+
+            // Coaching-cue strings used by the Profile card under
+            // the tier label. One sentence each — enough to give
+            // the number meaning without crowding the UI.
+            var coachingCue: String {
+                switch self {
+                case .building:
+                    return "Engine has real work to do. Long Z2 weeks pay off."
+                case .steady:
+                    return "Race-fit conditioning. Hold the volume, sharpen race pace."
+                case .elite:
+                    return "Everything firing. Maintain volume and add quality."
+                }
+            }
+        }
+
+        static func tier(forScore score: Double) -> Tier {
+            switch score {
+            case ..<40:  return .building
+            case 40..<70: return .steady
+            default:      return .elite
+            }
+        }
+    }
+
+    // Per-race engine score — same composition as the athlete-
+    // level rollup but scoped to one race. Each sub-metric is
+    // already a single-race signal (drift = within-this-race HR
+    // climb, recovery = within-this-race HR drops, etc.), so the
+    // per-race version is simply: "run each sub-metric helper on
+    // THIS race, normalize, average."
+    //
+    // Use case differs from the athlete-level rollup. The rollup
+    // answers "where am I in my conditioning right now" (5-race
+    // smoothing). The per-race version answers "how was the
+    // engine in *this* race specifically" — which is the headline
+    // post-race readout, and which becomes a single dot on the
+    // engine-score trend chart later.
+    //
+    // `history` is needed because the efficiency sub-metric
+    // requires the athlete's prior PB at each station to compute
+    // the relative-pace numerator. Pass the full race list; the
+    // helper handles the exclusion of the current race itself.
+    // Per-race engine-score interpretation against the athlete's
+    // recent rolling baseline. Drives the post-race insight
+    // narrative — turns the raw number ("Engine 78") into a
+    // coaching observation ("Breakthrough — Recovery powered it").
+    //
+    // Three signals layered:
+    //   1. Position vs recent average (last 5 races, excluding
+    //      this one). Breakthrough if 10+ above; regression if
+    //      10+ below; otherwise normal-range.
+    //   2. All-time-best detection — strictly highest score in
+    //      the athlete's race history. Surfaces only when there
+    //      are 2+ prior races to compare against; first-race
+    //      can't be a "best."
+    //   3. Dominant sub-metric driver — for races with a clear
+    //      delta (breakthrough or regression), identify which
+    //      of the four sub-scores deviated most from the
+    //      athlete's rolling sub-score baselines. Lets the
+    //      insight name the specific sub-metric ("Recovery
+    //      powered this race" / "Drift dragged it down").
+    //
+    // Returns nil for the first race ever or when sub-metric
+    // data isn't available — the insight stays silent rather
+    // than firing on noisy data.
+    struct EngineScoreContext: Equatable {
+        let thisRaceScore: Double
+        let recentAverage: Double      // last 5 races excluding this one
+        let delta: Double              // thisRace - recentAverage
+        let isAllTimeBest: Bool
+        let dominantSubMetric: SubMetric?
+        let position: Position
+        let priorRaceCount: Int
+
+        // Which sub-metric most influenced this race vs the
+        // athlete's rolling sub-score average. The "most
+        // influenced" calculation is the largest absolute delta
+        // between this race's sub-score and the rolling average
+        // sub-score, in the direction of the overall delta. So a
+        // breakthrough race shows the sub-metric that climbed
+        // most; a regression race shows the one that fell most.
+        enum SubMetric: String, Equatable {
+            case drift
+            case recovery
+            case efficiency
+            case decoupling
+
+            var displayName: String {
+                switch self {
+                case .drift:       return "Drift"
+                case .recovery:    return "Recovery"
+                case .efficiency:  return "Efficiency"
+                case .decoupling:  return "Decoupling"
+                }
+            }
+        }
+
+        // Three-way classification of this race vs recent baseline.
+        enum Position: Equatable {
+            case breakthrough  // 10+ above recent avg (or all-time best)
+            case regression    // 10+ below recent avg
+            case normal        // within ±10 of recent avg
+        }
+    }
+
+    static func engineScoreContext(
+        forRace race: Race,
+        history: [Race],
+        maxHR: Int
+    ) -> EngineScoreContext? {
+        // Need this race's score and at least 1 prior race for
+        // any meaningful interpretation. Below that, there's no
+        // context to interpret against.
+        guard let thisRace = engineScore(forRace: race, history: history, maxHR: maxHR) else {
+            return nil
+        }
+
+        // Recent rolling baseline: last 5 finished races EXCLUDING
+        // this one. Same window the rollup helper uses; keeps the
+        // "recent" definition consistent across surfaces.
+        let priorRaces = history
+            .filter { $0.isFinished && $0.id != race.id }
+            .sorted { $0.createdAt > $1.createdAt }
+            .prefix(5)
+
+        guard !priorRaces.isEmpty else { return nil }
+
+        let priorScores: [EngineScore] = priorRaces.compactMap {
+            engineScore(forRace: $0, history: history, maxHR: maxHR)
+        }
+        guard !priorScores.isEmpty else { return nil }
+
+        let recentAvg = priorScores.map(\.overall).reduce(0, +) / Double(priorScores.count)
+        let delta = thisRace.overall - recentAvg
+
+        // All-time-best across the full history (not just recent).
+        // True if THIS race's score is strictly higher than every
+        // prior race's score we could compute one for.
+        let allHistoricalScores: [Double] = history
+            .filter { $0.isFinished && $0.id != race.id }
+            .compactMap { engineScore(forRace: $0, history: history, maxHR: maxHR)?.overall }
+        let isAllTimeBest = !allHistoricalScores.isEmpty
+            && allHistoricalScores.allSatisfy { thisRace.overall > $0 }
+
+        // Position bucket — straight thresholds. The 10-point
+        // threshold is roughly 1 tier-band's worth of movement
+        // (Building→Steady spans 30 points), so 10 is the
+        // smallest delta that's meaningful at the rollup level.
+        let position: EngineScoreContext.Position = {
+            if delta >= 10 { return .breakthrough }
+            if delta <= -10 { return .regression }
+            return .normal
+        }()
+
+        // Dominant sub-metric driver — only meaningful for non-
+        // normal positions (in the normal band, no sub-metric
+        // really "drove" anything). For breakthrough or
+        // regression, find the sub-score that deviated most from
+        // the athlete's rolling sub-score average, in the
+        // direction of the overall delta.
+        let dominant: EngineScoreContext.SubMetric? = {
+            guard position != .normal else { return nil }
+            return dominantSubMetricDriver(
+                thisRace: thisRace,
+                priorRaces: priorScores,
+                direction: delta > 0 ? .breakthrough : .regression
+            )
+        }()
+
+        return EngineScoreContext(
+            thisRaceScore: thisRace.overall,
+            recentAverage: recentAvg,
+            delta: delta,
+            isAllTimeBest: isAllTimeBest,
+            dominantSubMetric: dominant,
+            position: position,
+            priorRaceCount: priorScores.count
+        )
+    }
+
+    // Finds the sub-metric whose this-race deviation from the
+    // rolling sub-score average is most aligned with the overall
+    // delta. Returns nil if no sub-metric has comparable rolling
+    // baseline data.
+    private static func dominantSubMetricDriver(
+        thisRace: EngineScore,
+        priorRaces: [EngineScore],
+        direction: EngineScoreContext.Position
+    ) -> EngineScoreContext.SubMetric? {
+        // Compute prior averages per sub-metric — only over races
+        // where that sub-metric was available, matching the
+        // engine-score helper's metric-by-metric averaging.
+        let priorDriftAvg = averageOrNil(priorRaces.compactMap(\.driftSubScore))
+        let priorRecoveryAvg = averageOrNil(priorRaces.compactMap(\.recoverySubScore))
+        let priorEfficiencyAvg = averageOrNil(priorRaces.compactMap(\.efficiencySubScore))
+        let priorDecouplingAvg = averageOrNil(priorRaces.compactMap(\.decouplingSubScore))
+
+        // Pair each sub-metric with its delta vs the rolling avg.
+        // A sub-metric only contributes if both the prior avg and
+        // this race's sub-score are non-nil — `subDelta` returns
+        // nil when either side is missing, dropping the pair.
+        //
+        // The two-step shape (build optional pairs, then
+        // compactMap to non-optional) is intentional: a single
+        // type-annotated literal that mixes `.drift` enum-case
+        // shorthand with optional Doubles trips Swift's type
+        // inference, since the outer annotation can't propagate
+        // through the array literal into the optional-stripping
+        // compactMap. Splitting it lets each step type-check
+        // cleanly on its own.
+        func subDelta(this: Double?, prior: Double?) -> Double? {
+            guard let this, let prior else { return nil }
+            return this - prior
+        }
+        let candidates: [(EngineScoreContext.SubMetric, Double?)] = [
+            (.drift,      subDelta(this: thisRace.driftSubScore,      prior: priorDriftAvg)),
+            (.recovery,   subDelta(this: thisRace.recoverySubScore,   prior: priorRecoveryAvg)),
+            (.efficiency, subDelta(this: thisRace.efficiencySubScore, prior: priorEfficiencyAvg)),
+            (.decoupling, subDelta(this: thisRace.decouplingSubScore, prior: priorDecouplingAvg))
+        ]
+        let deltas: [(metric: EngineScoreContext.SubMetric, delta: Double)] = candidates.compactMap { pair in
+            guard let value = pair.1 else { return nil }
+            return (metric: pair.0, delta: value)
+        }
+
+        guard !deltas.isEmpty else { return nil }
+
+        // For breakthrough — pick the sub-metric with the largest
+        // POSITIVE delta. For regression — largest NEGATIVE delta.
+        // The sub-metric most aligned with the overall delta's
+        // direction is the one that drove the change.
+        switch direction {
+        case .breakthrough:
+            return deltas.max(by: { $0.delta < $1.delta })?.metric
+        case .regression:
+            return deltas.min(by: { $0.delta < $1.delta })?.metric
+        case .normal:
+            return nil
+        }
+    }
+
+    static func engineScore(
+        forRace race: Race,
+        history: [Race],
+        maxHR: Int
+    ) -> EngineScore? {
+        let drift = heartRateDrift(for: race)?.driftBPM
+        let recovery = recoveryScore(for: race)?.averageDrop30s
+        let decoupling = aerobicDecoupling(for: race)?.decouplingFraction
+        let efficiency = efficiencyScore(for: race, history: history, maxHR: maxHR)?.overall
+
+        let driftSub = drift.map { normalizeDrift($0) }
+        let recoverySub = recovery.map { normalizeRecovery($0) }
+        let efficiencySub = efficiency.map { normalizeEfficiency($0) }
+        let decouplingSub = decoupling.map { normalizeDecoupling($0) }
+
+        let subScores = [driftSub, recoverySub, efficiencySub, decouplingSub]
+            .compactMap { $0 }
+        guard !subScores.isEmpty else { return nil }
+        let overall = subScores.reduce(0, +) / Double(subScores.count)
+
+        return EngineScore(
+            overall: overall,
+            driftSubScore: driftSub,
+            recoverySubScore: recoverySub,
+            efficiencySubScore: efficiencySub,
+            decouplingSubScore: decouplingSub,
+            racesCounted: 1,
+            tier: EngineScore.tier(forScore: overall)
+        )
+    }
+
+    static func engineScore(
+        across races: [Race],
+        maxHR: Int,
+        recentRaceLimit: Int = 5
+    ) -> EngineScore? {
+        // Pull the most recent finished races first.
+        let recent = races
+            .filter(\.isFinished)
+            .sorted { $0.createdAt > $1.createdAt }
+            .prefix(recentRaceLimit)
+
+        guard !recent.isEmpty else { return nil }
+
+        // Per-race sub-metric extraction. Each helper returns nil
+        // for races without enough data; we average over the
+        // races that DO have data per metric, separately, so a
+        // race missing recovery data still contributes to drift
+        // average (etc.).
+        let drifts: [Double] = recent.compactMap {
+            heartRateDrift(for: $0)?.driftBPM
+        }
+        let recoveries: [Double] = recent.compactMap {
+            recoveryScore(for: $0)?.averageDrop30s
+        }
+        let decouplings: [Double] = recent.compactMap {
+            aerobicDecoupling(for: $0)?.decouplingFraction
+        }
+        // Efficiency is per-race overall — pulls history excluding
+        // the current race for PB-baseline lookup. We use ALL
+        // finished races (the full provided list) as the history,
+        // not just the recent slice, so PBs are correct.
+        let efficiencies: [Double] = recent.compactMap {
+            efficiencyScore(for: $0, history: races, maxHR: maxHR)?.overall
+        }
+
+        // Average across available samples per metric. Returns nil
+        // when no samples exist for that metric — the overall avg
+        // ignores nil sub-scores.
+        let avgDrift = averageOrNil(drifts)
+        let avgRecovery = averageOrNil(recoveries)
+        let avgDecoupling = averageOrNil(decouplings)
+        let avgEfficiency = averageOrNil(efficiencies)
+
+        // Normalize each into 0-100 via the formulas above.
+        // Returning nil when the source metric is nil propagates
+        // "no data" cleanly through.
+        let driftSub = avgDrift.map { normalizeDrift($0) }
+        let recoverySub = avgRecovery.map { normalizeRecovery($0) }
+        let efficiencySub = avgEfficiency.map { normalizeEfficiency($0) }
+        let decouplingSub = avgDecoupling.map { normalizeDecoupling($0) }
+
+        // Overall = average of available sub-scores. We need at
+        // least one sub-score to render a number — otherwise the
+        // helper returns nil and the Profile card hides.
+        let subScores = [driftSub, recoverySub, efficiencySub, decouplingSub]
+            .compactMap { $0 }
+        guard !subScores.isEmpty else { return nil }
+        let overall = subScores.reduce(0, +) / Double(subScores.count)
+
+        return EngineScore(
+            overall: overall,
+            driftSubScore: driftSub,
+            recoverySubScore: recoverySub,
+            efficiencySubScore: efficiencySub,
+            decouplingSubScore: decouplingSub,
+            racesCounted: recent.count,
+            tier: EngineScore.tier(forScore: overall)
+        )
+    }
+
+    // Average helper that returns nil for empty arrays — keeps
+    // the engine-score formulas above readable and centralizes
+    // the empty-set behavior. Distinct from the existing
+    // `average(_:) -> TimeInterval` helper below which returns
+    // 0 for empty (different semantics: this one says "no data,"
+    // that one says "zero time"). Both are kept rather than
+    // merged because the empty-set behavior is what
+    // distinguishes them at the call site.
+    private static func averageOrNil(_ values: [Double]) -> Double? {
+        guard !values.isEmpty else { return nil }
+        return values.reduce(0, +) / Double(values.count)
+    }
+
+    // 0bpm = 100 (engine held perfectly), 15bpm = 0 (engine
+    // visibly faded). Anything beyond clamps. The 15bpm ceiling
+    // is well into "severe drift" by §HRDrift's category bands;
+    // an athlete drifting more than that has a real engine
+    // problem, not a calibration issue.
+    private static func normalizeDrift(_ bpm: Double) -> Double {
+        let clamped = max(0, min(15, bpm))
+        return (1 - clamped / 15) * 100
+    }
+
+    // 0bpm = 0 (no recovery), 30bpm = 100 (elite). 30 is the
+    // top of the "excellent" band per RecoveryScore.category.
+    private static func normalizeRecovery(_ bpm: Double) -> Double {
+        let clamped = max(0, min(30, bpm))
+        return (clamped / 30) * 100
+    }
+
+    // 0.6 = 0 (poor pace-per-HR), 1.2 = 100 (above PB pace at
+    // sub-PB intensity). The 1.2 ceiling is generous — most
+    // athletes' overall efficiency lives between 0.7 and 1.1
+    // even at peak fitness; allowing a 1.2 stretches the upper
+    // end so the score doesn't get pinned at 100 for any
+    // serious athlete.
+    private static func normalizeEfficiency(_ value: Double) -> Double {
+        let clamped = max(0.6, min(1.2, value))
+        return ((clamped - 0.6) / 0.6) * 100
+    }
+
+    // 0% = 100 (engine held perfectly), 15% = 0 (severe gap).
+    // 15% is well past the "large gap" threshold from
+    // AerobicDecoupling.category — same logic as the drift
+    // ceiling.
+    private static func normalizeDecoupling(_ fraction: Double) -> Double {
+        let clamped = max(0, min(0.15, fraction))
+        return (1 - clamped / 0.15) * 100
     }
 
     // MARK: - Cross-race aggregates (for Profile) — phone only
@@ -1415,6 +2260,139 @@ enum RaceStats {
     }
 
     #endif  // !os(watchOS)
+
+    // MARK: - Live coaching cue (shared with watchOS)
+    //
+    // Real-time pacing cue based on current HR vs the HYROX race-
+    // sustainable band. The intent: while running, an athlete
+    // should hold roughly Z3 — that's the 90-minute pace HYROX is
+    // built around. Above Z3 means they're dipping into anaerobic
+    // territory and won't last; below Z3 means they're leaving time
+    // on the table.
+    //
+    // Workout stations (sled, lunges, wall balls) are deliberately
+    // excluded — those are short tactical efforts where redlining
+    // is normal and useful. Telling someone to "slow down" mid-sled-
+    // push is bad coaching.
+    //
+    // Used on the iPhone race screen as a coaching chip and on the
+    // Watch (with haptic on cue transitions). Lives outside the
+    // `#if !os(watchOS)` guard above because it depends only on
+    // `Station` + `HRZone` + `Int`, all of which are in the watchOS
+    // compile set — so one helper serves both surfaces.
+    enum CoachingCue: String, Equatable, Sendable {
+        // Athlete is at race-sustainable HR during a run. Reads as
+        // affirmation: "you're doing it right, keep it here."
+        case hold
+
+        // Athlete's HR is above Z3 during a run. Tactical push
+        // mid-run is fine for short bursts (final 200m, hill);
+        // a sustained Z4-Z5 mid-run is pacing failure. The cue
+        // doesn't know which it is — it just flags "you can't
+        // hold this for 90 min."
+        case slow
+
+        // Athlete is below Z3 during a run. They've got more in
+        // the tank. Common at the start of races when fresh
+        // legs feel slow, or when athlete is sandbagging out
+        // of fear.
+        case push
+
+        // Currently on a workout station — no pace cue. Workouts
+        // are short tactical bursts; a "hold/slow/push" cue mid-
+        // wall-balls is wrong.
+        case workout
+
+        // No HR data, or race not in an active running/workout
+        // state. UI hides the chip entirely in this case.
+        case none
+
+        var displayText: String {
+            switch self {
+            case .hold:    return "HOLD PACE"
+            case .slow:    return "SLOW DOWN"
+            case .push:    return "PUSH HARDER"
+            case .workout: return "WORK"
+            case .none:    return ""
+            }
+        }
+
+        // Coaching-cue colors map onto the HYROX zone palette so
+        // the chip's color reinforces the same vocabulary the
+        // per-station tag uses. Hold is green (good zone), slow
+        // is red (above sustainable), push is blue (below race
+        // pace), workout is neutral white.
+        var colorHex: UInt {
+            switch self {
+            case .hold:    return 0x32D74B  // success green
+            case .slow:    return 0xFF3B30  // accent red
+            case .push:    return 0x5B9BD5  // calm blue (matches Z1)
+            case .workout: return 0xF5F5F7  // textPrimary off-white
+            case .none:    return 0x000000  // unused
+            }
+        }
+    }
+
+    // Compute the coaching cue from current HR + max HR + current
+    // station. Returns `.none` when any required input is missing —
+    // the UI silently hides the chip rather than showing a stale
+    // or misleading cue.
+    //
+    // When `personalLowerHR` and `personalUpperHR` are BOTH provided
+    // (typically from `RaceStats.personalHRBaseline(across:)`'s IQR
+    // bounds), the cue classifies against the athlete's *observed*
+    // race-pace band instead of the textbook Z3 zone. This is much
+    // more accurate than generic 70-80% of max — every athlete's
+    // race-sustainable HR sits in a different spot inside the
+    // textbook band, and the personalized version tells each of
+    // them exactly where their own line is.
+    //
+    // Without the personal band, falls back to textbook Z3 (zone
+    // computed from maxHR). The fallback path matches v0.1
+    // behavior so first-race / no-history users still get useful
+    // cues; the personal band kicks in once 8+ run-split HR samples
+    // exist.
+    static func coachingCue(
+        currentHR: Double?,
+        maxHR: Int,
+        currentStation: Station?,
+        personalLowerHR: Double? = nil,
+        personalUpperHR: Double? = nil
+    ) -> CoachingCue {
+        guard let hr = currentHR,
+              hr > 0,
+              let station = currentStation,
+              maxHR > 0
+        else { return .none }
+
+        // Workout stations: no pace cue — see note above.
+        if station.kind == .workout {
+            return .workout
+        }
+
+        // Personalized path: when the athlete has enough history
+        // to derive an observed race-pace band, classify against
+        // it directly. Both bounds must be present and ordered
+        // sensibly; we defensively fall back to textbook if not.
+        if let lower = personalLowerHR,
+           let upper = personalUpperHR,
+           lower > 0,
+           upper > lower {
+            if hr < lower { return .push }
+            if hr > upper { return .slow }
+            return .hold
+        }
+
+        // Textbook fallback — classify against Z3 (race-sustainable
+        // band: 70-80% of max). Used until the personal baseline
+        // bootstraps, and as a safety net when bounds are missing.
+        let zone = HRZone.zone(for: hr, maxBPM: maxHR)
+        switch zone {
+        case .z1, .z2: return .push
+        case .z3:      return .hold
+        case .z4, .z5: return .slow
+        }
+    }
 
     // MARK: - Effort score (snapshot-side, shared with watchOS)
     //

@@ -348,6 +348,16 @@ struct StationDetailView: View {
                 effortChip(category: category)
             }
 
+            // Per-station HR signature — "today's avg HR vs your
+            // historical signature for this station." Renders only
+            // when this split has avg HR data, the athlete has 3+
+            // prior splits at this station, AND today's HR falls
+            // outside the typical IQR band (typical = silent —
+            // actionable callouts only). The `excludingRace`
+            // parameter ensures today's race doesn't bias its own
+            // baseline when we classify it.
+            stationHRSignatureCallout
+
             // Boundary HR row — entry / end / 30s drop / 60s drop.
             // The HYROX-specific signal: how fatigued did you start
             // this station, where did your HR end up, and how fast
@@ -359,6 +369,77 @@ struct StationDetailView: View {
             if hasAnyBoundaryHR {
                 boundaryHRRow
             }
+        }
+    }
+
+    // Anomaly callout — surfaces when today's avg HR for this
+    // station is meaningfully off the athlete's historical
+    // signature. Three states render: above usual (amber),
+    // well above usual (coral), well below usual (success).
+    // Below-usual but still inside whiskers and typical both
+    // hide silently — only actionable observations earn screen
+    // real estate.
+    @ViewBuilder
+    private var stationHRSignatureCallout: some View {
+        // Find the parent race so today's split doesn't bias its
+        // own historical baseline when we classify it. Reverse
+        // lookup over the race list — Split doesn't have a
+        // back-reference relationship in our SwiftData schema, but
+        // the lookup is O(races × splits-per-race), which for
+        // realistic histories is single-digit microseconds.
+        let parentRace = allFinishedRaces.first { race in
+            race.splits.contains(where: { $0.id == split.id })
+        }
+        if let currentHR = split.heartRateAvgBPM,
+           let signature = RaceStats.stationHRSignature(
+               for: split.station,
+               across: allFinishedRaces,
+               excludingRace: parentRace
+           ) {
+            let anomaly = RaceStats.classifyStationHR(
+                currentHR: currentHR,
+                signature: signature
+            )
+            if let cue = anomaly.coachingCue {
+                let delta = Int((currentHR - signature.median).rounded())
+                let signed = delta >= 0 ? "+\(delta)" : "\(delta)"
+                let tint = signatureTint(for: anomaly)
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "waveform.path.ecg")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(tint)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(signed) bpm vs your usual")
+                            .font(.caption.weight(.heavy))
+                            .monospacedDigit()
+                            .foregroundStyle(Color.textPrimary)
+                        Text(cue)
+                            .font(.caption2)
+                            .foregroundStyle(Color.textSecondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(tint.opacity(0.12))
+                )
+            }
+        }
+    }
+
+    // Color contract: well-above is the strongest "something off"
+    // signal (coral), above-usual is a softer note (amber), well-
+    // below is positive (success green). Mirrors the recovery /
+    // drift insight color conventions.
+    private func signatureTint(for anomaly: RaceStats.StationHRAnomaly) -> Color {
+        switch anomaly {
+        case .wellAboveUsual: return .accent
+        case .aboveUsual:     return .warning
+        case .wellBelowUsual: return .success
+        case .belowUsual, .typical: return .textSecondary
         }
     }
 

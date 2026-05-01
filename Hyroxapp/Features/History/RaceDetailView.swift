@@ -151,6 +151,18 @@ struct RaceDetailView: View {
         .accessibilityLabel("Share race")
     }
 
+    // Engine-tier tint contract — matches RaceSummaryView and
+    // EngineScoreView's hero-score tint so the per-race line on
+    // historical detail reads the same color language as the
+    // post-race summary and the Profile rollup.
+    private func engineTint(_ tier: RaceStats.EngineScore.Tier) -> Color {
+        switch tier {
+        case .elite:    return .success
+        case .steady:   return .textPrimary
+        case .building: return .warning
+        }
+    }
+
     // Render both formats once and stash in @State for the Menu's
     // ShareLinks. Idempotent per-format.
     private func prepareShareImages() {
@@ -253,6 +265,22 @@ struct RaceDetailView: View {
                     .foregroundStyle(Color.accent)
             }
 
+            // Engine Quality — single-number rollup of this race's
+            // drift + recovery + efficiency + decoupling. Same hero
+            // line treatment as RaceSummaryView so the post-race
+            // summary and the historical detail screen read with
+            // the same headline.
+            if let engine = RaceStats.engineScore(
+                forRace: race,
+                history: allFinishedRaces,
+                maxHR: maxHeartRate
+            ) {
+                Text("Engine \(Int(engine.overall.rounded())) · \(engine.tier.displayName)")
+                    .font(.caption.weight(.heavy))
+                    .monospacedDigit()
+                    .foregroundStyle(engineTint(engine.tier))
+            }
+
             // Race-wide HR aggregate. Avg is duration-weighted across
             // all splits (a long station with high HR matters more
             // than a short one with low HR). Peak is the max of all
@@ -285,6 +313,35 @@ struct RaceDetailView: View {
                 maxHR: maxHeartRate
             ) {
                 Text("Efficiency \(String(format: "%.2f", efficiency.overall)) · \(efficiency.category.displayName)")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.accentDim)
+            }
+
+            // Cardiac drift — avg HR climb across the 8 runs (first
+            // half vs second half). Silent when fewer than 6 runs
+            // have HR data captured. Same line treatment + signed
+            // bpm rendering as the RaceSummary post-race hero.
+            if let drift = RaceStats.heartRateDrift(for: race) {
+                let signed = drift.driftBPM >= 0
+                    ? "+\(Int(drift.driftBPM.rounded()))"
+                    : "\(Int(drift.driftBPM.rounded()))"
+                Text("HR drift \(signed) bpm · \(drift.category.displayName)")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.accentDim)
+            }
+
+            // Aerobic decoupling — pace-per-HR ratio change across
+            // run halves. Sport-science engine-quality metric;
+            // pairs with cardiac drift to tell the full engine
+            // story (drift = HR climbed, decoupling = engine
+            // worked harder for same/less output). Silent when
+            // fewer than 6 runs have HR + pace data captured.
+            if let decoupling = RaceStats.aerobicDecoupling(for: race) {
+                let pct = Int((decoupling.decouplingFraction * 100).rounded())
+                let signed = pct >= 0 ? "+\(pct)%" : "\(pct)%"
+                Text("Decoupling \(signed) · \(decoupling.category.displayName)")
                     .font(.caption.weight(.semibold))
                     .monospacedDigit()
                     .foregroundStyle(Color.accentDim)
