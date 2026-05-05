@@ -267,6 +267,37 @@ extension WatchCompanionService: WCSessionDelegate {
 
         print("[WatchCompanion] didReceiveMessage — unrecognized payload, ignoring")
     }
+
+    // Receives queued payloads sent via `transferUserInfo`.
+    // Survives phone-backgrounded / locked states where
+    // `didReceiveMessage` doesn't fire — that's the gap this
+    // delegate closes. Used as a redundant channel for HR samples
+    // so the in-pocket-phone case still gets recent readings.
+    //
+    // The watch publishes every HR sample via BOTH `sendMessage`
+    // (when reachable) and `transferUserInfo` (always). On the
+    // receiving side both can deliver the same sample; the
+    // RaceViewModel's ingest path de-duplicates by `sampledAt`
+    // timestamp so the redundancy doesn't double-update the chip.
+    nonisolated func session(
+        _ session: WCSession,
+        didReceiveUserInfo userInfo: [String: Any] = [:]
+    ) {
+        print("[WatchCompanion] didReceiveUserInfo FIRED — keys: \(userInfo.keys.sorted())")
+
+        // Same payload shape as didReceiveMessage. We support HR
+        // updates here today; future queued payloads (analytics
+        // batches, sample backfills) can branch off the same dict
+        // shape recognition.
+        if let hrUpdate = WatchHeartRateUpdate(dictionary: userInfo) {
+            Task { @MainActor in
+                Self.shared.onHeartRate?(hrUpdate)
+            }
+            return
+        }
+
+        print("[WatchCompanion] didReceiveUserInfo — unrecognized payload, ignoring")
+    }
 }
 
 #endif  // canImport(WatchConnectivity)

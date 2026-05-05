@@ -56,29 +56,61 @@ final class WatchRaceClient: NSObject {
     // `WatchWorkoutManager`'s `HKLiveWorkoutBuilderDelegate` whenever
     // a new HR reading is collected during a race.
     //
-    // Uses `sendMessage` for low-latency delivery (target ~1Hz cadence
-    // matches the Watch sensor's native rate). Failures are logged
-    // and dropped — stale HR is worse than no HR, so we don't fall
-    // back to `transferUserInfo` queueing here. The next sample (~1s
-    // later) will retry naturally.
+    // Dual-path delivery for resilience:
     //
-    // No-op if the session isn't activated yet or the phone isn't
-    // reachable; the phone's existing HR-polling fallback covers the
-    // gap (it polls HealthKit which the Watch is also writing to).
+    //   1. `sendMessage` — low-latency live delivery. Only succeeds
+    //      when the iPhone is reachable (foregrounded or in a state
+    //      where WCSession allows live messaging). When it fails,
+    //      we don't retry; the next sample arrives in ~1s anyway.
+    //
+    //   2. `transferUserInfo` — queued background delivery. Survives
+    //      phone-backgrounded / locked states, where `sendMessage`
+    //      silently drops. Higher latency but eventually consistent.
+    //      We send EVERY sample down this channel too so the phone
+    //      always has a recent reading even if `sendMessage` was
+    //      dropped earlier.
+    //
+    // Previously this method gated on `session.isReachable`, which
+    // is only true when the iPhone app is foregrounded. Pocketing
+    // the phone made `isReachable == false` and HR pushes silently
+    // disappeared — the bug behind "HR stuck at 70 during a jog."
+    // Now we attempt both transports unconditionally; whichever
+    // path delivers first wins on the phone (the receiver
+    // de-duplicates by sample timestamp).
     func publishHeartRate(_ update: WatchHeartRateUpdate) {
         let session = WCSession.default
         guard session.activationState == .activated else { return }
-        guard session.isReachable else { return }
 
-        session.sendMessage(
-            update.toDictionary(),
-            replyHandler: nil,
-            errorHandler: { error in
-                // Log only — HR sample failures are routine (phone
-                // briefly unreachable, locked, etc) and not actionable.
-                print("[WatchClient] publishHeartRate FAILED — \(error.localizedDescription)")
-            }
-        )
+        let dict = update.toDictionary()
+
+        // Branch on reachability — pick exactly one transport so
+        // we don't double-fill WCSession's queue at 1Hz. Either
+        // path eventually lands the same sample on the phone; the
+        // receiver de-duplicates by `sampledAt` timestamp anyway.
+        if session.isReachable {
+            // Live path — fires immediately when the iPhone app is
+            // foregrounded or in a state where WCSession allows
+            // live messaging.
+            session.sendMessage(
+                dict,
+                replyHandler: nil,
+                errorHandler: { error in
+                    // Most failures are routine (phone briefly
+                    // unreachable, locked). Logged-only — the next
+                    // sample (~1s later) retries.
+                    print("[WatchClient] publishHeartRate sendMessage FAILED — \(error.localizedDescription)")
+                }
+            )
+        } else {
+            // Queued path — survives phone backgrounded / locked.
+            // transferUserInfo enqueues for delivery as soon as the
+            // phone becomes reachable. Fixes the "HR stuck during
+            // a jog" case where the previous code gated on
+            // `session.isReachable == true` and silently dropped
+            // every sample with the phone in a pocket. Higher
+            // latency (~5-30s when phone is asleep) but reliable.
+            session.transferUserInfo(dict)
+        }
     }
 
     // Send a user-initiated action to the paired iPhone (e.g. "advance

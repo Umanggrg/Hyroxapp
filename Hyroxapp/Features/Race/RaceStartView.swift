@@ -99,12 +99,31 @@ struct RaceStartView: View {
                     .padding(.bottom, 20)
 
                 primaryCTA
-                    .padding(.bottom, 12)
-
-                customWorkoutSecondary
                     .padding(.bottom, 24)
             }
             .padding(.horizontal, 4)
+
+            // Floating "•••" menu overlay — top-right corner of
+            // the screen, on top of the hero backdrop. Houses
+            // secondary entrypoints (Custom Workout) that were
+            // previously stacked below the primary CTA cluttering
+            // the bottom of the screen. Floats rather than living
+            // in a NavigationStack toolbar because RaceStartView
+            // sits inside an unwrapped Race tab — adding a nav
+            // bar would break the immersive HeroBackdrop bleed.
+            //
+            // <5% of session starts are Custom Workout; one tap
+            // through the menu is the right ergonomics for that
+            // frequency.
+            VStack {
+                HStack {
+                    Spacer()
+                    moreOptionsMenu
+                        .padding(.top, 12)
+                        .padding(.trailing, 16)
+                }
+                Spacer()
+            }
         }
         .onAppear {
             // Kick off the ambient CTA pulse on a small delay so the
@@ -170,10 +189,18 @@ struct RaceStartView: View {
 
     // MARK: - v2 hero composition
 
-    // Top-of-screen hero: caps wordmark + giant HYROX display + tag.
-    // The display font is the redesign's primary visual identity —
-    // bigger, blacker, more presence than the v1 56pt. Tracking
-    // bumped to 6 so the letters breathe at this size.
+    // Top-of-screen hero: caps wordmark + HYROX display.
+    //
+    // De-cluttered from the v1 hero — the "Tap start when you're at
+    // the line" subtitle was decorative filler that pushed the
+    // primary CTA further down without adding real information. The
+    // HYROX wordmark itself is the brand anchor; the caps strap
+    // ("READY TO RACE") provides the contextual call-to-action
+    // already. Wordmark also dropped from 76pt → 60pt: at 76 the
+    // hero ate ~30% of the vertical space on a 6.1" iPhone, leaving
+    // the Start CTA and target row clustered at the bottom. 60pt
+    // still reads as a hero, frees ~80pt of vertical breathing
+    // room for the controls below.
     private var heroBlock: some View {
         VStack(spacing: 6) {
             Text("READY TO RACE")
@@ -182,15 +209,10 @@ struct RaceStartView: View {
                 .foregroundStyle(Color.accent)
 
             Text("HYROX")
-                .font(.system(size: 76, weight: .black, design: .rounded))
-                .tracking(6)
+                .font(.system(size: 60, weight: .black, design: .rounded))
+                .tracking(5)
                 .foregroundStyle(Color.textPrimary)
-                .shadow(color: Color.accent.opacity(0.3), radius: 24, x: 0, y: 0)
-
-            Text("Tap start when you're at the line")
-                .font(.callout.weight(.medium))
-                .foregroundStyle(Color.textSecondary)
-                .padding(.top, 4)
+                .shadow(color: Color.accent.opacity(0.3), radius: 20, x: 0, y: 0)
         }
     }
 
@@ -368,33 +390,35 @@ struct RaceStartView: View {
         .padding(.horizontal, Layout.screenMargin - 4)
     }
 
-    // Secondary CTA — Custom Workout. Outlined, muted, clearly
-    // not competing with the primary. Visually anchors as an
-    // alternative path rather than a feature.
-    private var customWorkoutSecondary: some View {
-        Button {
-            isBuilderPresented = true
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.callout.weight(.semibold))
-                Text("Custom Workout")
-                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+    // Floating "•••" menu — top-right corner overlay, surfaces
+    // secondary entrypoints (Custom Workout) one tap away without
+    // letting them eat permanent vertical real estate at the
+    // bottom of the screen. Visual treatment matches the nav-bar
+    // ellipsis convention iOS users already know, but lives in a
+    // floating circle since this view has no NavigationStack
+    // ancestor.
+    private var moreOptionsMenu: some View {
+        Menu {
+            Button {
+                isBuilderPresented = true
+            } label: {
+                Label("Custom Workout", systemImage: "slider.horizontal.3")
             }
-            .foregroundStyle(Color.textPrimary)
-            .frame(maxWidth: .infinity)
-            .frame(height: Layout.standardButtonHeight + 8)
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Color.surface.opacity(0.7))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(Color.divider, lineWidth: 1)
-                    )
-            )
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 16, weight: .heavy))
+                .foregroundStyle(Color.textPrimary)
+                .frame(width: 36, height: 36)
+                .background(
+                    Circle()
+                        .fill(Color.surface.opacity(0.85))
+                        .overlay(
+                            Circle()
+                                .stroke(Color.divider.opacity(0.6), lineWidth: 1)
+                        )
+                )
         }
-        .buttonStyle(.plain)
-        .padding(.horizontal, Layout.screenMargin - 4)
+        .accessibilityLabel("More race options")
     }
 
     // Tappable row showing the current target. When set, reads

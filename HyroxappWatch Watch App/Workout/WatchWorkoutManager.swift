@@ -281,6 +281,18 @@ final class WatchWorkoutManager: NSObject {
     private var lastHRPublishedAt: Date = .distantPast
     private static let minHRPublishInterval: TimeInterval = 0.8
 
+    // De-dup gate — track the sample-end timestamp of the LAST HR
+    // value we published. `didCollectDataOf` fires for any data
+    // type the builder collects (HR, energy, etc.); when energy
+    // samples arrive between HR samples, we'd otherwise re-publish
+    // the same stale HR via `mostRecentQuantity()`. Tracking the
+    // sample's actual `endDate` lets us skip the re-publish and
+    // saves WCSession bandwidth + prevents the iPhone from seeing
+    // the same sample twice (which would still update the chip
+    // visually but for a different reason — content transition
+    // re-fires on every value write even if the value is equal).
+    private var lastPublishedSampleEnd: Date = .distantPast
+
     // Tear down the manager's references after the session has fully
     // ended. Called from the delegate's didChangeTo:.ended branch.
     private func clearWorkoutHandles() {
@@ -289,6 +301,11 @@ final class WatchWorkoutManager: NSObject {
         self.isWorkoutActive = false
         self.pendingFinalize = true
         self.lastHRPublishedAt = .distantPast
+        // Reset the de-dup gate too — next race starts fresh and
+        // the first HR sample of the new race must publish even if
+        // its end-date happens to be before the previous race's
+        // last sample (clock skew across day boundaries, etc).
+        self.lastPublishedSampleEnd = .distantPast
     }
 
     // MARK: - HR publishing
@@ -303,16 +320,22 @@ final class WatchWorkoutManager: NSObject {
     ) {
         guard let hrType = HKObjectType.quantityType(forIdentifier: .heartRate),
               let stats = builder.statistics(for: hrType),
-              let mostRecent = stats.mostRecentQuantity() else {
+              let mostRecent = stats.mostRecentQuantity(),
+              let sampleInterval = stats.mostRecentQuantityDateInterval() else {
             return
         }
 
-        // Throttle: skip if we published within the last interval.
-        let now = Date()
-        guard now.timeIntervalSince(lastHRPublishedAt) >= Self.minHRPublishInterval else {
-            return
-        }
-        lastHRPublishedAt = now
+        // De-dup gate FIRST — `didCollectDataOf` fires for every
+        // data type the builder collects (HR, energy, etc.). When
+        // energy samples arrive between HR samples, the HR
+        // statistics object's `mostRecentQuantity()` returns the
+        // SAME sample we already published. Skipping by the
+        // sample's `endDate` ensures we only publish when the HR
+        // sample itself genuinely advanced. Without this, the UI
+        // chip looks "stuck" because we keep streaming the same
+        // value at 1Hz.
+        let sampledAt = sampleInterval.end
+        guard sampledAt > lastPublishedSampleEnd else { return }
 
         // Extract bpm. HealthKit's HR unit is count per minute.
         let bpmUnit = HKUnit.count().unitDivided(by: .minute())
@@ -323,10 +346,20 @@ final class WatchWorkoutManager: NSObject {
         // or contact loss).
         guard bpm >= 30, bpm <= 230 else { return }
 
-        // Use the sample's actual end time when available so the
-        // phone can deduplicate / reject stale samples that arrive
-        // out of order via WCSession queuing.
-        let sampledAt = stats.mostRecentQuantityDateInterval()?.end ?? now
+        // Throttle gate AFTER all validity checks. Previous version
+        // updated `lastHRPublishedAt` before the bpm guard — when a
+        // bogus 0 sample fired the throttle reset, the next legit
+        // sample 500ms later got blocked by the throttle and lost.
+        // Order now: validate → throttle → publish, so rejected
+        // samples don't poison the throttle window.
+        let now = Date()
+        guard now.timeIntervalSince(lastHRPublishedAt) >= Self.minHRPublishInterval else {
+            return
+        }
+
+        // Commit the gate state only after we've decided to publish.
+        lastHRPublishedAt = now
+        lastPublishedSampleEnd = sampledAt
 
         let update = WatchHeartRateUpdate(bpm: bpm, sampledAt: sampledAt)
         WatchRaceClient.shared.publishHeartRate(update)

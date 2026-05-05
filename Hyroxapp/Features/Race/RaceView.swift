@@ -514,33 +514,49 @@ struct RaceView: View {
                 }
                 #endif
 
+                // Top bar — split into TWO rows for visual clarity.
+                //
+                // Row 1 (controls + status): splits peek button +
+                // station counter on the left, pause/cancel buttons
+                // on the right. Read as "where am I in the race"
+                // and "interrupt the race" — both static, structural.
+                //
+                // Row 2 (live signals): pace chip + HR chip +
+                // partner HR chip, right-aligned. Read as "how am I
+                // doing right now" — dynamic, mid-race feedback.
+                //
+                // Pre-split, all 8 elements fought for one HStack on
+                // narrow iPhones, wrapping or truncating the cue
+                // pill ("HOLD PACE" was getting cropped to "HOL").
+                // Splitting gives each band proper breathing room
+                // and makes the top header read as two distinct
+                // visual layers instead of an undifferentiated
+                // band of widgets.
                 HStack(spacing: 10) {
                     splitsChipButton
                     Text("Station \(viewModel.completedSegmentsCount + 1) of \(viewModel.totalSegments)")
                         .capsLabelStyle()
                     Spacer()
-                    // Pace chip — only when a target was set on race
-                    // start. Reads "+1:23 ahead" / "-0:45 behind" /
-                    // "on pace" based on a naive even-split of the
-                    // target across all stations.
-                    paceChip(now: context.date)
-                    // Live HR readout — only appears once a sample
-                    // arrives from HealthKit. Positioned next to the
-                    // cancel button so the four header controls read
-                    // as "status · pace · HR · cancel" left to right.
-                    liveHeartRateChip
-                    #if canImport(MultipeerConnectivity)
-                    // Partner's HR during a duo race. Sits next to
-                    // the local HR chip so a glance reads "us
-                    // (165) — them (172)". Only renders when a
-                    // duo is active and the partner has streamed a
-                    // sample at least once.
-                    partnerHeartRateChip
-                    #endif
                     pauseResumeButton
                     cancelButton
                 }
                 .padding(.top, 8)
+
+                // Live-signals row — right-aligned cluster of pace
+                // + HR. Each chip self-hides when its data isn't
+                // available (no target set → no pace chip; no HR
+                // sample yet → no HR chip), so the row collapses
+                // gracefully to nothing on a fresh-install first
+                // race instead of leaving an empty band.
+                HStack(spacing: 8) {
+                    Spacer()
+                    paceChip(now: context.date)
+                    liveHeartRateChip
+                    #if canImport(MultipeerConnectivity)
+                    partnerHeartRateChip
+                    #endif
+                }
+                .padding(.top, 6)
 
                 Spacer()
 
@@ -1501,17 +1517,26 @@ struct RaceView: View {
     private var inRoxzoneView: some View {
         TimelineView(.periodic(from: .now, by: 0.1)) { context in
             VStack(spacing: 0) {
+                // Same two-row top-bar pattern as the in-progress
+                // view. See the comment block on inProgressView's
+                // header for the split rationale — controls on
+                // top, live signals on a second row beneath.
                 HStack(spacing: 10) {
                     splitsChipButton
                     Text("Station \(viewModel.completedSegmentsCount + 1) of \(viewModel.totalSegments)")
                         .capsLabelStyle()
                     Spacer()
-                    paceChip(now: context.date)
-                    liveHeartRateChip
                     pauseResumeButton
                     cancelButton
                 }
                 .padding(.top, 8)
+
+                HStack(spacing: 8) {
+                    Spacer()
+                    paceChip(now: context.date)
+                    liveHeartRateChip
+                }
+                .padding(.top, 6)
 
                 Spacer()
 

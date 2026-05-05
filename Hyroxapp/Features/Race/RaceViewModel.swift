@@ -64,12 +64,23 @@ final class RaceViewModel {
 
     var isCountingDown: Bool { countdownValue != nil }
 
-    // How often we refresh current HR during a race. 5s is a good
-    // balance — Watch publishes HR to HealthKit every 5–15s in ambient
-    // mode and more frequently in workout mode, so a 5s poll usually
-    // catches the latest sample shortly after it lands without
-    // hammering HealthKit with redundant queries.
-    private static let heartRatePollInterval: TimeInterval = 5
+    // How often we poll HealthKit for current HR during a race. The
+    // poll is now a THIRD-TIER fallback behind two Watch transports
+    // (sendMessage when reachable + transferUserInfo always). It
+    // fires only when neither Watch path has delivered, typically
+    // when the Watch app is killed or HealthKit auth was denied.
+    //
+    // 2s rather than the old 5s because:
+    //   - Apple Watch ambient HR sampling lands in HealthKit every
+    //     5-15s in non-workout mode; polling more often than the
+    //     sample arrival rate is wasteful but doesn't hurt.
+    //   - During a Watch HKWorkoutSession (#18 path), samples land
+    //     in HealthKit at workout-rate. The 2s poll catches them
+    //     quickly.
+    //   - The user-perceived "stuck HR" bug at 5s polling motivates
+    //     fresher fallback latency — 2s feels alive, 5s feels
+    //     frozen during a fast warmup.
+    private static let heartRatePollInterval: TimeInterval = 2
 
     // MARK: - ModelContext plumbing
 
@@ -931,12 +942,18 @@ final class RaceViewModel {
     // distant past so the first sample always wins.
     private var lastWatchHRSampleAt: Date = .distantPast
 
-    // How long after a Watch HR sample we still consider the Watch
-    // the authoritative source. If samples stop coming for longer
-    // than this (Watch app killed, HealthKit denied, out of range),
-    // the phone's polling fallback (which also writes to
-    // `currentHeartRateBPM`) carries on at its own cadence.
-    private static let watchHRStaleThreshold: TimeInterval = 30
+    // Maximum age of a Watch HR sample we'll accept. Samples
+    // older than this get rejected as stale.
+    //
+    // Bumped from 30s → 90s after the transferUserInfo fallback
+    // path landed (phone-side ingest now receives queued samples
+    // that can be 30-60s old when the phone wakes from a pocket
+    // cycle / lock state). 30s rejected those samples wholesale,
+    // leaving the chip stuck at the last live-streamed value.
+    // 90s accepts queued bursts while still discarding genuinely
+    // old samples (e.g. from a previous race that somehow gets
+    // replayed by the OS's WCSession layer).
+    private static let watchHRStaleThreshold: TimeInterval = 90
 
     // Receive a heart-rate sample published from the Watch's
     // HKLiveWorkoutBuilder via WCSession. Wired up by `RaceView` for
@@ -989,7 +1006,27 @@ final class RaceViewModel {
             // stopHeartRatePolling() or when the task is GC'd.
             while !Task.isCancelled {
                 if let bpm = await HealthKitService.shared.currentHeartRate() {
-                    self.currentHeartRateBPM = bpm
+                    // Defer to the Watch streaming source when it's
+                    // recent. Without this gate, polling would
+                    // overwrite a fresh Watch sample (165 bpm @
+                    // t=10s) with a STALER HK-polled sample (158
+                    // bpm @ t=8s) — the polled query looks back 60s
+                    // and returns the most-recent-in-HK sample,
+                    // which can lag the Watch's WCSession push by
+                    // a few seconds since `HKLiveWorkoutBuilder`
+                    // doesn't write to HK during the workout
+                    // (samples land on `finishWorkout()`).
+                    //
+                    // 10s grace window: if a Watch sample arrived
+                    // within the last 10s, the Watch is considered
+                    // "live" and we skip the polled write. After
+                    // 10s of silence we assume Watch streaming is
+                    // dropped (app killed, HK denied, out of
+                    // range) and let polling fill the gap.
+                    let watchSampleAge = Date().timeIntervalSince(self.lastWatchHRSampleAt)
+                    if watchSampleAge >= 10 {
+                        self.currentHeartRateBPM = bpm
+                    }
                 }
                 // `try? await Task.sleep` — on cancellation, sleep
                 // throws CancellationError which we swallow and the
