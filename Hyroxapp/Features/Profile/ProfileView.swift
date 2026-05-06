@@ -419,38 +419,54 @@ struct ProfileView: View {
     @ViewBuilder
     private var performanceSection: some View {
         let maxHR = profiles.first?.maxHeartRate ?? 190
+        let division = profiles.first?.resolvedDivision ?? .mensOpen
         let hasPerf = HyroxPerformanceScoreView.hasAnyData(in: races)
         let hasReady = RaceReadyView.shouldShow(in: races)
         let hasOverload = PerformanceOverloadView.hasMeaningfulTrends(in: races)
         let hasEngine = EngineImpactView.shouldShow(in: races)
         let hasHRBaseline = PersonalHRBaselineView.hasEnoughData(in: races)
         let hasEngineScore = EngineScoreView.hasEnoughData(in: races, maxHR: maxHR)
+        let hasStationFingerprint = StationFingerprintView.hasEnoughData(in: races)
+        let hasHyroxScore = HyroxScoreView.hasEnoughData(in: races, division: division, maxHR: maxHR)
 
-        if hasPerf || hasReady || hasOverload || hasEngine || hasHRBaseline || hasEngineScore {
+        if hasPerf || hasReady || hasOverload || hasEngine || hasHRBaseline || hasEngineScore || hasStationFingerprint || hasHyroxScore {
             VStack(alignment: .leading, spacing: 12) {
                 ProfileSectionHeader(
                     title: "Performance",
                     icon: "bolt.fill"
                 )
-                // Engine Quality score sits at the top of the
-                // Performance section because it's the single
-                // headline rollup — the "where am I right now"
-                // number that frames everything else below it.
+                // HYROX Score sits at the very top of the
+                // Performance section — it's the §17.3
+                // "credit score for HYROX fitness" headline.
+                // Different question from Engine Quality below:
+                // HYROX Score is all-time positioning (Bronze
+                // → Elite); Engine Quality is recent
+                // conditioning state. Both belong on Profile
+                // but answer different questions.
+                if hasHyroxScore {
+                    hyroxScoreSection
+                }
+
+                // Engine Quality score sits below the HYROX
+                // Score because it's the recent-form HR rollup,
+                // versus HYROX Score's all-time positioning.
                 // First-time users without HR data don't see
-                // the section header (no sub-metric available);
-                // once any HR-derived metric exists, this card
-                // appears and anchors the section.
+                // this card; once any HR-derived metric exists,
+                // it appears.
                 if hasEngineScore {
                     engineScoreSection
                 }
                 if hasPerf {
-                    hyroxScoreSection
+                    hyroxPerformanceSection
                 }
                 if hasReady {
                     raceReadySection
                 }
                 if hasHRBaseline {
                     hrBaselineSection
+                }
+                if hasStationFingerprint {
+                    stationFingerprintSection
                 }
                 if hasOverload {
                     overloadSection
@@ -460,6 +476,26 @@ struct ProfileView: View {
                 }
             }
             .padding(.horizontal, Layout.screenMargin)
+        }
+    }
+
+    // Station HR Fingerprint — per-station tendency map
+    // (Runs + 7 workout stations). Sits between HR Baseline
+    // (athlete-wide Z3 band) and Performance Overload because
+    // it's the "who am I" signal at the station level — natural
+    // bridge between the global baseline above and the specific
+    // station signals (Engine Impact) below.
+    private var stationFingerprintSection: some View {
+        let maxHR = profiles.first?.maxHeartRate ?? 190
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Station Fingerprint")
+                    .capsLabelStyle()
+                Spacer()
+            }
+            .padding(.horizontal, 4)
+
+            StationFingerprintView(races: races, maxHR: maxHR)
         }
     }
 
@@ -480,6 +516,27 @@ struct ProfileView: View {
             .padding(.horizontal, 4)
 
             EngineScoreView(races: races, maxHR: maxHR)
+        }
+    }
+
+    // HYROX Score (0-1000) — the §17.3 credit-score-for-HYROX-
+    // fitness headline. Combines best finish time + engine
+    // rollup + pillar balance + race consistency into a single
+    // tier (Bronze/Silver/Gold/Elite). Anchors the Performance
+    // section as the "what am I as a HYROX athlete" identity
+    // metric.
+    private var hyroxScoreSection: some View {
+        let maxHR = profiles.first?.maxHeartRate ?? 190
+        let division = profiles.first?.resolvedDivision ?? .mensOpen
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("HYROX Score")
+                    .capsLabelStyle()
+                Spacer()
+            }
+            .padding(.horizontal, 4)
+
+            HyroxScoreView(races: races, division: division, maxHR: maxHR)
         }
     }
 
@@ -607,7 +664,12 @@ struct ProfileView: View {
     // most-summary (counts/PB total) to most-detailed (per-station
     // bests). Now also surfaces a compact "Avg effort" pill under
     // the pillar grid when HR data exists across recent races.
-    private var hyroxScoreSection: some View {
+    //
+    // Distinct from `hyroxScoreSection` above which renders the
+    // 0-1000 composite headline metric. This one is the 3-pillar
+    // (Strength / Endurance / Engine) breakdown — both belong on
+    // Profile but answer different questions.
+    private var hyroxPerformanceSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("HYROX Performance")
@@ -1025,6 +1087,7 @@ struct ProfileView: View {
         let hasDriftTrend = HRDriftTrendView.hasEnoughData(in: races)
         let hasRecoveryTrend = RecoveryTrendView.hasEnoughData(in: races)
         let hasEngineTrend = EngineScoreTrendView.hasEnoughData(in: races, maxHR: maxHR)
+        let hasRunDegradationTrend = RunDegradationTrendView.hasEnoughData(in: races)
 
         return VStack(alignment: .leading, spacing: 12) {
             // Engine Score Trend — the headline rollup curve. Sits
@@ -1090,6 +1153,27 @@ struct ProfileView: View {
                     .padding(.horizontal, 4)
 
                     HRDriftTrendView(races: races)
+                }
+            }
+
+            // Run degradation trend — explicit pace-only fade
+            // signal across races. Sits between Drift Trend and
+            // Recovery Trend so the back-half conditioning story
+            // clusters: drift = HR held within races, fade = pace
+            // held within runs, recovery = HR dropped between
+            // stations. Three angles on the same training-block
+            // question. Hidden when fewer than 3 races have run
+            // degradation data captured.
+            if hasRunDegradationTrend {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Run Fade Trend")
+                            .capsLabelStyle()
+                        Spacer()
+                    }
+                    .padding(.horizontal, 4)
+
+                    RunDegradationTrendView(races: races)
                 }
             }
 

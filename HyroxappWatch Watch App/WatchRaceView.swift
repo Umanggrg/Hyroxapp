@@ -31,6 +31,12 @@ struct WatchRaceView: View {
 
     @Environment(WatchRaceClient.self) private var client
 
+    // Reduce-motion accessibility setting — collapses the alert
+    // overlay's spring entrance into a hard cut for users who've
+    // enabled it. Same convention every animated surface in the
+    // app uses; see §13.9 design language doc.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     // Tracks the last seen coaching cue so we can fire a haptic on
     // every transition (hold→slow, push→hold, etc.) without firing
     // continuously on every snapshot push at the same cue. Stored as
@@ -43,6 +49,55 @@ struct WatchRaceView: View {
     // fire a haptic on its own — we only buzz on actual transitions
     // mid-race, not on race start.
     @State private var lastCueRaw: String?
+
+    // The currently-displayed Race Awareness alert overlay (§15).
+    // Set when the coaching cue transitions; cleared automatically
+    // by an attached Task after `alertOverlayDuration`. Renders
+    // full-screen on top of the in-progress TabView when non-nil.
+    @State private var activeAlertCue: RaceStats.CoachingCue?
+
+    // Handle to the pending dismiss-the-overlay task so we can
+    // cancel it if a new cue transition fires before the current
+    // overlay times out. Without cancellation, two rapid
+    // back-to-back transitions would have their dismiss tasks
+    // race against each other.
+    @State private var alertDismissTask: Task<Void, Never>?
+
+    // Segment Transition Moment state (§15 phase 3). Track the
+    // last station index we saw on the snapshot so we can detect
+    // an advance — when the index changes, we know a segment
+    // just completed and we should celebrate the moment.
+    //
+    // Stored as Int? so the very first snapshot we see (race
+    // start) doesn't trigger a transition overlay — we have no
+    // previous index to compare to, so transitionFromIndex stays
+    // nil until the second snapshot lands.
+    @State private var lastStationIndex: Int?
+    @State private var activeTransitionOverlay: TransitionOverlayState?
+    @State private var transitionDismissTask: Task<Void, Never>?
+
+    // Bundles the data the segment-transition overlay needs into
+    // one optional. Using a struct rather than three nullable
+    // strings keeps the `if let` render path readable.
+    private struct TransitionOverlayState: Equatable {
+        let completedStationLabel: String
+        let completedDuration: TimeInterval
+        let nextStationLabel: String
+    }
+
+    // §15 segment transition overlay duration. 2.4s matches the
+    // alert overlay duration so the athlete sees consistent
+    // pacing on every full-screen takeover; long enough for a
+    // sweaty glance, short enough to clear before the next
+    // segment timer needs the glance budget.
+    private static let transitionOverlayDuration: TimeInterval = 2.4
+
+    // How long the full-screen alert overlay sticks around before
+    // auto-dismissing. §15 says 2-3 seconds; 2.4s lands in the
+    // middle — long enough for a sweaty glance to register but
+    // short enough that the athlete isn't blocked from seeing
+    // their timer when they actually want to look at it.
+    private static let alertOverlayDuration: TimeInterval = 2.4
 
     var body: some View {
         ZStack {
@@ -67,6 +122,47 @@ struct WatchRaceView: View {
             } else {
                 waitingView
             }
+
+            // §15 Race Awareness System overlay — full-screen
+            // takeover for 2-3s on every actionable cue
+            // transition. Sits in the same ZStack as the phase
+            // views so the underlying timer continues ticking
+            // beneath it; auto-dismisses via a Task scheduled in
+            // `handleCoachingCueChange`. Animation is gentle
+            // (200ms spring) so the entrance lands with weight
+            // rather than blasts.
+            if let alertCue = activeAlertCue {
+                WatchAlertOverlay(cue: alertCue)
+                    .zIndex(1)
+                    .animation(
+                        reduceMotion ? .none : .spring(response: 0.35, dampingFraction: 0.85),
+                        value: activeAlertCue
+                    )
+            }
+
+            // §15 Segment Transition Moment — fires on every
+            // station advance, briefly celebrating the just-
+            // completed segment before stepping out of the way
+            // for the new station's timer. zIndex(2) places it
+            // above the alert overlay so a transition that
+            // happens to coincide with a cue change wins (the
+            // transition is the more important moment — the cue
+            // overlay can fire again on the next sample).
+            if let transition = activeTransitionOverlay {
+                WatchSegmentTransitionOverlay(
+                    completedStationLabel: transition.completedStationLabel,
+                    completedDuration: transition.completedDuration,
+                    nextStationLabel: transition.nextStationLabel
+                )
+                .zIndex(2)
+                .animation(
+                    reduceMotion ? .none : .spring(response: 0.35, dampingFraction: 0.85),
+                    value: activeTransitionOverlay
+                )
+            }
+        }
+        .onChange(of: client.snapshot?.currentStationIndex) { _, newIndex in
+            handleStationIndexChange(to: newIndex)
         }
         // Coaching-cue transition haptic. Computes the current cue
         // from the snapshot; when it changes (and we're mid-race),
@@ -109,11 +205,16 @@ struct WatchRaceView: View {
 
     private func handleCoachingCueChange(to newRaw: String?) {
         defer { lastCueRaw = newRaw }
-        // First-ever cue we see this race — no haptic. The athlete
-        // is just settling in; buzzing on the first BPM sample
-        // would be noise, not signal.
+        // First-ever cue we see this race — no haptic, no overlay.
+        // The athlete is just settling in; buzzing or taking over
+        // the screen on the first BPM sample would be noise, not
+        // signal.
         guard lastCueRaw != nil else { return }
         guard let newRaw, let newCue = RaceStats.CoachingCue(rawValue: newRaw) else { return }
+
+        // Haptic side. Distinct pattern per cue so the wrist
+        // signals "what just happened" before the eye reaches
+        // the watch face.
         switch newCue {
         case .hold:
             // You hit the zone — affirming double-tap.
@@ -134,59 +235,173 @@ struct WatchRaceView: View {
             // there reads as a malfunction, not coaching.
             break
         }
+
+        // Visual side — §15 Race Awareness alert overlay. Fire
+        // the full-screen takeover for actionable cues only;
+        // workout/none silently skip (matches the haptic
+        // suppression above). Auto-dismiss after the §15
+        // 2-3 second window.
+        guard newCue.shouldShowAlertOverlay else { return }
+
+        // §15 final-2-stations SLOW suppression — we've stopped
+        // coaching "pull back" at this point in the race so the
+        // athlete can empty the tank. HOLD and PUSH still fire
+        // (affirmation + motivator, not a brake). The earlier
+        // haptic stage of this method DID still fire on .slow,
+        // which is intentional — the silent buzz is acceptable
+        // continuity, but the full-screen takeover would
+        // visually nag.
+        if let snapshot = client.snapshot,
+           newCue == .slow,
+           shouldSuppressSlowAlert(snapshot: snapshot) {
+            return
+        }
+
+        showAlertOverlay(cue: newCue)
+    }
+
+    // Display the alert overlay for the configured duration,
+    // then clear it. Cancels any in-flight dismiss task so
+    // back-to-back cue changes (rare but possible — push → hold
+    // within a few seconds during a Z3 brush) don't fight each
+    // other for the screen.
+    private func showAlertOverlay(cue: RaceStats.CoachingCue) {
+        alertDismissTask?.cancel()
+        activeAlertCue = cue
+        alertDismissTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(Self.alertOverlayDuration))
+            guard !Task.isCancelled else { return }
+            activeAlertCue = nil
+        }
+    }
+
+    // Watcher for `currentStationIndex` changes on the snapshot.
+    // When the index changes (any direction) AND we have a
+    // previous index to compare to, fire the §15 Segment
+    // Transition Moment overlay celebrating the just-completed
+    // segment. Skipped on the very first snapshot of a race
+    // (no previous index) and on race-end transitions where
+    // the snapshot phase flips to .finished (separate UX —
+    // the finishedView already handles celebration).
+    private func handleStationIndexChange(to newIndex: Int?) {
+        defer { lastStationIndex = newIndex }
+
+        // Need both old and new — first snapshot of a race
+        // gives lastStationIndex == nil, skip until next.
+        guard let previousIndex = lastStationIndex,
+              let newIndex,
+              previousIndex != newIndex,
+              let snapshot = client.snapshot else { return }
+
+        // Skip if the race ended — the finished view celebrates
+        // the whole race; layering a "RUN 8 COMPLETE → NEXT:"
+        // overlay on top would conflict.
+        guard snapshot.phase == .inProgress else { return }
+
+        // Pull the just-completed split's data. The host adds
+        // splits in chronological order, so the most-recent
+        // split is the one we just finished.
+        guard let completedSplit = snapshot.splits.last else { return }
+        let completedStation = Station(rawValue: completedSplit.stationRaw)
+        let completedLabel = completedStation?.displayName ?? "STATION"
+        let completedDuration = completedSplit.endedAt.timeIntervalSince(completedSplit.startedAt)
+
+        // The new station the athlete is about to start. Pulled
+        // from the snapshot's currentStation accessor (it
+        // resolves the new index back through Station(rawValue:)).
+        let nextLabel = snapshot.currentStation?.displayName ?? "—"
+
+        showTransitionOverlay(
+            completed: completedLabel,
+            duration: completedDuration,
+            next: nextLabel
+        )
+    }
+
+    private func showTransitionOverlay(
+        completed: String,
+        duration: TimeInterval,
+        next: String
+    ) {
+        transitionDismissTask?.cancel()
+        activeTransitionOverlay = TransitionOverlayState(
+            completedStationLabel: completed,
+            completedDuration: duration,
+            nextStationLabel: next
+        )
+        // Add a subtle haptic on top of whatever the existing
+        // advance flow fires — the success pattern reinforces
+        // the celebratory moment.
+        Haptics.success()
+        transitionDismissTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(Self.transitionOverlayDuration))
+            guard !Task.isCancelled else { return }
+            activeTransitionOverlay = nil
+        }
+    }
+
+    // §15 final-2-stations SLOW suppression. The design
+    // principle: let the athlete empty the tank in the closing
+    // stretch without "pull back" coaching. Hold + Push still
+    // fire (they're affirmations or motivators, not nags),
+    // SLOW gets silenced.
+    private func shouldSuppressSlowAlert(snapshot: RaceStateSnapshot) -> Bool {
+        let stationsRemaining = snapshot.totalStations - snapshot.completedStationsCount
+        return stationsRemaining <= 2
     }
 
     // MARK: - In-progress
 
-    // Live race layout. TimelineView re-evaluates every animation frame;
-    // we pass `context.date` into the timer formatter so the digits tick
-    // without any manual `Timer` bookkeeping.
+    // Live race layout per CLAUDE.md §15 — three pages stacked
+    // vertically, navigable via the Digital Crown:
+    //
+    //   Page 0: Splits  (scroll up)   — completed segments list
+    //   Page 1: Race    (default)     — segment + big timer + pace + HR
+    //   Page 2: HR      (scroll down) — engine-room detail
+    //
+    // We use `TabView(.page)` — on watchOS this is exactly the
+    // crown-paginated vertical UX §15 specifies (Apple Workouts
+    // uses the same pattern). `selection: .constant(1)`
+    // initializes on the Race page; the user can crown up to
+    // Splits or down to HR from there.
+    //
+    // The TabView re-evaluates on every snapshot push, so all
+    // three pages stay in sync with the host's race state. Each
+    // page owns its own TimelineView for ticking (independent of
+    // sibling pages) so off-screen pages don't drain battery
+    // re-rendering hidden content.
     private func inProgressView(snapshot: RaceStateSnapshot) -> some View {
-        TimelineView(.periodic(from: .now, by: 0.5)) { context in
-            VStack(spacing: 6) {
-                // Brand fingerprint progress bar with a pause button
-                // tucked at the trailing edge. The fingerprint
-                // anchors the brand identity; the pause icon gives
-                // a tap-to-pause affordance from the wrist that
-                // mirrors the iPhone's header pause button. Small
-                // (24pt) so it doesn't crowd the fingerprint.
-                HStack(spacing: 6) {
-                    WatchFingerprintProgress(
-                        completedCount: snapshot.completedStationsCount,
-                        currentIndex: snapshot.currentStationIndex,
-                        totalCount: snapshot.totalStations
-                    )
-                    .frame(height: 18)
-
-                    pauseButton
-                }
-                .padding(.horizontal, 4)
-
-                stationHeader(snapshot: snapshot)
-
-                Spacer(minLength: 2)
-
-                timerDisplay(snapshot: snapshot, now: context.date)
-
-                Spacer(minLength: 2)
-
-                // Final-station guard: on station 16 (or the last
-                // station of any custom sequence), a stray tap on
-                // an instant button locks in the wrong final time
-                // with no undo. The phone has the same guard on
-                // its hold-to-finish CTA. The watch carries it
-                // here so a sweaty wrist swing can't accidentally
-                // close out a race.
-                if isFinalStation(snapshot: snapshot) {
-                    holdToFinishButton
-                } else {
-                    advanceButton
-                }
+        TabView(selection: .constant(1)) {
+            TimelineView(.periodic(from: .now, by: 0.5)) { context in
+                WatchRaceSplitsPage(snapshot: snapshot, now: context.date)
             }
-            .padding(.horizontal, 6)
-            .padding(.top, 6)
-            .padding(.bottom, 4)
+            .tag(0)
+
+            TimelineView(.periodic(from: .now, by: 0.5)) { context in
+                WatchRaceMainPage(
+                    snapshot: snapshot,
+                    now: context.date,
+                    onAdvance: { Self.handleAdvanceTap() },
+                    isFinalStation: isFinalStation(snapshot: snapshot),
+                    holdToFinishButton: AnyView(holdToFinishButton)
+                )
+            }
+            .tag(1)
+
+            TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+                WatchRaceHRPage(snapshot: snapshot)
+            }
+            .tag(2)
         }
+        .tabViewStyle(.page)
+    }
+
+    // Fire the advance action from the Race page's button. Sits
+    // here rather than inline on the page so the WCSession plumbing
+    // stays in WatchRaceView's existing button machinery.
+    private static func handleAdvanceTap() {
+        Haptics.impact(.medium)
+        WatchRaceClient.shared.send(.advance)
     }
 
     // True when the upcoming advance would close the race —

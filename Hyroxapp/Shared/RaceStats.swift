@@ -399,10 +399,35 @@ enum RaceStats {
     // session" rather than just a bare state. Hours-since lets
     // the athlete sanity-check the signal against their own felt
     // sense of recovery.
+    //
+    // `engineRollupScore` is the most recent EngineScore (#15)
+    // rollup overall (0-100). Carried so the banner can display
+    // "Engine 78 · Steady" as context for why readiness landed
+    // where it did. Optional because the engine rollup needs 1+
+    // recent races with HR data to compute — first-race users see
+    // readiness without the engine context line.
+    //
+    // `engineModulation` describes how the engine context
+    // adjusted the time-based state:
+    //   • `.bumpedUp`     — engine was breakthrough / all-time
+    //                       best, the time-based state was upgraded
+    //                       one tier
+    //   • `.bumpedDown`   — engine was regression, the time-based
+    //                       state was downgraded one tier
+    //   • `.unmodulated`  — engine context didn't move the state
     struct ReadinessReadout: Sendable {
         let state: ReadinessState
         let hoursSinceLastRace: Double
         let lastRaceDemand: RecoveryDemand
+        let engineRollupScore: Double?
+        let engineRollupTier: EngineScore.Tier?
+        let engineModulation: EngineModulation
+
+        enum EngineModulation: Sendable, Equatable {
+            case bumpedUp
+            case bumpedDown
+            case unmodulated
+        }
     }
 
     // Compute current readiness from race history + maxHR. Walks
@@ -437,25 +462,98 @@ enum RaceStats {
         let hoursElapsed = referenceDate.timeIntervalSince(endedAt) / 3600
         guard hoursElapsed >= 0 else { return nil }
 
-        // Use the demand's upper-bound recovery hour estimate as the
-        // "fully recovered" threshold. Below 50% of that, the
-        // athlete is meaningfully under-recovered.
+        // Time-based bucketing — same boundaries as before.
+        // Use the demand's upper-bound recovery hour estimate as
+        // the "fully recovered" threshold. Below 50% of that,
+        // the athlete is meaningfully under-recovered.
         let upperBound = recoveryUpperBound(for: demand)
 
-        let state: ReadinessState
+        let timeBasedState: ReadinessState
         if hoursElapsed >= upperBound {
-            state = .fresh
+            timeBasedState = .fresh
         } else if hoursElapsed >= upperBound * 0.5 {
-            state = .partial
+            timeBasedState = .partial
         } else {
-            state = .recovering
+            timeBasedState = .recovering
+        }
+
+        // Engine modulation — the new signal layered on top of
+        // the time-based state. Athletes can have fully recovered
+        // CNS (time says fresh) but a fading engine (engine score
+        // regression) — that should read as partial, not fresh,
+        // because pushing hard against a fading engine is how
+        // overtraining sneaks in. Conversely a breakthrough
+        // engine state on a partial recovery window can earn a
+        // bump up — body's saying "I'm peaking, let's go."
+        //
+        // Modulation is conservative: at most ±1 tier, and we
+        // never bump UP from .recovering (a recent hard session
+        // beats engine vibes — let the body recover).
+        let engineRollup = engineScore(across: races, maxHR: maxHR)
+        let engineContext = engineScoreContext(forRace: race, history: races, maxHR: maxHR)
+
+        var state = timeBasedState
+        var modulation = ReadinessReadout.EngineModulation.unmodulated
+
+        if let context = engineContext {
+            switch context.position {
+            case .breakthrough where context.isAllTimeBest:
+                // Strongest positive signal — earn an upgrade.
+                if let bumped = bumpUp(state) {
+                    state = bumped
+                    modulation = .bumpedUp
+                }
+            case .breakthrough:
+                // Soft positive — only earn the upgrade from
+                // partial to fresh (don't move recovering up).
+                if state == .partial, let bumped = bumpUp(state) {
+                    state = bumped
+                    modulation = .bumpedUp
+                }
+            case .regression:
+                // Engine is meaningfully off — bump readiness down
+                // a tier to coach the athlete toward easier work.
+                // Only fires when the time-based state was fresh
+                // or partial; "recovering" stays recovering.
+                if state == .fresh, let bumped = bumpDown(state) {
+                    state = bumped
+                    modulation = .bumpedDown
+                } else if state == .partial, let bumped = bumpDown(state) {
+                    state = bumped
+                    modulation = .bumpedDown
+                }
+            case .normal:
+                break
+            }
         }
 
         return ReadinessReadout(
             state: state,
             hoursSinceLastRace: hoursElapsed,
-            lastRaceDemand: demand
+            lastRaceDemand: demand,
+            engineRollupScore: engineRollup?.overall,
+            engineRollupTier: engineRollup?.tier,
+            engineModulation: modulation
         )
+    }
+
+    // Adjacent-tier helpers for engine modulation. Returning nil
+    // when at the boundary (can't bump fresh up, can't bump
+    // recovering down) keeps the modulation logic readable.
+    private static func bumpUp(_ state: ReadinessState) -> ReadinessState? {
+        switch state {
+        case .recovering: return .partial
+        case .partial:    return .fresh
+        case .fresh:      return nil
+        }
+    }
+
+    private static func bumpDown(_ state: ReadinessState) -> ReadinessState? {
+        switch state {
+        case .fresh:      return .partial
+        case .partial:    return .recovering
+        case .recovering: return nil
+        }
     }
 
     // Hours threshold that maps to "fully recovered" for each demand
@@ -915,6 +1013,192 @@ enum RaceStats {
         )
     }
 
+    // Whole-race variant of heartRateDrift. Same first-half-vs-
+    // second-half method, but applied to ALL splits (runs +
+    // workouts) instead of just the runs.
+    //
+    // Why both: the run-only version is a clean signal because
+    // every run is the same prescribed work (1km), so HR climb
+    // there is unambiguously engine fade. But it misses the
+    // case where the workout stations are what's beating up the
+    // athlete — sled push + sandbag lunges + wall balls all
+    // accumulate HR cost that the run-only metric hides.
+    //
+    // The whole-race variant catches that cumulative fatigue.
+    // Pace-change fraction here uses station duration rather
+    // than 1km pace (workouts have varying durations), so it's
+    // a slightly different question than the run-only pace
+    // change — but the HR drift number itself is directly
+    // comparable to the run-only one.
+    //
+    // Same 6+ split minimum + same category thresholds (under 5
+    // bpm minimal / 5-10 moderate / over 10 severe) as the run-
+    // only path, since the underlying body signal — "HR climbed
+    // X bpm across the same prescribed work" — is the same. We
+    // reuse the HRDrift struct for the same reason.
+    static func heartRateDriftAllStations(for race: Race) -> HRDrift? {
+        // Pull every split with HR + duration data, sorted in
+        // race order. Same approach as the run-only variant
+        // above; sortBy(startedAt) recovers the canonical
+        // sequence regardless of how SwiftData stored them.
+        let allSplits = race.splits.sorted { $0.startedAt < $1.startedAt }
+
+        let segments: [(hr: Double, durationSec: Double)] = allSplits.compactMap { split in
+            guard let avg = split.heartRateAvgBPM, avg > 0,
+                  split.duration > 0 else { return nil }
+            return (hr: avg, durationSec: split.duration)
+        }
+
+        // Need at least 6 segments — same minimum as the run-
+        // only variant. On a full HYROX race with HR data this
+        // is trivially met; on a partial / aborted race the
+        // metric correctly sits silent.
+        guard segments.count >= 6 else { return nil }
+
+        let mid = segments.count / 2
+        let firstHalf = Array(segments.prefix(mid))
+        let secondHalf = Array(segments.suffix(segments.count - mid))
+
+        let firstHRAvg = firstHalf.map(\.hr).reduce(0, +) / Double(firstHalf.count)
+        let secondHRAvg = secondHalf.map(\.hr).reduce(0, +) / Double(secondHalf.count)
+        let firstDurationAvg = firstHalf.map(\.durationSec).reduce(0, +) / Double(firstHalf.count)
+        let secondDurationAvg = secondHalf.map(\.durationSec).reduce(0, +) / Double(secondHalf.count)
+
+        let drift = secondHRAvg - firstHRAvg
+        // Duration-change fraction in the all-stations path
+        // tracks "did segments take longer in the second half?"
+        // — a coarser signal than run-only pace change because
+        // workout durations don't normalize to a fixed
+        // distance, but still useful for narrative phrasing
+        // ("HR climbed AND segments slowed" vs "HR climbed but
+        // segments held").
+        let paceChange = firstDurationAvg > 0
+            ? (secondDurationAvg - firstDurationAvg) / firstDurationAvg
+            : 0
+
+        return HRDrift(
+            firstHalfAvgHR: firstHRAvg,
+            secondHalfAvgHR: secondHRAvg,
+            driftBPM: drift,
+            firstHalfAvgPace: firstDurationAvg,
+            secondHalfAvgPace: secondDurationAvg,
+            paceChangeFraction: paceChange,
+            runsCounted: segments.count,
+            category: HRDrift.category(forDrift: drift)
+        )
+    }
+
+    // MARK: - Run Degradation Score
+
+    // The single explicit run-fade metric from §17.2:
+    //
+    //   degradation% = (lastRun.pace - firstRun.pace) / firstRun.pace
+    //
+    // Where pace is sec/km (lower is faster). Positive % = the
+    // last run was slower than the first; negative % is rare but
+    // possible (negative-split races) and reads as "you pushed
+    // the back half harder than the front."
+    //
+    // Tier thresholds straight from the §17.2 spec / HyroxDataLab
+    // research: Elite <8% / Good 8-15% / Needs Work >15%. Coaches
+    // benchmark athletes against these constants — they aren't
+    // arbitrary.
+    //
+    // Why first-vs-last (not first-half-vs-second-half avg): §17.2
+    // is explicit about R_last - R_first, and it's the metric
+    // athletes actually compare against the literature. The half-
+    // averages metric exists separately as the cardiac-drift
+    // input above; the two are complementary signals.
+    //
+    // Returns nil when fewer than 4 runs have pace data — below
+    // that, the first-vs-last spread can't meaningfully separate
+    // "consistent pacing" from "huge fade." Four is the minimum
+    // that gives at least one run between the endpoints, so the
+    // delta isn't just two adjacent runs.
+    struct RunDegradation: Equatable {
+        let firstRunPace: Double         // sec/km, R_first
+        let lastRunPace: Double          // sec/km, R_last
+        let degradationPercent: Double   // signed; +% = slower last run
+        let runsCounted: Int             // total runs with pace data
+        let category: Category
+
+        enum Category: String, Equatable {
+            case elite       // <8% — race-fit conditioning
+            case good        // 8-15% — typical for a strong amateur
+            case needsWork   // >15% — significant fade, work to do
+
+            var displayName: String {
+                switch self {
+                case .elite:     return "Elite"
+                case .good:      return "Good"
+                case .needsWork: return "Needs Work"
+                }
+            }
+
+            // Coaching-cue strings used by the insight card on
+            // the actionable bucket (.needsWork). Elite + good
+            // are silent — celebrating "you didn't fade much" is
+            // less useful than naming a fix when the athlete
+            // did fade.
+            var coachingCue: String {
+                switch self {
+                case .elite:
+                    return "Run degradation is in the elite band — pacing held across the race."
+                case .good:
+                    return "Solid run pacing — slight back-half fade but well-controlled."
+                case .needsWork:
+                    return "Significant run fade — front-loaded pacing or aerobic gap. Even your first 3 runs."
+                }
+            }
+        }
+
+        static func category(forPercent pct: Double) -> Category {
+            // Negative degradation (negative split — last run
+            // faster than first) treats as elite-ish. The
+            // literature thresholds are written for the typical
+            // case (positive % fade) but a negative split
+            // shouldn't accidentally bucket as "needs work."
+            switch pct {
+            case ..<8:    return .elite
+            case 8..<15:  return .good
+            default:      return .needsWork
+            }
+        }
+    }
+
+    static func runDegradation(for race: Race) -> RunDegradation? {
+        // Pull runs in chronological order. Same approach as
+        // heartRateDrift / aerobicDecoupling — startedAt sort is
+        // the safest recovery of run order.
+        let runSplits = race.splits
+            .filter { $0.station.kind == .run }
+            .sorted { $0.startedAt < $1.startedAt }
+
+        let runPaces = runSplits.compactMap { split -> Double? in
+            guard split.duration > 0 else { return nil }
+            // 1km is the prescribed run distance, so duration
+            // in seconds == sec/km pace. No distance lookup
+            // needed.
+            return split.duration
+        }
+
+        // 4 runs minimum so first-vs-last spans at least one
+        // run between the endpoints — single-bad-run noise gets
+        // less weight than the trend it sits inside.
+        guard runPaces.count >= 4 else { return nil }
+        guard let first = runPaces.first, first > 0,
+              let last = runPaces.last else { return nil }
+
+        let degradation = ((last - first) / first) * 100
+        return RunDegradation(
+            firstRunPace: first,
+            lastRunPace: last,
+            degradationPercent: degradation,
+            runsCounted: runPaces.count,
+            category: RunDegradation.category(forPercent: degradation)
+        )
+    }
+
     // MARK: - Aerobic decoupling
 
     // Sport-science classic for aerobic conditioning. Where #8
@@ -1263,6 +1547,170 @@ enum RaceStats {
         if currentHR > upperWhisker { return .wellAboveUsual }
         if currentHR > signature.upperQuartile { return .aboveUsual }
         return .typical
+    }
+
+    // MARK: - Per-station HR tendency (aggregated)
+
+    // Athlete-level station HR fingerprint — the "who you are as
+    // a racer" identity card from CLAUDE.md §18 Pillar 1
+    // (Fatigue Fingerprint), one level deeper than the per-race
+    // anomaly callout already shipped on StationDetailView (#12).
+    //
+    // For each station type the athlete has done 3+ times, this
+    // surfaces:
+    //   • Median HR — the "your usual" anchor
+    //   • Recent delta — average of the last N races' avg HR at
+    //     that station, minus the median. Tells whether the
+    //     athlete's recent races are running hotter or cooler
+    //     than their historical baseline.
+    //   • Tendency — `cool` (recent runs cold), `typical`
+    //     (within IQR), `hot` (recent runs warm).
+    //
+    // The recent-vs-historical comparison is what makes this
+    // useful identity-level data: a brand-new fitness gain (or
+    // an off-week) shows up as the recent delta drifting away
+    // from the long-run median. Athletes can read the card as
+    // "this is who I am" + "this is where I'm trending."
+    //
+    // Runs collapse into a single "Run" row — all 8 runs share
+    // the same prescribed work, so HR samples across all 8 are
+    // pooled into one fingerprint. Each unique workout station
+    // (sledPush, sledPull, etc.) gets its own row.
+    struct StationHRTendency: Equatable, Identifiable {
+        var id: Int { stationKey.id }
+
+        /// Distinguishes "all runs pooled" from a specific
+        /// workout station. Used for grouping in the aggregator
+        /// and for rendering an icon / label in the UI.
+        enum StationKey: Equatable, Identifiable {
+            case run                  // pooled across run1...run8
+            case workout(Station)     // a specific workout station
+
+            var id: Int {
+                switch self {
+                case .run:                   return -1
+                case .workout(let station):  return station.rawValue
+                }
+            }
+
+            /// Display label for the row.
+            var displayName: String {
+                switch self {
+                case .run:                   return "Runs"
+                case .workout(let station):  return station.displayName
+                }
+            }
+        }
+
+        let stationKey: StationKey
+        let medianHR: Double
+        let lowerQuartile: Double
+        let upperQuartile: Double
+        let recentAverageHR: Double
+        let recentDelta: Double          // recentAverage - median
+        let sampleCount: Int             // total HR samples in history
+        let recentRacesCounted: Int      // races contributing to recent average
+        let tendency: Tendency
+
+        enum Tendency: Equatable {
+            case cool          // recent < lowerQuartile (running cooler than usual)
+            case typical       // within IQR
+            case hot           // recent > upperQuartile (running hotter than usual)
+
+            var displayName: String {
+                switch self {
+                case .cool:    return "Runs cool"
+                case .typical: return "Typical"
+                case .hot:     return "Runs hot"
+                }
+            }
+        }
+    }
+
+    static func stationHRTendencies(
+        across races: [Race],
+        recentRaceLimit: Int = 5
+    ) -> [StationHRTendency] {
+        let finished = races.filter { $0.isFinished }
+        guard !finished.isEmpty else { return [] }
+
+        let recentRaces = finished
+            .sorted { $0.createdAt > $1.createdAt }
+            .prefix(recentRaceLimit)
+
+        var out: [StationHRTendency] = []
+
+        // Pooled "Runs" tendency — pull HR from every run split
+        // across the full history, then a parallel set from the
+        // recent window for the delta.
+        if let runTendency = poolTendency(
+            for: .run,
+            historySplits: finished.flatMap { $0.splits.filter { $0.station.kind == .run } },
+            recentSplits: recentRaces.flatMap { $0.splits.filter { $0.station.kind == .run } },
+            recentRacesCounted: recentRaces.count
+        ) {
+            out.append(runTendency)
+        }
+
+        // One row per workout station. We iterate the canonical
+        // race sequence, filtering to workouts and de-duplicating
+        // — sledPush appears once in the official sequence so the
+        // dedup is a no-op today, but it's defensive against
+        // future custom-workout sequences that might repeat a
+        // station.
+        let workoutStations = Array(Set(Station.raceSequence.filter { $0.kind == .workout }))
+            .sorted { $0.rawValue < $1.rawValue }
+        for station in workoutStations {
+            if let tendency = poolTendency(
+                for: .workout(station),
+                historySplits: finished.flatMap { $0.splits.filter { $0.station == station } },
+                recentSplits: recentRaces.flatMap { $0.splits.filter { $0.station == station } },
+                recentRacesCounted: recentRaces.count
+            ) {
+                out.append(tendency)
+            }
+        }
+
+        return out
+    }
+
+    private static func poolTendency(
+        for key: StationHRTendency.StationKey,
+        historySplits: [Split],
+        recentSplits: [Split],
+        recentRacesCounted: Int
+    ) -> StationHRTendency? {
+        let historySamples = historySplits.compactMap { $0.heartRateAvgBPM }.filter { $0 > 0 }
+        guard historySamples.count >= 3 else { return nil }
+
+        let recentSamples = recentSplits.compactMap { $0.heartRateAvgBPM }.filter { $0 > 0 }
+        guard !recentSamples.isEmpty else { return nil }
+
+        let sorted = historySamples.sorted()
+        let median = percentile(sorted, p: 0.50)
+        let q1 = percentile(sorted, p: 0.25)
+        let q3 = percentile(sorted, p: 0.75)
+
+        let recentAvg = recentSamples.reduce(0, +) / Double(recentSamples.count)
+        let delta = recentAvg - median
+
+        let tendency: StationHRTendency.Tendency = {
+            if recentAvg < q1 { return .cool }
+            if recentAvg > q3 { return .hot }
+            return .typical
+        }()
+
+        return StationHRTendency(
+            stationKey: key,
+            medianHR: median,
+            lowerQuartile: q1,
+            upperQuartile: q3,
+            recentAverageHR: recentAvg,
+            recentDelta: delta,
+            sampleCount: historySamples.count,
+            recentRacesCounted: recentRacesCounted,
+            tendency: tendency
+        )
     }
 
     // Linear-interpolated percentile on a pre-sorted array. p in
@@ -1831,6 +2279,207 @@ enum RaceStats {
     private static func normalizeDecoupling(_ fraction: Double) -> Double {
         let clamped = max(0, min(0.15, fraction))
         return (1 - clamped / 0.15) * 100
+    }
+
+    // MARK: - HYROX Score composite (0-1000)
+
+    // The headline single-number Profile metric per CLAUDE.md
+    // §17.3 — the "credit score for HYROX fitness" athletes
+    // screenshot and share. Different from EngineScore (#15)
+    // which is the HR-derived rollup of recent races: HYROX
+    // Score is an ALL-TIME metric combining the four most
+    // important HYROX dimensions into one number.
+    //
+    // Composition (totals to 1000):
+    //
+    //   • Performance      (0-500) — best race finish time
+    //                                vs division reference scale.
+    //                                Lower time = higher score.
+    //                                The dominant component because
+    //                                in HYROX, the clock IS the
+    //                                game.
+    //
+    //   • Engine Quality   (0-200) — recent EngineScore (#15)
+    //                                rollup, scaled. Captures the
+    //                                HR-derived conditioning state.
+    //                                Less weighted than Performance
+    //                                because it's a recent-form
+    //                                signal, not a peak.
+    //
+    //   • Pillar Balance   (0-150) — how even Strength / Endurance
+    //                                / Engine pillars are. Balance
+    //                                matters in HYROX: an athlete
+    //                                with great runs and weak
+    //                                workouts is less complete than
+    //                                a balanced one. Computed from
+    //                                the pillar theoretical-bests.
+    //
+    //   • Consistency      (0-150) — finished-race count, capped.
+    //                                Rewards repeat-engagement
+    //                                without making the score
+    //                                infinite — at 10+ finished
+    //                                races the consistency
+    //                                contribution is full.
+    //
+    // Tier thresholds reflect what shipping athletes look like
+    // from real-world HYROX data:
+    //   • Bronze   <400   — first-timer / building base
+    //   • Silver   400-699 — solid amateur
+    //   • Gold     700-899 — competitive amateur
+    //   • Elite    900+    — sub-elite / elite range
+    //
+    // Returns nil only when the athlete has zero finished
+    // races. With one race, returns a partial-data score. The
+    // breakdown lets the caller render which components are
+    // contributing and which are zero.
+    struct HyroxScore: Equatable {
+        let overall: Int                 // 0-1000
+        let performanceScore: Int        // 0-500
+        let engineScore: Int             // 0-200
+        let balanceScore: Int            // 0-150
+        let consistencyScore: Int        // 0-150
+        let racesCounted: Int
+        let tier: Tier
+
+        enum Tier: String, Equatable {
+            case bronze
+            case silver
+            case gold
+            case elite
+
+            var displayName: String {
+                switch self {
+                case .bronze: return "Bronze"
+                case .silver: return "Silver"
+                case .gold:   return "Gold"
+                case .elite:  return "Elite"
+                }
+            }
+
+            // One-line coaching cue surfaced under the tier
+            // label. Frames the score as a step in a journey
+            // rather than a final verdict.
+            var coachingCue: String {
+                switch self {
+                case .bronze:
+                    return "Building the base — every race counts."
+                case .silver:
+                    return "Solid amateur — race-fit conditioning."
+                case .gold:
+                    return "Competitive amateur — chasing podium."
+                case .elite:
+                    return "Elite range — race the front."
+                }
+            }
+        }
+
+        static func tier(forScore score: Int) -> Tier {
+            switch score {
+            case ..<400:  return .bronze
+            case 400..<700: return .silver
+            case 700..<900: return .gold
+            default:        return .elite
+            }
+        }
+    }
+
+    // Division-aware reference times for performance scoring.
+    // (worldClass, recreational) — finishing at worldClass time
+    // earns the full 500 performance points; finishing at
+    // recreational time earns 0; linear interpolation between.
+    // Times derived from public HYROX leaderboard distributions
+    // — the worldClass anchor is sub-elite, not actual world
+    // record (a perfect score should be achievable for a strong
+    // amateur, not gated to the top 0.01% of the sport).
+    private static func performanceReferenceTimes(for division: Division) -> (worldClass: TimeInterval, recreational: TimeInterval) {
+        switch division {
+        case .mensOpen:   return (60 * 60,        2 * 60 * 60)        // 1:00 → 2:00
+        case .womensOpen: return (70 * 60,        2 * 60 * 60 + 15 * 60) // 1:10 → 2:15
+        case .mensPro:    return (55 * 60,        90 * 60)            // 0:55 → 1:30
+        case .womensPro:  return (65 * 60,        100 * 60)           // 1:05 → 1:40
+        }
+    }
+
+    static func hyroxScore(
+        across races: [Race],
+        division: Division,
+        maxHR: Int
+    ) -> HyroxScore? {
+        let finished = races.filter { $0.isFinished }
+        guard !finished.isEmpty else { return nil }
+
+        // Performance component — best finish time vs division.
+        let performance: Int = {
+            let bestTime = finished.compactMap(\.totalDuration).min()
+            guard let bestTime else { return 0 }
+            let refs = performanceReferenceTimes(for: division)
+            // Linear interpolation. Faster than worldClass clamps
+            // at 500; slower than recreational clamps at 0.
+            let range = refs.recreational - refs.worldClass
+            guard range > 0 else { return 0 }
+            let raw = (refs.recreational - bestTime) / range
+            let clamped = max(0, min(1, raw))
+            return Int((clamped * 500).rounded())
+        }()
+
+        // Engine Quality component — EngineScore rollup scaled
+        // to 0-200. EngineScore returns 0-100 (Building/Steady/
+        // Elite); we double it for our 200-point band.
+        let engine: Int = {
+            guard let engineRollup = engineScore(across: finished, maxHR: maxHR) else {
+                return 0
+            }
+            return Int((engineRollup.overall * 2).rounded())
+        }()
+
+        // Pillar Balance component — how even Strength /
+        // Endurance / Engine theoretical bests are. Score
+        // decreases as the spread between the worst and best
+        // pillar grows (relative to the best pillar).
+        let balance: Int = {
+            let pillarBests = HyroxPillar.allCases.compactMap { pillar in
+                pillarTheoreticalBest(pillar, among: finished)
+            }
+            guard pillarBests.count == HyroxPillar.allCases.count else {
+                // Partial coverage — score proportionally to
+                // how many pillars have data. Athletes with
+                // only some stations completed shouldn't get a
+                // 0 here.
+                let coverage = Double(pillarBests.count) / Double(HyroxPillar.allCases.count)
+                return Int((coverage * 75).rounded())
+            }
+            guard let minBest = pillarBests.min(),
+                  let maxBest = pillarBests.max(),
+                  maxBest > 0 else { return 0 }
+            // Ratio of fastest to slowest pillar — closer to 1.0
+            // = better balance. A perfectly balanced athlete
+            // (ratio 1.0) gets the full 150; ratio 0.5 (one
+            // pillar takes twice as long as another) gets 0.
+            let ratio = minBest / maxBest
+            let normalized = max(0, min(1, (ratio - 0.5) * 2))
+            return Int((normalized * 150).rounded())
+        }()
+
+        // Consistency component — race count capped at 10. Each
+        // finished race up to 10 contributes 15 points; beyond
+        // 10 caps at 150. Rewards repeat engagement.
+        let consistency: Int = {
+            let count = min(finished.count, 10)
+            return count * 15
+        }()
+
+        let total = performance + engine + balance + consistency
+        let clamped = max(0, min(1000, total))
+
+        return HyroxScore(
+            overall: clamped,
+            performanceScore: performance,
+            engineScore: engine,
+            balanceScore: balance,
+            consistencyScore: consistency,
+            racesCounted: finished.count,
+            tier: HyroxScore.tier(forScore: clamped)
+        )
     }
 
     // MARK: - Cross-race aggregates (for Profile) — phone only

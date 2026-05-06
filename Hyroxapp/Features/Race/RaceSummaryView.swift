@@ -201,18 +201,43 @@ struct RaceSummaryView: View {
                                 .foregroundStyle(Color.accentDim)
                         }
 
-                        // Cardiac drift — avg HR climb across the
-                        // 8 runs (first half vs second half). Sign
-                        // is intentionally rendered with explicit
-                        // "+" so a climb reads as a climb, not as
-                        // a neutral number. Silent when fewer than
-                        // 6 runs have HR data captured.
+                        // Cardiac drift (runs only) — avg HR climb
+                        // across the 8 runs (first half vs second
+                        // half). The clean prescribed-work signal:
+                        // every run is the same 1km, so HR climb
+                        // is unambiguously engine fade. Sign is
+                        // intentionally rendered with explicit "+"
+                        // so a climb reads as a climb, not as a
+                        // neutral number. Silent when fewer than 6
+                        // runs have HR data captured.
                         if let race = viewModel.activeRace,
                            let drift = RaceStats.heartRateDrift(for: race) {
                             let signed = drift.driftBPM >= 0
                                 ? "+\(Int(drift.driftBPM.rounded()))"
                                 : "\(Int(drift.driftBPM.rounded()))"
-                            Text("HR drift \(signed) bpm · \(drift.category.displayName)")
+                            Text("Run drift \(signed) bpm · \(drift.category.displayName)")
+                                .font(.caption.weight(.semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(Color.accentDim)
+                        }
+
+                        // Cardiac drift (all stations) — same
+                        // calculation but across all 16 segments.
+                        // Catches cumulative fatigue from the
+                        // workout stations that runs-only drift
+                        // misses (sled push spike + lunges burn +
+                        // wall balls grind all show up here).
+                        // Renders as a separate line right under
+                        // run drift so the athlete can compare
+                        // the two — a big gap between them is
+                        // diagnostic ("the workouts are beating
+                        // me up more than the runs reveal").
+                        if let race = viewModel.activeRace,
+                           let drift = RaceStats.heartRateDriftAllStations(for: race) {
+                            let signed = drift.driftBPM >= 0
+                                ? "+\(Int(drift.driftBPM.rounded()))"
+                                : "\(Int(drift.driftBPM.rounded()))"
+                            Text("Race drift \(signed) bpm · \(drift.category.displayName)")
                                 .font(.caption.weight(.semibold))
                                 .monospacedDigit()
                                 .foregroundStyle(Color.accentDim)
@@ -231,6 +256,25 @@ struct RaceSummaryView: View {
                             let pct = Int((decoupling.decouplingFraction * 100).rounded())
                             let signed = pct >= 0 ? "+\(pct)%" : "\(pct)%"
                             Text("Decoupling \(signed) · \(decoupling.category.displayName)")
+                                .font(.caption.weight(.semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(Color.accentDim)
+                        }
+
+                        // Run degradation score — explicit
+                        // (R_last - R_first) / R_first metric from
+                        // §17.2. Tiered Elite <8% / Good <15% /
+                        // Needs Work >15%. Sits next to drift +
+                        // decoupling so the three "how-did-the-
+                        // engine-fade?" signals cluster: drift is
+                        // HR-only, decoupling is HR/pace ratio,
+                        // degradation is pace-only. Together
+                        // they triangulate the fade story.
+                        if let race = viewModel.activeRace,
+                           let deg = RaceStats.runDegradation(for: race) {
+                            let pct = Int(deg.degradationPercent.rounded())
+                            let signed = pct >= 0 ? "+\(pct)%" : "\(pct)%"
+                            Text("Run fade \(signed) · \(deg.category.displayName)")
                                 .font(.caption.weight(.semibold))
                                 .monospacedDigit()
                                 .foregroundStyle(Color.accentDim)
@@ -271,6 +315,31 @@ struct RaceSummaryView: View {
                         let division = profiles.first?.resolvedDivision ?? .mensOpen
                         RaceDayProjectionView(race: race, division: division)
                             .padding(.top, 8)
+                    }
+
+                    // Race Story — single-paragraph narrative
+                    // summary of the race, drawn from the engine
+                    // score context's dominant sub-metric driver.
+                    // Sits above the bullet-list insights because
+                    // it's the rollup story; the insights below
+                    // are the supporting detail (drift line +
+                    // recovery line + decoupling line + etc).
+                    // Hidden when generator returns nil (race
+                    // not finished, no anchor data).
+                    if let race = viewModel.activeRace {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Story").capsLabelStyle()
+                                Spacer()
+                            }
+                            .padding(.horizontal, 4)
+                            RaceStoryView(
+                                race: race,
+                                history: allFinishedRaces,
+                                maxHR: maxHeartRate
+                            )
+                        }
+                        .padding(.top, 8)
                     }
 
                     // Auto-generated narrative insights — PBs, HR

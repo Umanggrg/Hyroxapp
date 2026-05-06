@@ -207,7 +207,8 @@ final class RaceViewModel {
     func makeRaceStateSnapshot(
         division: Division,
         maxHR: Int = 190,
-        personalHRBaseline: RaceStats.PersonalHRBaseline? = nil
+        personalHRBaseline: RaceStats.PersonalHRBaseline? = nil,
+        targetDuration: TimeInterval? = nil
     ) -> RaceStateSnapshot? {
         let phase: RaceStateSnapshot.Phase
         let startedAt: Date?
@@ -273,7 +274,8 @@ final class RaceViewModel {
             currentHeartRateBPM: currentHeartRateBPM,
             maxHeartRate: maxHR,
             personalHRLowerQuartile: personalHRBaseline?.lowerQuartile,
-            personalHRUpperQuartile: personalHRBaseline?.upperQuartile
+            personalHRUpperQuartile: personalHRBaseline?.upperQuartile,
+            targetDuration: targetDuration ?? activeRace?.targetDuration
         )
     }
 

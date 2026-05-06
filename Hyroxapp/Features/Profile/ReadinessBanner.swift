@@ -76,6 +76,58 @@ struct ReadinessBanner: View {
         }
     }
 
+    // Engine context line — explains the engine's contribution
+    // to today's readiness. Three flavors:
+    //
+    //   • Unmodulated: "Engine 64 · Steady" — neutral, shows
+    //     what the rollup is without claiming it changed the
+    //     state.
+    //   • bumpedUp: "↑ Engine 78 · Elite breakthrough" — the
+    //     engine bumped readiness up a tier.
+    //   • bumpedDown: "↓ Engine 51 · Off-day, taking it easy" —
+    //     the engine bumped readiness down a tier.
+    //
+    // Color tracks the modulation: bumped-up is success green
+    // (positive signal), bumped-down is warning amber (caution
+    // signal), unmodulated is neutral text-tertiary.
+    @ViewBuilder
+    private func engineContextLine(
+        score: Double,
+        tier: RaceStats.EngineScore.Tier,
+        modulation: RaceStats.ReadinessReadout.EngineModulation
+    ) -> some View {
+        // Compute label / color / symbol via an immediately-
+        // invoked closure so the @ViewBuilder body sees a single
+        // expression series. A switch statement that assigns to
+        // local lets isn't allowed in @ViewBuilder context — the
+        // builder treats it as a Void statement and complains
+        // "Type '()' cannot conform to 'View'." The closure
+        // returns a tuple instead.
+        let scoreInt = Int(score.rounded())
+        let (label, color, symbol): (String, Color, String?) = {
+            switch modulation {
+            case .bumpedUp:
+                return ("Engine \(scoreInt) · \(tier.displayName) breakthrough", .success, "arrow.up")
+            case .bumpedDown:
+                return ("Engine \(scoreInt) · Off-day, taking it easy", .warning, "arrow.down")
+            case .unmodulated:
+                return ("Engine \(scoreInt) · \(tier.displayName)", .textTertiary, nil)
+            }
+        }()
+
+        HStack(spacing: 4) {
+            if let symbol {
+                Image(systemName: symbol)
+                    .font(.caption2.weight(.heavy))
+            }
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .monospacedDigit()
+        }
+        .foregroundStyle(color)
+        .padding(.top, 2)
+    }
+
     private func content(readout: RaceStats.ReadinessReadout) -> some View {
         let color = tint(for: readout.state)
         let hoursLabel: String = {
@@ -142,6 +194,26 @@ struct ReadinessBanner: View {
                     .font(.caption)
                     .foregroundStyle(Color.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                // Engine context — small line surfacing why the
+                // state landed where it did. Only renders when the
+                // engine rollup is computable (1+ HR-tracked
+                // races); first-race users see the time-based
+                // state without the engine context, same as before.
+                //
+                // When engine modulation actually moved the
+                // state (bumpedUp / bumpedDown), prefix with an
+                // explainer arrow so the athlete can see how the
+                // engine influenced the read. Unmodulated states
+                // get a neutral "Engine N · Tier" line.
+                if let score = readout.engineRollupScore,
+                   let tier = readout.engineRollupTier {
+                    engineContextLine(
+                        score: score,
+                        tier: tier,
+                        modulation: readout.engineModulation
+                    )
+                }
             }
 
             Spacer()

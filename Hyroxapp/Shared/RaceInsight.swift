@@ -113,6 +113,15 @@ enum InsightGenerator {
         if let decouplingInsight = aerobicDecouplingInsight(for: race) {
             out.append(decouplingInsight)
         }
+        // Run degradation — pace-only fade signal. Fires on
+        // .needsWork only (the actionable bucket); elite + good
+        // are silenced because "you didn't fade much" is less
+        // useful than naming the fix when the athlete did fade.
+        // Pairs with the drift + decoupling insights above to
+        // triangulate the back-half story.
+        if let degradationInsight = runDegradationInsight(for: race) {
+            out.append(degradationInsight)
+        }
         // Effort insight needs maxHR to compute scores; when the
         // caller doesn't have it, the insight is skipped silently.
         // All current call sites have a UserProfile and pass
@@ -606,6 +615,27 @@ enum InsightGenerator {
         case .conditioned:
             return nil
         }
+    }
+
+    // MARK: - Run degradation insight
+    //
+    // Surfaces only on .needsWork — the actionable case where
+    // run pacing visibly fell apart. Phrasing names the percent
+    // and gives the athlete something to work on (front-loaded
+    // pacing → even your first 3 runs).
+    private static func runDegradationInsight(for race: Race) -> RaceInsight? {
+        guard let deg = RaceStats.runDegradation(for: race) else {
+            return nil
+        }
+        guard deg.category == .needsWork else { return nil }
+
+        let pct = Int(deg.degradationPercent.rounded())
+        let signedPct = pct >= 0 ? "+\(pct)%" : "\(pct)%"
+        return RaceInsight(
+            text: "Run fade \(signedPct) — significant pacing drop. Try evening your first 3 runs by 5s each.",
+            symbol: "tortoise.fill",
+            color: .accent
+        )
     }
 
     // MARK: - Engine Score insight

@@ -118,6 +118,17 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
     let personalHRLowerQuartile: Double?
     let personalHRUpperQuartile: Double?
 
+    // The target finish time the athlete set on race start, in
+    // seconds. Used by the Watch's §15 Pace Ghost — the small
+    // delta line on the Race page that reads "+0:23 ahead" /
+    // "on pace" / "-0:45 behind" using a naïve even split of
+    // the target across all segments.
+    //
+    // Nil when the athlete didn't set a target (clean omission
+    // — the Watch hides the delta line rather than rendering
+    // a misleading dash).
+    let targetDuration: TimeInterval?
+
     // 0-based index into `Station.raceSequence`. The watch resolves this
     // to a `Station` case and uses `station.displayName` /
     // `station.target(for: division)` for the header + subtitle.
@@ -159,7 +170,8 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         currentHeartRateBPM: Double? = nil,
         maxHeartRate: Int = 190,
         personalHRLowerQuartile: Double? = nil,
-        personalHRUpperQuartile: Double? = nil
+        personalHRUpperQuartile: Double? = nil,
+        targetDuration: TimeInterval? = nil
     ) {
         self.phase = phase
         self.startedAt = startedAt
@@ -175,6 +187,7 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         self.maxHeartRate = maxHeartRate
         self.personalHRLowerQuartile = personalHRLowerQuartile
         self.personalHRUpperQuartile = personalHRUpperQuartile
+        self.targetDuration = targetDuration
     }
 
     // MARK: - Dictionary encoding (WCSession transport)
@@ -196,6 +209,7 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         static let maxHeartRate = "maxHeartRate"
         static let personalHRLowerQuartile = "personalHRLowerQuartile"
         static let personalHRUpperQuartile = "personalHRUpperQuartile"
+        static let targetDuration = "targetDuration"
     }
 
     // Build a plist-compatible dictionary suitable for
@@ -231,6 +245,9 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         }
         if let personalHRUpperQuartile {
             dict[Key.personalHRUpperQuartile] = personalHRUpperQuartile
+        }
+        if let targetDuration {
+            dict[Key.targetDuration] = targetDuration
         }
         return dict
     }
@@ -297,6 +314,11 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         // fallback" — `RaceStats.coachingCue` already does that.
         self.personalHRLowerQuartile = dictionary[Key.personalHRLowerQuartile] as? Double
         self.personalHRUpperQuartile = dictionary[Key.personalHRUpperQuartile] as? Double
+
+        // Target finish time — optional, missing from old-version
+        // snapshots. Watch hides the Pace Ghost line cleanly when
+        // absent rather than rendering a misleading dash.
+        self.targetDuration = dictionary[Key.targetDuration] as? TimeInterval
 
         // Splits aren't carried over the WCSession dictionary path.
         // The watch doesn't render per-split detail; the duo/Codable

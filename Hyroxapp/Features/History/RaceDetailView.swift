@@ -318,15 +318,30 @@ struct RaceDetailView: View {
                     .foregroundStyle(Color.accentDim)
             }
 
-            // Cardiac drift — avg HR climb across the 8 runs (first
-            // half vs second half). Silent when fewer than 6 runs
-            // have HR data captured. Same line treatment + signed
-            // bpm rendering as the RaceSummary post-race hero.
+            // Cardiac drift (runs only) — avg HR climb across the
+            // 8 runs (first half vs second half). Silent when
+            // fewer than 6 runs have HR data captured. Same line
+            // treatment + signed bpm rendering as the RaceSummary
+            // post-race hero.
             if let drift = RaceStats.heartRateDrift(for: race) {
                 let signed = drift.driftBPM >= 0
                     ? "+\(Int(drift.driftBPM.rounded()))"
                     : "\(Int(drift.driftBPM.rounded()))"
-                Text("HR drift \(signed) bpm · \(drift.category.displayName)")
+                Text("Run drift \(signed) bpm · \(drift.category.displayName)")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.accentDim)
+            }
+
+            // Cardiac drift (all stations) — same calculation but
+            // across all 16 segments. Catches workout-station
+            // fatigue that runs-only misses. See RaceSummaryView
+            // for the full rationale.
+            if let drift = RaceStats.heartRateDriftAllStations(for: race) {
+                let signed = drift.driftBPM >= 0
+                    ? "+\(Int(drift.driftBPM.rounded()))"
+                    : "\(Int(drift.driftBPM.rounded()))"
+                Text("Race drift \(signed) bpm · \(drift.category.displayName)")
                     .font(.caption.weight(.semibold))
                     .monospacedDigit()
                     .foregroundStyle(Color.accentDim)
@@ -342,6 +357,19 @@ struct RaceDetailView: View {
                 let pct = Int((decoupling.decouplingFraction * 100).rounded())
                 let signed = pct >= 0 ? "+\(pct)%" : "\(pct)%"
                 Text("Decoupling \(signed) · \(decoupling.category.displayName)")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.accentDim)
+            }
+
+            // Run degradation — explicit (R_last - R_first) /
+            // R_first metric. Same line treatment as RaceSummary;
+            // see that view for the full context comment on why
+            // this metric sits next to drift + decoupling.
+            if let deg = RaceStats.runDegradation(for: race) {
+                let pct = Int(deg.degradationPercent.rounded())
+                let signed = pct >= 0 ? "+\(pct)%" : "\(pct)%"
+                Text("Run fade \(signed) · \(deg.category.displayName)")
                     .font(.caption.weight(.semibold))
                     .monospacedDigit()
                     .foregroundStyle(Color.accentDim)
@@ -409,12 +437,29 @@ struct RaceDetailView: View {
             for: race,
             division: profiles.first?.resolvedDivision ?? .mensOpen
         ) != nil
-        if !insights.isEmpty || hasRecovery || hasProjection {
+        let hasStory = RaceStoryView.hasContent(
+            for: race,
+            history: allFinishedRaces,
+            maxHR: maxHeartRate
+        )
+        if hasStory || !insights.isEmpty || hasRecovery || hasProjection {
             VStack(alignment: .leading, spacing: 12) {
                 ProfileSectionHeader(
                     title: "Insights",
                     icon: "sparkles"
                 )
+                // Race Story sits at the top of the Insights group
+                // because it's the rollup narrative — the
+                // bullet-list insights below are the supporting
+                // detail. Reads top-down: "what's the story?"
+                // → "here are the specific signals."
+                if hasStory {
+                    RaceStoryView(
+                        race: race,
+                        history: allFinishedRaces,
+                        maxHR: maxHeartRate
+                    )
+                }
                 if hasRecovery {
                     RecoveryEstimateView(race: race, maxHR: maxHeartRate)
                 }
