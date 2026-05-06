@@ -76,6 +76,23 @@ final class WatchWorkoutManager: NSObject {
     // called twice without an `end` in between.
     private(set) var isWorkoutActive: Bool = false
 
+    // Latest heart-rate sample collected by the local workout
+    // builder, published immediately as it lands. The Watch UI
+    // reads this directly to display HR with zero phone-roundtrip
+    // latency: previously the Watch's HR chip waited for its own
+    // sample to be published to the iPhone via WCSession, then
+    // bounced back to the Watch via the application-context
+    // snapshot push. That round-trip cost 1-3s of perceived
+    // delay on the wrist for HR data the Watch ALREADY HAD.
+    //
+    // This property is set inside `publishLatestHeartRateIfNeeded`
+    // every time we publish to the phone, so the local UI stays
+    // in lockstep with what we ship across the bridge.
+    //
+    // Cleared back to nil in `clearWorkoutHandles` so the chip
+    // stops showing a stale reading after the race ends.
+    private(set) var currentHeartRateBPM: Double?
+
     private override init() {
         super.init()
     }
@@ -273,13 +290,23 @@ final class WatchWorkoutManager: NSObject {
     // read by the HKWorkoutSessionDelegate.
     private var pendingFinalize: Bool = true
 
-    // Throttle gate for HR publishing to the iPhone. Even though
-    // HKLiveWorkoutBuilder samples at ~1-2Hz natively, the delegate
-    // method can fire in bursts during state changes — coalescing to
-    // ~1Hz keeps WCSession's per-app message budget healthy without
-    // sacrificing the live-feeling UI updates on the iPhone side.
+    // Throttle gate for HR publishing to the iPhone. The de-dup
+    // gate (lastPublishedSampleEnd, below) handles "same sample
+    // arrived twice" correctly without the throttle's help; the
+    // throttle's only job is to coalesce burst delivery so we
+    // don't blow WCSession's per-app message budget during a
+    // builder state change.
+    //
+    // Tuned 0.8s → 0.3s. Three publishes/second is the floor —
+    // well under WCSession's typical ~100Hz queue limit, but
+    // tight enough that didCollectDataOf delivering a fresh
+    // sample 0.4s after the previous publish actually lands
+    // instead of being rejected. The user-perceived "few-second
+    // delay" between wrist HR change and iPhone chip update is
+    // mostly Apple's HK builder tick latency (~1-3s), but the
+    // 0.5s saving here is the biggest tunable lever we control.
     private var lastHRPublishedAt: Date = .distantPast
-    private static let minHRPublishInterval: TimeInterval = 0.8
+    private static let minHRPublishInterval: TimeInterval = 0.3
 
     // De-dup gate — track the sample-end timestamp of the LAST HR
     // value we published. `didCollectDataOf` fires for any data
@@ -306,6 +333,10 @@ final class WatchWorkoutManager: NSObject {
         // its end-date happens to be before the previous race's
         // last sample (clock skew across day boundaries, etc).
         self.lastPublishedSampleEnd = .distantPast
+        // Clear the live HR display value so the Watch UI doesn't
+        // hold a stale reading from the just-finished race when
+        // the next one starts.
+        self.currentHeartRateBPM = nil
     }
 
     // MARK: - HR publishing
@@ -360,6 +391,12 @@ final class WatchWorkoutManager: NSObject {
         // Commit the gate state only after we've decided to publish.
         lastHRPublishedAt = now
         lastPublishedSampleEnd = sampledAt
+
+        // Update the local UI source FIRST — the Watch UI binds
+        // to this and renders immediately, no phone roundtrip
+        // needed. The publish-to-phone below is just for the
+        // iPhone's side; the wrist already has the value.
+        currentHeartRateBPM = bpm
 
         let update = WatchHeartRateUpdate(bpm: bpm, sampledAt: sampledAt)
         WatchRaceClient.shared.publishHeartRate(update)

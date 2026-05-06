@@ -1549,6 +1549,74 @@ enum RaceStats {
         return .typical
     }
 
+    // MARK: - Guardrails (per-station HR ceiling)
+
+    // Per-station HR ceiling for the §17.1 Guardrails feature —
+    // race-phase-aware "don't exceed this" threshold the Watch
+    // displays + uses to fire anticipatory haptics. Different
+    // from coaching-cue zones (#7) which are textbook Z3-based;
+    // guardrails are PERSONALIZED to each athlete's history at
+    // each specific station.
+    //
+    // Method:
+    //   • Pull StationHRSignature for the station — needs 3+
+    //     historical samples. Below that, no personalized
+    //     ceiling exists.
+    //   • Ceiling = upperQuartile + 5 bpm. The Q3 is "above
+    //     usual"; +5 bpm is "well above usual you can't sustain
+    //     this." Past the ceiling, the haptic fires reactively
+    //     ("you crossed").
+    //   • Approach threshold = upperQuartile. Within Q3 to Q3+5
+    //     is the "approaching ceiling" band — anticipatory
+    //     haptic fires here ("you're about to cross").
+    //
+    // Returns nil for first-station-of-this-type (no history).
+    // Caller can fall back to textbook Z4 (~87% of max HR) for
+    // the ceiling and ~83% for approach in that case.
+    struct Guardrail: Equatable {
+        let station: Station
+        let approachThreshold: Double  // HR at which to start warning
+        let ceiling: Double             // HR you should not exceed
+    }
+
+    static func guardrail(
+        for station: Station,
+        across races: [Race],
+        excludingRace: Race? = nil
+    ) -> Guardrail? {
+        guard let signature = stationHRSignature(
+            for: station,
+            across: races,
+            excludingRace: excludingRace
+        ) else { return nil }
+
+        // Q3 = approach threshold; Q3 + 5 = ceiling. The 5 bpm
+        // buffer is conservative — tight enough that the
+        // ceiling actually means "stop pushing" but loose
+        // enough that minor HR jitter doesn't fire spurious
+        // alerts at the boundary.
+        return Guardrail(
+            station: station,
+            approachThreshold: signature.upperQuartile,
+            ceiling: signature.upperQuartile + 5
+        )
+    }
+
+    // Textbook fallback when the athlete has no historical data
+    // for this station yet (first-time-at-this-station case).
+    // Uses Z4-Z5 zone boundaries: approach = top of Z3 (~80% of
+    // max), ceiling = bottom of Z5 (~90% of max). Generic but
+    // physiologically reasonable as a starting point.
+    static func textbookGuardrail(forMaxHR maxHR: Int) -> Guardrail? {
+        guard maxHR > 0 else { return nil }
+        let maxD = Double(maxHR)
+        return Guardrail(
+            station: .run1,  // not station-specific in the fallback
+            approachThreshold: maxD * 0.80,
+            ceiling: maxD * 0.90
+        )
+    }
+
     // MARK: - Per-station HR tendency (aggregated)
 
     // Athlete-level station HR fingerprint — the "who you are as
@@ -2482,6 +2550,213 @@ enum RaceStats {
         )
     }
 
+    // MARK: - Pre-race finish predictor
+
+    // §17.5 — pre-race AI finish-time estimation. Different
+    // intent from the in-race `predictedFinishTime` helper above
+    // (which is a naïve linear extrapolation of pace mid-race);
+    // this one runs BEFORE the race starts and answers "given my
+    // training state, what should I expect to finish in?"
+    //
+    // Method (multiplicative model on a baseline):
+    //
+    //   baseline = mean of recent finished-race times (last 5)
+    //   adjusted = baseline × engineFactor × readinessFactor × trendFactor
+    //
+    // Each factor moves the estimate by a few percent. The
+    // factors are conservative — none alone changes the
+    // prediction by more than 6%, even at the extremes.
+    //
+    //   • engineFactor    — elite engine: 0.97x, steady: 1.0x,
+    //                       building: 1.04x. A peaking athlete
+    //                       races a few % faster than baseline;
+    //                       a building one a few % slower.
+    //
+    //   • readinessFactor — fresh: 0.99x, partial: 1.02x,
+    //                       recovering: 1.06x. Recent hard
+    //                       sessions cost real time on race day.
+    //
+    //   • trendFactor     — improving (last 3 races faster than
+    //                       prior 3): 0.98x, regressing: 1.02x,
+    //                       stable: 1.0x. Reflects current
+    //                       trajectory.
+    //
+    // Confidence interval: ±N seconds where N is the standard
+    // deviation of the recent baseline window (so a consistent
+    // racer gets a tighter band than a volatile one). Capped at
+    // ±300s so even a wildly inconsistent athlete sees a usable
+    // window.
+    //
+    // Returns nil for first-race users (no baseline) — the
+    // predictor doesn't fabricate predictions out of thin air.
+    struct PredictedFinish: Equatable {
+        let predicted: TimeInterval         // most-likely finish
+        let lowerBound: TimeInterval        // predicted - 1σ
+        let upperBound: TimeInterval        // predicted + 1σ
+        let baselineMean: TimeInterval      // raw average of recent races
+        let racesCounted: Int               // baseline window size
+        let drivers: [Driver]               // why the prediction is what it is
+
+        // What's pulling the prediction up or down vs the raw
+        // baseline. UI surfaces these as chips so the athlete
+        // can see the model's reasoning.
+        struct Driver: Equatable {
+            let label: String              // "Engine", "Readiness", "Trend"
+            let modifier: Modifier         // .accelerating / .neutral / .braking
+            let detail: String             // "Engine 78 · Steady"
+        }
+
+        enum Modifier: Equatable {
+            case accelerating  // factor < 1.0 — making prediction faster
+            case braking       // factor > 1.0 — making prediction slower
+            case neutral       // factor == 1.0 — no contribution
+        }
+    }
+
+    static func predictedFinish(
+        across races: [Race],
+        division: Division,
+        maxHR: Int,
+        referenceDate: Date = Date()
+    ) -> PredictedFinish? {
+        let finished = races
+            .filter { $0.isFinished && $0.totalDuration != nil }
+            .sorted { $0.createdAt > $1.createdAt }
+
+        // Need at least 1 prior race for a baseline. With 1
+        // race we still produce a prediction but the trend
+        // factor is 1.0 (no trend data) and the σ is 0 so we
+        // use the cap as the band.
+        guard !finished.isEmpty else { return nil }
+
+        let recent = Array(finished.prefix(5))
+        let recentTimes = recent.compactMap(\.totalDuration)
+        guard !recentTimes.isEmpty else { return nil }
+
+        let baseline = recentTimes.reduce(0, +) / Double(recentTimes.count)
+
+        // Engine factor — read the rollup over the same recent
+        // window. Tier maps to a small multiplicative nudge.
+        let engineRollup = engineScore(across: finished, maxHR: maxHR)
+        let (engineFactor, engineDriver): (Double, PredictedFinish.Driver?) = {
+            guard let rollup = engineRollup else {
+                return (1.0, nil)
+            }
+            let factor: Double = {
+                switch rollup.tier {
+                case .elite:    return 0.97
+                case .steady:   return 1.00
+                case .building: return 1.04
+                }
+            }()
+            let modifier: PredictedFinish.Modifier = {
+                if factor < 1.0 { return .accelerating }
+                if factor > 1.0 { return .braking }
+                return .neutral
+            }()
+            let driver = PredictedFinish.Driver(
+                label: "Engine",
+                modifier: modifier,
+                detail: "\(Int(rollup.overall.rounded())) · \(rollup.tier.displayName)"
+            )
+            return (factor, driver)
+        }()
+
+        // Readiness factor — recent recovery state modulates
+        // the prediction. Fresh helps a little, recovering
+        // hurts noticeably.
+        let readiness = currentReadiness(in: finished, maxHR: maxHR, referenceDate: referenceDate)
+        let (readinessFactor, readinessDriver): (Double, PredictedFinish.Driver?) = {
+            guard let readout = readiness else {
+                return (1.0, nil)
+            }
+            let factor: Double = {
+                switch readout.state {
+                case .fresh:      return 0.99
+                case .partial:    return 1.02
+                case .recovering: return 1.06
+                }
+            }()
+            let modifier: PredictedFinish.Modifier = {
+                if factor < 1.0 { return .accelerating }
+                if factor > 1.0 { return .braking }
+                return .neutral
+            }()
+            let driver = PredictedFinish.Driver(
+                label: "Readiness",
+                modifier: modifier,
+                detail: readout.state.displayName
+            )
+            return (factor, driver)
+        }()
+
+        // Trend factor — last 3 races vs prior 3. Need 6+
+        // races to compute; otherwise neutral.
+        let (trendFactor, trendDriver): (Double, PredictedFinish.Driver?) = {
+            guard finished.count >= 6 else {
+                return (1.0, nil)
+            }
+            let recent3 = finished.prefix(3).compactMap(\.totalDuration)
+            let prior3 = finished.dropFirst(3).prefix(3).compactMap(\.totalDuration)
+            guard recent3.count == 3, prior3.count == 3 else {
+                return (1.0, nil)
+            }
+            let recentMean = recent3.reduce(0, +) / 3
+            let priorMean = prior3.reduce(0, +) / 3
+
+            let label: String
+            let factor: Double
+            // 2% tolerance — anything within 2% of prior is
+            // "stable," not a real trend.
+            let ratio = recentMean / priorMean
+            if ratio < 0.98 {
+                label = "Improving"
+                factor = 0.98
+            } else if ratio > 1.02 {
+                label = "Regressing"
+                factor = 1.02
+            } else {
+                label = "Stable"
+                factor = 1.00
+            }
+            let modifier: PredictedFinish.Modifier = {
+                if factor < 1.0 { return .accelerating }
+                if factor > 1.0 { return .braking }
+                return .neutral
+            }()
+            return (factor, PredictedFinish.Driver(
+                label: "Trend",
+                modifier: modifier,
+                detail: label
+            ))
+        }()
+
+        let predicted = baseline * engineFactor * readinessFactor * trendFactor
+
+        // σ from the baseline window. Standard deviation of
+        // recent times, used as the ± band. Capped 30s minimum
+        // (so a perfectly consistent racer doesn't get a
+        // useless ±0 band) and 300s maximum (so a wildly
+        // inconsistent racer doesn't see a five-minute window
+        // that's not actionable).
+        let mean = recentTimes.reduce(0, +) / Double(recentTimes.count)
+        let variance = recentTimes
+            .map { pow($0 - mean, 2) }
+            .reduce(0, +) / Double(recentTimes.count)
+        let sigma = max(30, min(300, sqrt(variance)))
+
+        let drivers = [engineDriver, readinessDriver, trendDriver].compactMap { $0 }
+
+        return PredictedFinish(
+            predicted: predicted,
+            lowerBound: predicted - sigma,
+            upperBound: predicted + sigma,
+            baselineMean: baseline,
+            racesCounted: recent.count,
+            drivers: drivers
+        )
+    }
+
     // MARK: - Cross-race aggregates (for Profile) — phone only
 
     // Fastest total race time across the provided races (nil if none).
@@ -2886,6 +3161,222 @@ enum RaceStats {
                 )
             }
             .sorted { $0.avgPercentSlower > $1.avgPercentSlower }
+    }
+
+    // MARK: - Fatigue Resistance Score
+
+    // Per-station 0-100 score wrapping the existing compromised-
+    // running average slowdown into a coaching-friendly metric.
+    // §17.5 — "Your pace degrades 6% after Wall Balls (great!)
+    // but 22% after Sled Push (needs work)." Converting the raw
+    // % into a 0-100 scale gives the athlete a number that
+    // climbs with training, which is more motivating than
+    // "your slowdown shrunk by 4 percentage points."
+    //
+    // Score formula: 0% slowdown → 100, 25% slowdown → 0,
+    // linear in between. The 25% ceiling is calibrated against
+    // observed HYROX athlete data — anything past 25% reflects
+    // a back-half collapse (the run after that station is
+    // essentially walking pace).
+    //
+    // Tiers from the §17.5 spec calibration:
+    //   • Resilient (80+) — that station barely affects the
+    //     next run. Compromised-running training is dialed.
+    //   • Moderate  (50-79) — typical for a strong amateur.
+    //     Some slowdown, but manageable.
+    //   • Vulnerable (<50) — the station is meaningfully
+    //     hurting subsequent runs. Train compromised running
+    //     specifically targeting this station.
+    struct FatigueResistanceScore: Equatable, Identifiable {
+        var id: Int { station.rawValue }
+        let station: Station
+        let score: Int                    // 0-100, higher = better resistance
+        let avgPercentSlower: Double      // raw input from StationImpact
+        let sampleCount: Int              // races contributing
+        let tier: Tier
+
+        enum Tier: String, Equatable {
+            case resilient
+            case moderate
+            case vulnerable
+
+            var displayName: String {
+                switch self {
+                case .resilient:  return "Resilient"
+                case .moderate:   return "Moderate"
+                case .vulnerable: return "Vulnerable"
+                }
+            }
+        }
+
+        static func tier(forScore score: Int) -> Tier {
+            switch score {
+            case 80...:  return .resilient
+            case 50..<80: return .moderate
+            default:      return .vulnerable
+            }
+        }
+    }
+
+    static func fatigueResistanceScores(
+        across races: [Race]
+    ) -> [FatigueResistanceScore] {
+        let impacts = crossRaceCompromisedAnalysis(among: races)
+        return impacts.map { impact in
+            // Linear: 0% → 100, 25% → 0. Clamp at the ends so
+            // a station with negative slowdown (faster after,
+            // rare but possible if the athlete eased up
+            // during the workout) doesn't score >100.
+            let clamped = max(0, min(25, impact.avgPercentSlower))
+            let score = Int(((25 - clamped) / 25 * 100).rounded())
+            return FatigueResistanceScore(
+                station: impact.station,
+                score: score,
+                avgPercentSlower: impact.avgPercentSlower,
+                sampleCount: impact.sampleCount,
+                tier: FatigueResistanceScore.tier(forScore: score)
+            )
+        }
+        // Sort ascending by score — lowest (most vulnerable)
+        // first, so the chart's top rows are the ones the
+        // athlete should train. Mirrors how strength athletes
+        // train weakest lifts first.
+        .sorted { $0.score < $1.score }
+    }
+
+    // MARK: - Weakness-to-Workout Engine (§17.3)
+
+    // Closed-loop recommendation: detects the athlete's #1
+    // weakness from per-station Fatigue Resistance Scores and
+    // returns a targeted compromised-running prescription.
+    //
+    // The "your own data" recommendation: this isn't a generic
+    // library workout — it's prescribed FROM the athlete's
+    // measured weakest station, so each user sees a different
+    // recommendation as their FRS map evolves.
+    //
+    // Closes the closed loop: athlete trains → Trakrr tracks
+    // the next race's compromised-running data → FRS updates →
+    // recommendation pivots to the new #1 weakness. Step 3
+    // (closing the loop with explicit "did this workout"
+    // tracking) is deferred — for now the FRS naturally
+    // updates as races land, which is the same effect.
+    struct WeaknessRecommendation: Equatable {
+        let station: Station                  // the targeted weakness
+        let currentScore: Int                 // FRS for this station
+        let tier: FatigueResistanceScore.Tier
+        let title: String                     // e.g. "Train Sled Push Recovery"
+        let prescription: String              // the workout itself
+        let coachingNote: String              // why this prescription works
+    }
+
+    // Returns the recommendation for the athlete's lowest-FRS
+    // station, or nil when there's no compromised-running data
+    // (custom-only history or zero races). When multiple
+    // stations tie at the bottom, picks the first by station
+    // rawValue order (deterministic for testing + UI stability).
+    static func topWeaknessRecommendation(
+        across races: [Race]
+    ) -> WeaknessRecommendation? {
+        let scores = fatigueResistanceScores(across: races)
+        guard let lowest = scores.first else { return nil }
+
+        // Only recommend training for stations the athlete has
+        // 2+ samples on. Single-race outliers (one bad sled push)
+        // don't justify rebuilding training around it.
+        guard lowest.sampleCount >= 2 else { return nil }
+
+        // Skip recommendations when the athlete is already
+        // resilient — no #1 weakness to fix. Coaching honesty:
+        // we don't fabricate problems.
+        guard lowest.tier != .resilient else { return nil }
+
+        let template = prescriptionTemplate(for: lowest.station)
+        return WeaknessRecommendation(
+            station: lowest.station,
+            currentScore: lowest.score,
+            tier: lowest.tier,
+            title: template.title,
+            prescription: template.prescription,
+            coachingNote: template.coachingNote
+        )
+    }
+
+    // Per-station prescription templates. Each entry encodes the
+    // canonical compromised-running workout for that station —
+    // a "rounds × distance" recipe targeting the specific
+    // physiology that station fatigues. These are deliberately
+    // station-specific: sled push (legs + sustained tension)
+    // wants different work than rowing (full-body anaerobic).
+    //
+    // Templates were refined from the §17.3 spec examples and
+    // standard HYROX coaching practice. They're not generic
+    // "go run after the workout" — each one specifies the
+    // intensity and duration that produces the right adaptation.
+    private static func prescriptionTemplate(for station: Station) -> (title: String, prescription: String, coachingNote: String) {
+        switch station {
+        case .sledPush:
+            return (
+                title: "Train Sled Push Recovery",
+                prescription: "4 rounds: 25m sled push at 80% race weight → 400m run holding Z3.",
+                coachingNote: "Heavy legs + sustained tension is what hurts the next run. Lighter-than-race-weight sleds with immediate run transitions teach the engine to recover while moving."
+            )
+        case .sledPull:
+            return (
+                title: "Train Sled Pull Recovery",
+                prescription: "4 rounds: 25m sled pull at 80% race weight → 400m run holding Z3.",
+                coachingNote: "Sled pull burns the upper back + grip. Sub-race-weight pulls keep the local fatigue real while protecting the pull-itself recovery so the run doesn't collapse."
+            )
+        case .burpeeBroadJumps:
+            return (
+                title: "Train Burpee-to-Run Recovery",
+                prescription: "5 rounds: 10m burpee broad jumps → 400m run holding Z3.",
+                coachingNote: "Burpees spike HR fastest of any station. Short bursts before each run trains your engine to drop HR + reorganize for running pace."
+            )
+        case .rowing:
+            return (
+                title: "Train Row-to-Run Recovery",
+                prescription: "3 rounds: 500m row → 800m run holding Z3.",
+                coachingNote: "Row leaves seated-position fatigue + lower-back lactate. Half-station volume + double-distance runs teach your engine to clear that load and find pace."
+            )
+        case .skiErg:
+            return (
+                title: "Train Ski Erg Recovery",
+                prescription: "3 rounds: 500m ski erg → 800m run holding Z3.",
+                coachingNote: "Ski Erg is upper-body anaerobic — your legs are fresh but your engine is taxed. Trains the systemic-fatigue recovery the runs need."
+            )
+        case .farmersCarry:
+            return (
+                title: "Train Farmers Carry Recovery",
+                prescription: "4 rounds: 100m farmers carry at 80% race weight → 400m run holding Z3.",
+                coachingNote: "Farmers carry is grip + core under load. Sub-weight carries keep the postural challenge while letting the run come back at race pace."
+            )
+        case .sandbagLunges:
+            return (
+                title: "Train Sandbag Lunge Recovery",
+                prescription: "4 rounds: 50m sandbag lunges → 400m run holding Z3.",
+                coachingNote: "Lunges burn out the quads — runs after this station are the most pace-vulnerable. Half-station lunges with immediate runs build quad-fatigue tolerance."
+            )
+        case .wallBalls:
+            // Wall Balls is the final station — no run follows
+            // in the canonical sequence — so the prescription
+            // is just general wall-ball-engine work rather than
+            // compromised-running.
+            return (
+                title: "Train Wall Ball Endurance",
+                prescription: "3 rounds: 25 wall balls at race weight → 200m run easy. Rest 90s between rounds.",
+                coachingNote: "Wall balls is the final station with no run after — work pure endurance under quad fatigue. Easy run between rounds is recovery, not race pace."
+            )
+        case .run1, .run2, .run3, .run4, .run5, .run6, .run7, .run8:
+            // Run stations don't appear in FRS — they're not
+            // "weakness-causing" stations in the compromised-
+            // running model. Defensive return for completeness.
+            return (
+                title: "Run-only training",
+                prescription: "3 × 1km at race pace, 90s rest between.",
+                coachingNote: "Run pace work builds the front-half foundation."
+            )
+        }
     }
 
     static func stationTrend(

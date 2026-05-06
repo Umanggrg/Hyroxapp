@@ -1,6 +1,16 @@
 import SwiftUI
 import SwiftData
 
+// Navigation destinations for the Profile depth-behind-nav
+// pushed views. Hashable enum so SwiftUI's
+// `.navigationDestination(for:)` can dispatch on it. New
+// destinations append cases here; the dispatch happens in
+// ProfileView's body.
+enum ProfileDestination: Hashable {
+    case performanceDetail
+    case trendsDetail
+}
+
 // The Profile tab. Composes a `ProfileHeaderView` reading from the live
 // `UserProfile` model with a stats grid computed from all finished races.
 // Bootstraps a default `UserProfile` on first launch so the header always
@@ -162,6 +172,35 @@ struct ProfileView: View {
             .navigationDestination(for: YearlyRecap.self) { recap in
                 YearlyRecapView(recap: recap)
             }
+            // Profile cleanup — Performance + Trends sections push
+            // their secondary cards behind navigation taps so the
+            // Profile overview stays focused on the headline
+            // metrics. PerformanceDetailView houses the deep
+            // Performance cards (HYROX Performance pillars, Race
+            // Ready, HR Baseline, Station Fingerprint, Performance
+            // Overload, Engine Impact); TrendsDetailView houses
+            // the secondary trend charts (Time, Effort, HR Drift,
+            // Run Fade, Recovery, Intensity Mix). Engine Score +
+            // Engine Score Trend stay above-the-fold as the
+            // headlines for each domain.
+            .navigationDestination(for: ProfileDestination.self) { destination in
+                let maxHR = profiles.first?.maxHeartRate ?? 190
+                let division = profiles.first?.resolvedDivision ?? .mensOpen
+                switch destination {
+                case .performanceDetail:
+                    PerformanceDetailView(
+                        races: races,
+                        division: division,
+                        maxHR: maxHR
+                    )
+                case .trendsDetail:
+                    TrendsDetailView(
+                        races: races,
+                        division: division,
+                        maxHR: maxHR
+                    )
+                }
+            }
             .toolbar {
                 #if !os(macOS)
                 // Settings gear goes on the leading edge, Edit on the
@@ -279,6 +318,17 @@ struct ProfileView: View {
             )
             if ReadinessBanner.shouldShow(in: races, maxHR: maxHR) {
                 ReadinessBanner(races: races, maxHR: maxHR)
+            }
+            // §17.3 Weakness-to-Workout — recommended workout
+            // card driven by the athlete's lowest-FRS station.
+            // Sits BELOW the readiness banner because readiness
+            // answers "should I push today?" first; once that's
+            // affirmative, this card answers "what should I
+            // push?". Hidden when no compromised-running data
+            // exists or athlete is already resilient on every
+            // station.
+            if RecommendedWorkoutCard.hasRecommendation(in: races) {
+                RecommendedWorkoutCard(races: races)
             }
             raceEventBanner
             challengeBannerOrCTA
@@ -429,54 +479,80 @@ struct ProfileView: View {
         let hasStationFingerprint = StationFingerprintView.hasEnoughData(in: races)
         let hasHyroxScore = HyroxScoreView.hasEnoughData(in: races, division: division, maxHR: maxHR)
 
-        if hasPerf || hasReady || hasOverload || hasEngine || hasHRBaseline || hasEngineScore || hasStationFingerprint || hasHyroxScore {
+        // Profile cleanup: keep the two headline rollup metrics
+        // inline (HYROX Score + Engine Quality), push the rest of
+        // the Performance cards behind a "View Detail →" tap to
+        // PerformanceDetailView. Same depth-behind-nav approach
+        // the Race Start screen uses for Custom Workout.
+        //
+        // The "has more detail" gate is anything that lives in
+        // PerformanceDetailView — when none of those cards have
+        // data, the nav row hides too so a fresh-install athlete
+        // doesn't see a teaser link to an empty page.
+        let hasMoreDetail = hasPerf || hasReady || hasHRBaseline
+            || hasStationFingerprint || hasOverload || hasEngine
+
+        if hasHyroxScore || hasEngineScore || hasMoreDetail {
             VStack(alignment: .leading, spacing: 12) {
                 ProfileSectionHeader(
                     title: "Performance",
                     icon: "bolt.fill"
                 )
-                // HYROX Score sits at the very top of the
-                // Performance section — it's the §17.3
-                // "credit score for HYROX fitness" headline.
-                // Different question from Engine Quality below:
-                // HYROX Score is all-time positioning (Bronze
-                // → Elite); Engine Quality is recent
-                // conditioning state. Both belong on Profile
-                // but answer different questions.
+                // HYROX Score — §17.3 "credit score for HYROX
+                // fitness" headline. All-time positioning
+                // (Bronze → Elite). The single number to
+                // screenshot.
                 if hasHyroxScore {
                     hyroxScoreSection
                 }
 
-                // Engine Quality score sits below the HYROX
-                // Score because it's the recent-form HR rollup,
-                // versus HYROX Score's all-time positioning.
-                // First-time users without HR data don't see
-                // this card; once any HR-derived metric exists,
-                // it appears.
+                // Engine Quality — recent-form HR rollup
+                // (Building / Steady / Elite). Recent
+                // conditioning state, complementary to HYROX
+                // Score's all-time positioning.
                 if hasEngineScore {
                     engineScoreSection
                 }
-                if hasPerf {
-                    hyroxPerformanceSection
-                }
-                if hasReady {
-                    raceReadySection
-                }
-                if hasHRBaseline {
-                    hrBaselineSection
-                }
-                if hasStationFingerprint {
-                    stationFingerprintSection
-                }
-                if hasOverload {
-                    overloadSection
-                }
-                if hasEngine {
-                    engineImpactSection
+
+                // Detail navigation — pushes PerformanceDetailView
+                // with the deeper Performance cards. Mirrors the
+                // "View All →" pattern Apple Fitness uses.
+                if hasMoreDetail {
+                    NavigationLink(value: ProfileDestination.performanceDetail) {
+                        viewDetailRow(label: "View Performance Detail")
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, Layout.screenMargin)
         }
+    }
+
+    // Reusable "View Detail →" row used by both the Performance
+    // and Trends sections. Surface treatment matches the
+    // existing card vocabulary on Profile (rounded surface,
+    // subtle border) so the nav row reads as a sibling of the
+    // cards above it, not an unrelated control.
+    private func viewDetailRow(label: String) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.textPrimary)
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.textTertiary)
+        }
+        .padding(.horizontal, Layout.cardPadding)
+        .frame(height: 48)
+        .background(
+            RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                .fill(Color.surface.opacity(0.7))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                        .stroke(Color.divider, lineWidth: 1)
+                )
+        )
     }
 
     // Station HR Fingerprint — per-station tendency map
@@ -1089,14 +1165,26 @@ struct ProfileView: View {
         let hasEngineTrend = EngineScoreTrendView.hasEnoughData(in: races, maxHR: maxHR)
         let hasRunDegradationTrend = RunDegradationTrendView.hasEnoughData(in: races)
 
+        // Profile cleanup — keep the headline trend chart inline
+        // (Engine Score Trend, the rollup of all other trends),
+        // push the rest behind "View All Trends →" to
+        // TrendsDetailView. Same depth-behind-nav approach as
+        // Performance.
+        //
+        // Time Trend always renders in the detail view (the
+        // PerformanceTrendsView shows a "not enough yet" empty
+        // state on its own when needed), so the nav row appears
+        // whenever there's at least one race; we never offer a
+        // dead link.
+        let hasMoreTrends = hasEffortTrend || hasEffortDistribution
+            || hasDriftTrend || hasRecoveryTrend || hasRunDegradationTrend
+            || !races.isEmpty  // Time Trend covers the always-on case
+
         return VStack(alignment: .leading, spacing: 12) {
-            // Engine Score Trend — the headline rollup curve. Sits
-            // at the top of the trend family because it's the
-            // composite of every other trend below it (drift,
-            // recovery, efficiency, decoupling). The athlete
-            // looking at trends starts here for the "where is my
-            // engine going" answer; the metric-specific trends
-            // beneath break down the why.
+            // Engine Score Trend — the headline rollup curve.
+            // Composite of drift / recovery / efficiency /
+            // decoupling. Stays above-the-fold because it's the
+            // single answer to "where is my engine going."
             if hasEngineTrend {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
@@ -1110,111 +1198,14 @@ struct ProfileView: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Time Trend")
-                        .capsLabelStyle()
-                    Spacer()
+            // Detail navigation — pushes TrendsDetailView with
+            // the secondary trend charts (Time, Effort, HR Drift,
+            // Run Fade, Recovery, Intensity Mix).
+            if hasMoreTrends {
+                NavigationLink(value: ProfileDestination.trendsDetail) {
+                    viewDetailRow(label: "View All Trends")
                 }
-                .padding(.horizontal, 4)
-
-                PerformanceTrendsView(races: races)
-            }
-
-            if hasEffortTrend {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Effort Trend")
-                            .capsLabelStyle()
-                        Spacer()
-                    }
-                    .padding(.horizontal, 4)
-
-                    EffortTrendView(races: races, maxHR: maxHR)
-                }
-            }
-
-            // HR drift trend — tracks aerobic-engine progression
-            // across the athlete's full race history. Sits below
-            // Effort Trend because they answer different questions:
-            // effort = "am I training harder?", drift = "is my
-            // engine getting better at the same intensity?". The
-            // drift line should slope DOWN over a training block
-            // even when effort holds flat — that's the engine
-            // adaptation arrow. Hidden when fewer than 3 races
-            // have HR data on 6+ runs each.
-            if hasDriftTrend {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("HR Drift Trend")
-                            .capsLabelStyle()
-                        Spacer()
-                    }
-                    .padding(.horizontal, 4)
-
-                    HRDriftTrendView(races: races)
-                }
-            }
-
-            // Run degradation trend — explicit pace-only fade
-            // signal across races. Sits between Drift Trend and
-            // Recovery Trend so the back-half conditioning story
-            // clusters: drift = HR held within races, fade = pace
-            // held within runs, recovery = HR dropped between
-            // stations. Three angles on the same training-block
-            // question. Hidden when fewer than 3 races have run
-            // degradation data captured.
-            if hasRunDegradationTrend {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Run Fade Trend")
-                            .capsLabelStyle()
-                        Spacer()
-                    }
-                    .padding(.horizontal, 4)
-
-                    RunDegradationTrendView(races: races)
-                }
-            }
-
-            // Recovery trend — between-station 30s HR drop across
-            // the athlete's race history. Different question from
-            // drift: drift = "is HR holding steady WITHIN a race?",
-            // recovery = "is the engine getting faster at dropping
-            // HR BETWEEN stations?" Both should improve with
-            // training, but they answer different conditioning
-            // questions. Hidden when fewer than 3 races have
-            // recovery data captured.
-            if hasRecoveryTrend {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Recovery Trend")
-                            .capsLabelStyle()
-                        Spacer()
-                    }
-                    .padding(.horizontal, 4)
-
-                    RecoveryTrendView(races: races)
-                }
-            }
-
-            // Distribution complements the trend chart — same data,
-            // different question. Trend = "how is intensity moving
-            // over time?" Distribution = "what's the mix across my
-            // recent races?" Together they cover the load-balance
-            // story. Same data-availability gate so they appear and
-            // disappear as a unit.
-            if hasEffortDistribution {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Intensity Mix")
-                            .capsLabelStyle()
-                        Spacer()
-                    }
-                    .padding(.horizontal, 4)
-
-                    EffortDistributionView(races: races, maxHR: maxHR)
-                }
+                .buttonStyle(.plain)
             }
         }
     }

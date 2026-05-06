@@ -65,22 +65,23 @@ final class RaceViewModel {
     var isCountingDown: Bool { countdownValue != nil }
 
     // How often we poll HealthKit for current HR during a race. The
-    // poll is now a THIRD-TIER fallback behind two Watch transports
+    // poll is the THIRD-TIER fallback behind two Watch transports
     // (sendMessage when reachable + transferUserInfo always). It
     // fires only when neither Watch path has delivered, typically
     // when the Watch app is killed or HealthKit auth was denied.
     //
-    // 2s rather than the old 5s because:
-    //   - Apple Watch ambient HR sampling lands in HealthKit every
-    //     5-15s in non-workout mode; polling more often than the
-    //     sample arrival rate is wasteful but doesn't hurt.
-    //   - During a Watch HKWorkoutSession (#18 path), samples land
-    //     in HealthKit at workout-rate. The 2s poll catches them
-    //     quickly.
-    //   - The user-perceived "stuck HR" bug at 5s polling motivates
-    //     fresher fallback latency — 2s feels alive, 5s feels
-    //     frozen during a fast warmup.
-    private static let heartRatePollInterval: TimeInterval = 2
+    // Tuned 5s → 2s → 1s. WCSession is now reliable enough that
+    // polling rarely needs to write — the watchSampleAge gate
+    // suppresses the polled write when the Watch streamed
+    // anything in the last 10s. So a 1s cadence isn't actually
+    // 1Hz of HK queries in practice; it's 1Hz of "should I fill
+    // a gap?" checks, most of which short-circuit on the gate.
+    //
+    // The user-perceived latency win: when the Watch path DOES
+    // drop (locker, killed, denied auth) and polling kicks in,
+    // a fresh sample lands ≤1s after it appears in HK rather
+    // than waiting up to 2s.
+    private static let heartRatePollInterval: TimeInterval = 1
 
     // MARK: - ModelContext plumbing
 
@@ -208,7 +209,8 @@ final class RaceViewModel {
         division: Division,
         maxHR: Int = 190,
         personalHRBaseline: RaceStats.PersonalHRBaseline? = nil,
-        targetDuration: TimeInterval? = nil
+        targetDuration: TimeInterval? = nil,
+        guardrailHistory: [Race] = []
     ) -> RaceStateSnapshot? {
         let phase: RaceStateSnapshot.Phase
         let startedAt: Date?
@@ -260,6 +262,20 @@ final class RaceViewModel {
         // Watch path doesn't read this; only the duo bridge does.
         let serializedSplits = engine.splits.map(SerializedSplit.init(from:))
 
+        // Guardrail thresholds — personalized from history when
+        // 3+ samples exist for the current station, falls back
+        // to textbook Z4-Z5 boundaries otherwise. Recomputed on
+        // every snapshot push so the Watch sees fresh ceilings
+        // as the race advances through stations.
+        let guardrail: RaceStats.Guardrail? = {
+            guard let station = currentStation else { return nil }
+            return RaceStats.guardrail(
+                for: station,
+                across: guardrailHistory,
+                excludingRace: activeRace
+            ) ?? RaceStats.textbookGuardrail(forMaxHR: maxHR)
+        }()
+
         return RaceStateSnapshot(
             phase: phase,
             startedAt: startedAt,
@@ -275,7 +291,9 @@ final class RaceViewModel {
             maxHeartRate: maxHR,
             personalHRLowerQuartile: personalHRBaseline?.lowerQuartile,
             personalHRUpperQuartile: personalHRBaseline?.upperQuartile,
-            targetDuration: targetDuration ?? activeRace?.targetDuration
+            targetDuration: targetDuration ?? activeRace?.targetDuration,
+            segmentHRApproachThreshold: guardrail?.approachThreshold,
+            segmentHRCeiling: guardrail?.ceiling
         )
     }
 

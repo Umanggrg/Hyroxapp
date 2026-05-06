@@ -56,6 +56,14 @@ struct WatchRaceView: View {
     // full-screen on top of the in-progress TabView when non-nil.
     @State private var activeAlertCue: RaceStats.CoachingCue?
 
+    // Last-seen guardrail state. State-machine that ensures the
+    // anticipatory haptic fires ONCE when HR first enters the
+    // approach band, and doesn't repeat continuously while HR
+    // sits in the band. Re-fires only after HR drops below
+    // approach and re-enters. Same per-transition firing pattern
+    // as the existing `lastCueRaw` state for coaching cues.
+    @State private var lastGuardrailState: GuardrailState = .silent
+
     // Handle to the pending dismiss-the-overlay task so we can
     // cancel it if a new cue transition fires before the current
     // overlay times out. Without cancellation, two rapid
@@ -164,6 +172,16 @@ struct WatchRaceView: View {
         .onChange(of: client.snapshot?.currentStationIndex) { _, newIndex in
             handleStationIndexChange(to: newIndex)
         }
+        // Guardrail state watcher — fires the anticipatory
+        // haptic when HR enters the approach band (§17.1). The
+        // computed `currentGuardrailState` reads the latest HR
+        // (local Watch source preferred) against the snapshot's
+        // ceiling/approach thresholds. State-machine in
+        // `handleGuardrailStateChange` ensures we buzz ONCE per
+        // entry into the band, not continuously while in it.
+        .onChange(of: currentGuardrailState) { _, newState in
+            handleGuardrailStateChange(to: newState)
+        }
         // Coaching-cue transition haptic. Computes the current cue
         // from the snapshot; when it changes (and we're mid-race),
         // fires a haptic distinct to the new state so the athlete
@@ -192,9 +210,18 @@ struct WatchRaceView: View {
     // pre-race / post-race phase transitions.
     private var currentCoachingCueRaw: String? {
         guard let snapshot = client.snapshot,
-              snapshot.phase == .inProgress,
-              let hr = snapshot.currentHeartRateBPM
+              snapshot.phase == .inProgress
         else { return nil }
+        // Prefer the local Watch HR (zero-latency, sourced
+        // directly from the active workout builder) over the
+        // snapshot HR (phone-roundtrip, ~1-3s slower). This
+        // means cue transitions + the alert overlay fire on
+        // the wrist as soon as the underlying sample changes,
+        // not after the iPhone has bounced it back.
+        guard let hr = WatchWorkoutManager.shared.currentHeartRateBPM
+            ?? snapshot.currentHeartRateBPM else {
+            return nil
+        }
         // Centralized cue resolver on RaceStateSnapshot uses the
         // personal HR band carried on the snapshot when present
         // (athlete-specific Z3 from RaceStats.personalHRBaseline)
@@ -272,6 +299,62 @@ struct WatchRaceView: View {
             try? await Task.sleep(for: .seconds(Self.alertOverlayDuration))
             guard !Task.isCancelled else { return }
             activeAlertCue = nil
+        }
+    }
+
+    // §17.1 Guardrail state derivation. Reads the latest HR
+    // (local Watch source preferred, snapshot fallback) against
+    // the snapshot's per-segment ceiling + approach thresholds.
+    // Returns `.silent` when any input is missing — the haptic
+    // handler treats `.silent` transitions as "no signal," so
+    // missing data means no spurious buzzing.
+    private var currentGuardrailState: GuardrailState {
+        guard let snapshot = client.snapshot,
+              snapshot.phase == .inProgress else { return .silent }
+        let hr = WatchWorkoutManager.shared.currentHeartRateBPM
+            ?? snapshot.currentHeartRateBPM
+        guard let hr,
+              let ceiling = snapshot.segmentHRCeiling,
+              let approach = snapshot.segmentHRApproachThreshold,
+              hr > 0 else { return .silent }
+        if hr >= ceiling { return .aboveCeiling }
+        if hr >= approach { return .approaching }
+        return .silent
+    }
+
+    // Anticipatory haptic firing on guardrail transitions
+    // (§17.1). Buzzes ONCE when HR enters a new band:
+    //   • silent → approaching: warning haptic ("you're about
+    //     to cross the ceiling")
+    //   • approaching → aboveCeiling: stronger heavy haptic
+    //     ("you're past the ceiling")
+    //   • Any → silent: no haptic ("good, you came back down")
+    //
+    // Re-firing only on transitions (not while in a band) is the
+    // §17.1 design principle: silence = you're fine; we speak
+    // only when state changes.
+    private func handleGuardrailStateChange(to newState: GuardrailState) {
+        defer { lastGuardrailState = newState }
+        // First-ever state we see this race — no haptic; the
+        // race has just started and we don't know if the
+        // athlete is settling in.
+        guard newState != lastGuardrailState else { return }
+
+        switch newState {
+        case .approaching:
+            // Crossing into the approach band — anticipatory.
+            // Distinct from the cue-change haptics above so the
+            // athlete can tell "approaching ceiling" apart from
+            // "zone changed."
+            Haptics.warning()
+        case .aboveCeiling:
+            // Crossed the ceiling — stronger signal. Reactive
+            // rather than anticipatory at this point.
+            Haptics.impact(.heavy)
+        case .silent:
+            // Came back below approach — no haptic, just
+            // visual chip color change.
+            break
         }
     }
 
@@ -690,11 +773,19 @@ struct WatchRaceView: View {
                 // green hold, red slow, blue push, zone-color on
                 // workout stations (no pace cue mid-sled-push).
                 //
+                // HR source priority: local Watch builder first
+                // (zero-latency), snapshot fallback. See
+                // `WatchRaceMainPage.heartRateBar` for the rationale
+                // — this chip exists in the legacy timer display
+                // surface (paused/roxzone views), so it shares the
+                // same source-priority logic.
+                //
                 // The cue itself drives a haptic on transition further
                 // down via `.onChange(of: coachingCue)` — that's
                 // attached at the inProgressView level so the haptic
                 // fires once per state change rather than per frame.
-                if let hr = snapshot.currentHeartRateBPM {
+                if let hr = WatchWorkoutManager.shared.currentHeartRateBPM
+                    ?? snapshot.currentHeartRateBPM {
                     let zone = HRZone.zone(for: hr, maxBPM: snapshot.maxHeartRate)
                     // Personalized cue when the snapshot carries
                     // the personal HR band (RaceStats.personalHR-

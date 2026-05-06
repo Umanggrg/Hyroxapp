@@ -1417,7 +1417,8 @@ struct RaceView: View {
         if let snapshot = viewModel.makeRaceStateSnapshot(
             division: division,
             maxHR: maxHeartRate,
-            personalHRBaseline: personalHRBaseline
+            personalHRBaseline: personalHRBaseline,
+            guardrailHistory: allRaces
         ) {
             WatchCompanionService.shared.publish(snapshot)
         } else {

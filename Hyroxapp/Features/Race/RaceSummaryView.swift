@@ -342,11 +342,13 @@ struct RaceSummaryView: View {
                         .padding(.top, 8)
                     }
 
-                    // Auto-generated narrative insights — PBs, HR
-                    // peak, run fatigue. The view skips itself when
-                    // no insights apply (e.g. first race ever, no
-                    // HR data, even pacing). Section header only
-                    // renders when the underlying view has content.
+                    // Auto-generated narrative insights as a §16
+                    // Layer 2 horizontal scroll strip. Replaces
+                    // the previous bullet-list rendering. The
+                    // view skips itself when no insights apply
+                    // (e.g. first race ever, no HR data, even
+                    // pacing). Section header only renders when
+                    // the underlying strip has content.
                     if let race = viewModel.activeRace {
                         let insights = InsightGenerator.generate(
                             for: race,
@@ -359,7 +361,7 @@ struct RaceSummaryView: View {
                                     Spacer()
                                 }
                                 .padding(.horizontal, 4)
-                                RaceInsightsView(insights: insights)
+                                RaceInsightStrip(insights: insights)
                             }
                             .padding(.top, 8)
                         }

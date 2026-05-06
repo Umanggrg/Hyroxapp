@@ -43,6 +43,34 @@ struct RaceStartView: View {
     @Query(sort: [SortDescriptor(\RaceEvent.date, order: .forward)])
     private var allEvents: [RaceEvent]
 
+    // Historical finished races — input to the §17.5 pre-race
+    // predictor chip rendered above the primary CTA. The chip
+    // hides itself silently when fewer than 1 finished race
+    // exists, so the @Query is cheap on a fresh-install render
+    // (returns []) and the chip just doesn't appear.
+    @Query(
+        filter: #Predicate<Race> { $0.endedAt != nil },
+        sort: [SortDescriptor(\Race.createdAt, order: .reverse)]
+    )
+    private var finishedRaces: [Race]
+
+    // Athlete's configured max HR — drives the engine-score
+    // input to the predictor. Falls back to the standard 190
+    // when no profile is bootstrapped yet (defensive — the
+    // bootstrap should always have run by the time the start
+    // screen renders).
+    private var maxHeartRate: Int {
+        profiles.first?.maxHeartRate ?? 190
+    }
+
+    // Resolved division for the current athlete — needed by the
+    // predictor (different divisions have different reference
+    // times in the underlying model, though phase 1 doesn't use
+    // division-specific anchors yet).
+    private var resolvedDivision: Division {
+        profiles.first?.resolvedDivision ?? .mensOpen
+    }
+
     private var nextEvent: RaceEvent? {
         let today = Calendar.current.startOfDay(for: Date())
         return allEvents.first { $0.date >= today }
@@ -96,7 +124,27 @@ struct RaceStartView: View {
                     .padding(.bottom, 12)
 
                 targetRow
-                    .padding(.bottom, 20)
+                    .padding(.bottom, 12)
+
+                // §17.5 — pre-race finish predictor chip. Sits
+                // directly above the primary CTA so the athlete
+                // sees their predicted time as they're about to
+                // start. Hidden silently for first-race users
+                // (no baseline to predict from); appears once
+                // the athlete has 1+ prior finished race.
+                if RacePredictorChip.hasEnoughData(
+                    in: finishedRaces,
+                    division: resolvedDivision,
+                    maxHR: maxHeartRate
+                ) {
+                    RacePredictorChip(
+                        races: finishedRaces,
+                        division: resolvedDivision,
+                        maxHR: maxHeartRate
+                    )
+                    .padding(.horizontal, Layout.screenMargin - 4)
+                    .padding(.bottom, 16)
+                }
 
                 primaryCTA
                     .padding(.bottom, 24)

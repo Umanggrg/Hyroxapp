@@ -244,12 +244,40 @@ struct WatchRaceMainPage: View {
     // bar with the current zone highlighted. Coaching-cue color
     // tints the entire row so a glance reads both the BPM and
     // whether it's a hold/slow/push moment.
+    //
+    // HR source priority:
+    //   1. WatchWorkoutManager.currentHeartRateBPM (LOCAL — zero
+    //      latency, the Watch sees its own HR sample as soon as
+    //      the builder publishes it)
+    //   2. snapshot.currentHeartRateBPM (REMOTE — the value the
+    //      iPhone bounced back via the application-context push,
+    //      ~1-3s slower)
+    //
+    // We check local first so the wrist UI doesn't wait for a
+    // round-trip to display HR data the Watch already has. The
+    // snapshot fallback covers the case where the Watch isn't
+    // running its own workout session (e.g. iPhone-only race
+    // with the Watch app foregrounded but no local HK auth).
     @ViewBuilder
     private var heartRateBar: some View {
-        if let hr = snapshot.currentHeartRateBPM {
+        if let hr = WatchWorkoutManager.shared.currentHeartRateBPM
+            ?? snapshot.currentHeartRateBPM {
             let zone = HRZone.zone(for: hr, maxBPM: snapshot.maxHeartRate)
             let cue = snapshot.coachingCue(forCurrentHR: hr)
             let cueColor = colorForCue(cue, fallback: zone.color)
+            // Guardrail status — drives ceiling chip + tinting.
+            // §17.1 — when HR is within the approach band, the
+            // ceiling chip glows amber; when above the ceiling,
+            // it goes coral. Below the approach threshold, no
+            // tint change (silent).
+            let ceiling = snapshot.segmentHRCeiling
+            let approachThreshold = snapshot.segmentHRApproachThreshold
+            let guardrailState: GuardrailState = {
+                guard let ceiling, let approachThreshold, hr > 0 else { return .silent }
+                if hr >= ceiling { return .aboveCeiling }
+                if hr >= approachThreshold { return .approaching }
+                return .silent
+            }()
 
             HStack(spacing: 6) {
                 Image(systemName: "heart.fill")
@@ -260,6 +288,20 @@ struct WatchRaceMainPage: View {
                     .monospacedDigit()
                     .foregroundStyle(cueColor)
                     .contentTransition(.numericText())
+
+                // Guardrail ceiling chip — small "/172" suffix
+                // showing the personalized ceiling for this
+                // station. Renders only when the snapshot
+                // carries a ceiling (history-based or textbook
+                // fallback). Tints follow the guardrail state:
+                // silent (textTertiary) below approach, amber
+                // approaching, coral above ceiling.
+                if let ceiling {
+                    Text("/\(Int(ceiling.rounded()))")
+                        .font(.system(size: 10, weight: .heavy))
+                        .monospacedDigit()
+                        .foregroundStyle(guardrailTint(for: guardrailState))
+                }
 
                 Spacer(minLength: 2)
 
@@ -323,6 +365,18 @@ struct WatchRaceMainPage: View {
         }
     }
 
+    // Guardrail tint contract per §17.1:
+    //   • silent (HR below approach) → textTertiary, low-key
+    //   • approaching (within band)  → warning amber, "heads up"
+    //   • aboveCeiling (past ceiling) → accent coral, "stop pushing"
+    private func guardrailTint(for state: GuardrailState) -> Color {
+        switch state {
+        case .silent:        return Color.textTertiary
+        case .approaching:   return Color.warning
+        case .aboveCeiling:  return Color.accent
+        }
+    }
+
     // Single tappable advance button. White-on-coral, 38pt height
     // — slim because it's competing with the rest of the §15
     // layout for vertical space, but still finger-target sized.
@@ -344,6 +398,16 @@ struct WatchRaceMainPage: View {
         }
         .buttonStyle(.plain)
     }
+}
+
+// Guardrail state for the §17.1 ceiling system. Computed from
+// snapshot.segmentHRCeiling + segmentHRApproachThreshold +
+// current HR. Drives the ceiling chip's tint and the
+// anticipatory haptic in WatchRaceView's onChange handler.
+enum GuardrailState: Equatable {
+    case silent           // below approach band
+    case approaching      // in [approach, ceiling) band
+    case aboveCeiling     // at or above ceiling
 }
 
 // MARK: - Splits page (scroll up)
@@ -522,7 +586,12 @@ struct WatchRaceHRPage: View {
 
     @ViewBuilder
     private var currentHRBlock: some View {
-        if let hr = snapshot.currentHeartRateBPM {
+        // Same source-priority logic as the main page's HR bar:
+        // local Watch builder first, snapshot fallback. See the
+        // comment on `WatchRaceMainPage.heartRateBar` for the
+        // full rationale.
+        if let hr = WatchWorkoutManager.shared.currentHeartRateBPM
+            ?? snapshot.currentHeartRateBPM {
             let zone = HRZone.zone(for: hr, maxBPM: snapshot.maxHeartRate)
             let cue = snapshot.coachingCue(forCurrentHR: hr)
             let tint = colorForCue(cue, fallback: zone.color)

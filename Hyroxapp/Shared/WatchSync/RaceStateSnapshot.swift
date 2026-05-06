@@ -129,6 +129,24 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
     // a misleading dash).
     let targetDuration: TimeInterval?
 
+    // Guardrail HR thresholds for the CURRENT segment, per
+    // §17.1. Personalized from the athlete's StationHRSignature
+    // (Q3 + 5 bpm = ceiling, Q3 = approach threshold) when 3+
+    // historical samples exist, falls back to textbook Z4-Z5
+    // boundaries when not.
+    //
+    // Watch UI uses these to:
+    //   • Display the ceiling number near the HR chip
+    //   • Fire an anticipatory haptic when HR enters the
+    //     approach band (between approach and ceiling)
+    //   • Tint the HR chip when above the ceiling
+    //
+    // Both nil when the host doesn't compute guardrails (no
+    // history + no maxHR yet) — Watch silently omits the
+    // guardrail UI in that case.
+    let segmentHRApproachThreshold: Double?
+    let segmentHRCeiling: Double?
+
     // 0-based index into `Station.raceSequence`. The watch resolves this
     // to a `Station` case and uses `station.displayName` /
     // `station.target(for: division)` for the header + subtitle.
@@ -171,7 +189,9 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         maxHeartRate: Int = 190,
         personalHRLowerQuartile: Double? = nil,
         personalHRUpperQuartile: Double? = nil,
-        targetDuration: TimeInterval? = nil
+        targetDuration: TimeInterval? = nil,
+        segmentHRApproachThreshold: Double? = nil,
+        segmentHRCeiling: Double? = nil
     ) {
         self.phase = phase
         self.startedAt = startedAt
@@ -188,6 +208,8 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         self.personalHRLowerQuartile = personalHRLowerQuartile
         self.personalHRUpperQuartile = personalHRUpperQuartile
         self.targetDuration = targetDuration
+        self.segmentHRApproachThreshold = segmentHRApproachThreshold
+        self.segmentHRCeiling = segmentHRCeiling
     }
 
     // MARK: - Dictionary encoding (WCSession transport)
@@ -210,6 +232,8 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         static let personalHRLowerQuartile = "personalHRLowerQuartile"
         static let personalHRUpperQuartile = "personalHRUpperQuartile"
         static let targetDuration = "targetDuration"
+        static let segmentHRApproachThreshold = "segmentHRApproachThreshold"
+        static let segmentHRCeiling = "segmentHRCeiling"
     }
 
     // Build a plist-compatible dictionary suitable for
@@ -248,6 +272,12 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         }
         if let targetDuration {
             dict[Key.targetDuration] = targetDuration
+        }
+        if let segmentHRApproachThreshold {
+            dict[Key.segmentHRApproachThreshold] = segmentHRApproachThreshold
+        }
+        if let segmentHRCeiling {
+            dict[Key.segmentHRCeiling] = segmentHRCeiling
         }
         return dict
     }
@@ -319,6 +349,12 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         // snapshots. Watch hides the Pace Ghost line cleanly when
         // absent rather than rendering a misleading dash.
         self.targetDuration = dictionary[Key.targetDuration] as? TimeInterval
+
+        // Guardrail thresholds — both optional, missing from
+        // old-version snapshots. Watch silently omits the
+        // ceiling chip + skips anticipatory haptics when absent.
+        self.segmentHRApproachThreshold = dictionary[Key.segmentHRApproachThreshold] as? Double
+        self.segmentHRCeiling = dictionary[Key.segmentHRCeiling] as? Double
 
         // Splits aren't carried over the WCSession dictionary path.
         // The watch doesn't render per-split detail; the duo/Codable

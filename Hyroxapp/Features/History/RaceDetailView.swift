@@ -470,7 +470,10 @@ struct RaceDetailView: View {
                     )
                 }
                 if !insights.isEmpty {
-                    RaceInsightsView(insights: insights)
+                    // §16 Layer 2 — horizontal scroll strip
+                    // instead of bullet list. Same insights data,
+                    // different rendering surface.
+                    RaceInsightStrip(insights: insights)
                 }
             }
         }
@@ -484,8 +487,9 @@ struct RaceDetailView: View {
     private var analysisGroupSection: some View {
         let hasHR = HeartRateChartView.hasAnyHeartRateData(in: race.splits)
         let hasCompromised = CompromisedRunningView.hasData(in: race)
+        let hasScatter = PaceHeartRateScatterView.hasEnoughData(for: race)
 
-        if hasHR || hasCompromised {
+        if hasHR || hasCompromised || hasScatter {
             VStack(alignment: .leading, spacing: 12) {
                 ProfileSectionHeader(
                     title: "Analysis",
@@ -495,10 +499,37 @@ struct RaceDetailView: View {
                     heartRateSection
                     hrZonesSection
                 }
+                // Pace × HR scatter — different lens on the same
+                // data the HR chart already covers, but with pace
+                // and HR on the SAME plane. The R1→R8 trajectory
+                // line shows fade patterns at a glance: tight
+                // cluster = elite, up-and-right trail = aerobic
+                // gap. Hidden when fewer than 4 runs have HR +
+                // pace data.
+                if hasScatter {
+                    paceHeartRateScatterSection
+                }
                 if hasCompromised {
                     compromisedRunningSection
                 }
             }
+        }
+    }
+
+    // Pace × HR scatter section — caps-label header + chart.
+    // Sits between HR Zones and Compromised Running because the
+    // scatter answers a related-but-distinct question from each:
+    // zones = "how much time at each intensity," scatter = "how
+    // did pace and HR co-evolve across the runs."
+    private var paceHeartRateScatterSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Pace × HR").capsLabelStyle()
+                Spacer()
+            }
+            .padding(.horizontal, 4)
+
+            PaceHeartRateScatterView(race: race, maxHR: maxHeartRate)
         }
     }
 
@@ -584,7 +615,8 @@ struct RaceDetailView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Insights").capsLabelStyle()
                     .padding(.horizontal, 4)
-                RaceInsightsView(insights: insights)
+                // §16 Layer 2 — horizontal scroll strip rendering.
+                RaceInsightStrip(insights: insights)
             }
         }
     }
