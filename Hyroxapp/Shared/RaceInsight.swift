@@ -122,6 +122,13 @@ enum InsightGenerator {
         if let degradationInsight = runDegradationInsight(for: race) {
             out.append(degradationInsight)
         }
+        // Guardrail compliance (§17.1 phase 2) — fires on poor
+        // compliance only. Names the worst-offending stations
+        // so the athlete knows which ceilings they blew.
+        if let maxHR,
+           let complianceInsight = guardrailComplianceInsight(for: race, allRaces: allRaces, maxHR: maxHR) {
+            out.append(complianceInsight)
+        }
         // Effort insight needs maxHR to compute scores; when the
         // caller doesn't have it, the insight is skipped silently.
         // All current call sites have a UserProfile and pass
@@ -615,6 +622,44 @@ enum InsightGenerator {
         case .conditioned:
             return nil
         }
+    }
+
+    // MARK: - Guardrail compliance insight
+    //
+    // Surfaces when post-race guardrail compliance is poor —
+    // i.e. the athlete blew through their personalized HR
+    // ceiling on multiple stations. Names the worst offenders
+    // (up to 2) so the athlete knows which station-specific
+    // pacing to dial back. Strong + Moderate compliance fire
+    // no insight (they're not actionable callouts).
+    private static func guardrailComplianceInsight(
+        for race: Race,
+        allRaces: [Race],
+        maxHR: Int
+    ) -> RaceInsight? {
+        guard let compliance = RaceStats.guardrailCompliance(
+            for: race,
+            across: allRaces,
+            maxHR: maxHR
+        ) else { return nil }
+
+        guard compliance.tier == .poor else { return nil }
+
+        // List up to 2 worst-offending station names. Beyond
+        // 2 the sentence reads as a wall; the athlete gets
+        // the point from the first two.
+        let worstNames = compliance.nonCompliantStations
+            .prefix(2)
+            .map(\.displayName)
+        let stationCallout = worstNames.isEmpty
+            ? ""
+            : " — \(worstNames.joined(separator: ", "))"
+
+        return RaceInsight(
+            text: "HR ceiling blown on \(compliance.nonCompliantStations.count) of \(compliance.totalEvaluated) stations\(stationCallout). Pace those stations 5-10% softer next race.",
+            symbol: "exclamationmark.triangle.fill",
+            color: .accent
+        )
     }
 
     // MARK: - Run degradation insight

@@ -753,15 +753,32 @@ final class RaceViewModel {
                 from: segmentStart,
                 to: segmentEnd
             )
+            // HR std dev — pacing-quality signal computed from
+            // individual samples in the window. Parallel with the
+            // other queries; another HK round-trip but cheap when
+            // run concurrently.
+            async let hrStdDev = HealthKitService.shared.heartRateStdDev(
+                from: segmentStart,
+                to: segmentEnd
+            )
+            // SpO2 minimum — §13.8 Tier 4 anaerobic-threshold
+            // proxy. Watch Series 6+ only; older Watches return
+            // nil and the StationDetailView line silently hides.
+            async let spo2Min = HealthKitService.shared.lowestOxygenSaturation(
+                from: segmentStart,
+                to: segmentEnd
+            )
             let hr = await heartRate
             let entry = await entryHR
             let end = await endHR
             let kcal = await calories
+            let stdDev = await hrStdDev
+            let spo2 = await spo2Min
 
             // Skip the persist round-trip if HealthKit had nothing
             // for this segment — common for indoor sessions without
             // a Watch streaming any of these metrics.
-            guard hr.avg != nil || hr.max != nil || entry != nil || end != nil || kcal != nil else {
+            guard hr.avg != nil || hr.max != nil || entry != nil || end != nil || kcal != nil || stdDev != nil || spo2 != nil else {
                 return
             }
 
@@ -770,6 +787,8 @@ final class RaceViewModel {
                 heartRateMax: hr.max,
                 heartRateEntry: entry,
                 heartRateEnd: end,
+                heartRateStdDev: stdDev,
+                lowestSpO2: spo2,
                 activeCalories: kcal,
                 atSplitIndex: index
             )

@@ -34,6 +34,7 @@ struct PerformanceDetailView: View {
     private var hasHRBaseline: Bool { PersonalHRBaselineView.hasEnoughData(in: races) }
     private var hasStationFingerprint: Bool { StationFingerprintView.hasEnoughData(in: races) }
     private var hasFatigueResistance: Bool { FatigueResistanceView.hasEnoughData(in: races) }
+    private var hasFatigueFingerprint: Bool { FatigueFingerprintView.hasEnoughData(in: races) }
 
     var body: some View {
         ScrollView {
@@ -68,6 +69,18 @@ struct PerformanceDetailView: View {
                 if hasFatigueResistance {
                     section(title: "Fatigue Resistance") {
                         FatigueResistanceView(races: races)
+                    }
+                }
+                // Fatigue Fingerprint — §18 Pillar 1. Where do
+                // I characteristically fall apart? Sits next to
+                // Fatigue Resistance because they're related
+                // signals: FRS = "which station hurts the next
+                // run?", Fingerprint = "where in the race does
+                // the cliff happen?". Together they answer the
+                // full back-half story.
+                if hasFatigueFingerprint {
+                    section(title: "Fatigue Fingerprint") {
+                        FatigueFingerprintView(races: races)
                     }
                 }
                 if hasOverload {

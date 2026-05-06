@@ -59,6 +59,36 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
     let heartRateRecovery30sBPM: Double?
     let heartRateRecovery60sBPM: Double?
 
+    // Standard deviation of HR samples within the segment window
+    // (bpm). Pacing-quality signal: a smooth, controlled effort
+    // produces tightly-bunched HR samples (low std dev); erratic
+    // surges + recoveries produce a wide spread (high std dev).
+    //
+    // Useful coaching read at the per-station level — a sled push
+    // with high std dev means the athlete was stop-and-go rather
+    // than maintaining tension. A run with high std dev means
+    // pace surged + collapsed rather than holding steady.
+    //
+    // Optional because:
+    //   • Older races persisted before this field existed
+    //   • HealthKit may not have enough samples in the window to
+    //     compute meaningful std dev (need 4+ samples)
+    //   • No HR data captured at all
+    let heartRateStdDevBPM: Double?
+
+    // Lowest blood-oxygen saturation reading during the segment
+    // window — §13.8 Tier 4 post-race anaerobic-threshold proxy.
+    // Stored as a fraction (0.0-1.0); rendered as %. SpO2 95-100%
+    // = aerobic, 92-94% = approaching anaerobic threshold, <92%
+    // = anaerobic.
+    //
+    // Optional because:
+    //   • Older races persisted before this field existed
+    //   • Apple Watch Series 1-5 doesn't have SpO2 hardware
+    //   • Watch samples SpO2 periodically, not continuously —
+    //     short stations may have no sample in the window
+    let lowestSpO2: Double?
+
     // Active calories burned during this segment, queried from
     // HealthKit's `.activeEnergyBurned` cumulative sum over the
     // segment window. Optional for the same reasons HR is optional:
@@ -131,6 +161,8 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
         case heartRateEndBPM
         case heartRateRecovery30sBPM
         case heartRateRecovery60sBPM
+        case heartRateStdDevBPM
+        case lowestSpO2
         case activeCaloriesKcal
         case weightKg
         case repsCompleted
@@ -152,6 +184,8 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
         heartRateEndBPM: Double? = nil,
         heartRateRecovery30sBPM: Double? = nil,
         heartRateRecovery60sBPM: Double? = nil,
+        heartRateStdDevBPM: Double? = nil,
+        lowestSpO2: Double? = nil,
         activeCaloriesKcal: Double? = nil,
         weightKg: Double? = nil,
         repsCompleted: Int? = nil,
@@ -167,6 +201,8 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
         self.heartRateEndBPM = heartRateEndBPM
         self.heartRateRecovery30sBPM = heartRateRecovery30sBPM
         self.heartRateRecovery60sBPM = heartRateRecovery60sBPM
+        self.heartRateStdDevBPM = heartRateStdDevBPM
+        self.lowestSpO2 = lowestSpO2
         self.activeCaloriesKcal = activeCaloriesKcal
         self.weightKg = weightKg
         self.repsCompleted = repsCompleted
@@ -189,6 +225,8 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
         heartRateMax: Double?,
         heartRateEntry: Double? = nil,
         heartRateEnd: Double? = nil,
+        heartRateStdDev: Double? = nil,
+        lowestSpO2: Double? = nil,
         activeCalories: Double?
     ) -> Split {
         Split(
@@ -201,6 +239,8 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
             heartRateEndBPM: heartRateEnd,
             heartRateRecovery30sBPM: heartRateRecovery30sBPM,
             heartRateRecovery60sBPM: heartRateRecovery60sBPM,
+            heartRateStdDevBPM: heartRateStdDev,
+            lowestSpO2: lowestSpO2,
             activeCaloriesKcal: activeCalories,
             weightKg: weightKg,
             repsCompleted: repsCompleted,
@@ -232,6 +272,8 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
             heartRateEndBPM: heartRateEndBPM,
             heartRateRecovery30sBPM: heartRateRecovery30s,
             heartRateRecovery60sBPM: heartRateRecovery60s,
+            heartRateStdDevBPM: heartRateStdDevBPM,
+            lowestSpO2: lowestSpO2,
             activeCaloriesKcal: activeCaloriesKcal,
             weightKg: weightKg,
             repsCompleted: repsCompleted,
@@ -263,6 +305,8 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
             heartRateEndBPM: heartRateEndBPM,
             heartRateRecovery30sBPM: heartRateRecovery30sBPM,
             heartRateRecovery60sBPM: heartRateRecovery60sBPM,
+            heartRateStdDevBPM: heartRateStdDevBPM,
+            lowestSpO2: lowestSpO2,
             activeCaloriesKcal: activeCaloriesKcal,
             weightKg: newWeight ?? weightKg,
             repsCompleted: newReps ?? repsCompleted,
@@ -285,6 +329,8 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
             heartRateEndBPM: heartRateEndBPM,
             heartRateRecovery30sBPM: heartRateRecovery30sBPM,
             heartRateRecovery60sBPM: heartRateRecovery60sBPM,
+            heartRateStdDevBPM: heartRateStdDevBPM,
+            lowestSpO2: lowestSpO2,
             activeCaloriesKcal: activeCaloriesKcal,
             weightKg: weightKg,
             repsCompleted: repsCompleted,

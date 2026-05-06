@@ -53,17 +53,25 @@ final class HealthKitService {
 
         let typesToShare: Set<HKSampleType> = [HKObjectType.workoutType()]
 
-        // Read: heart rate + active energy. Declared on the same
-        // `requestAuthorization` call so users see one consolidated
-        // HealthKit prompt rather than separate ones for each type.
-        // If Apple adds more read types later (VO2 max, distance,
-        // etc.), append them here.
+        // Read: heart rate + active energy + oxygen saturation
+        // (SpO2). Declared on the same `requestAuthorization`
+        // call so users see one consolidated HealthKit prompt
+        // rather than separate ones for each type. If Apple
+        // adds more read types later (VO2 max, distance, etc.),
+        // append them here.
         var typesToRead: Set<HKObjectType> = []
         if let hrType = HKObjectType.quantityType(forIdentifier: .heartRate) {
             typesToRead.insert(hrType)
         }
         if let energyType = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned) {
             typesToRead.insert(energyType)
+        }
+        // SpO2 — Apple Watch Series 6+. Powers §13.8 Tier 4
+        // post-race anaerobic-threshold proxy ("Your SpO2
+        // dropped to 92% on Wall Balls"). Series 1-5 users get
+        // nil reads; the UI hides the line cleanly.
+        if let spo2Type = HKObjectType.quantityType(forIdentifier: .oxygenSaturation) {
+            typesToRead.insert(spo2Type)
         }
 
         do {
@@ -129,6 +137,120 @@ final class HealthKitService {
                 let avg = stats?.averageQuantity()?.doubleValue(for: bpmUnit)
                 let max = stats?.maximumQuantity()?.doubleValue(for: bpmUnit)
                 continuation.resume(returning: (avg, max))
+            }
+            store.execute(query)
+        }
+    }
+
+    // MARK: - HR standard deviation (segment window)
+
+    // Standard deviation of HR samples within a window. The
+    // pacing-quality signal: smooth controlled effort produces
+    // tightly-bunched samples (low std dev); erratic surges
+    // and recoveries produce a wide spread (high std dev).
+    //
+    // Different from `heartRateStats(from:to:)` above which
+    // returns avg + max via HKStatisticsQuery's discrete
+    // aggregations. Std dev requires individual samples to
+    // compute, so this uses HKSampleQuery directly.
+    //
+    // Returns nil when:
+    //   • HealthKit unavailable / read auth denied
+    //   • Fewer than 4 samples in the window (below that,
+    //     std dev isn't meaningful — single high-HR sample
+    //     during a recovery dominates)
+    //   • Window is zero or inverted
+    func heartRateStdDev(
+        from start: Date,
+        to end: Date
+    ) async -> Double? {
+        guard isAvailable else { return nil }
+        guard let hrType = HKObjectType.quantityType(forIdentifier: .heartRate) else {
+            return nil
+        }
+        guard end > start else { return nil }
+
+        let predicate = HKQuery.predicateForSamples(
+            withStart: start,
+            end: end,
+            options: .strictStartDate
+        )
+        let bpmUnit = HKUnit.count().unitDivided(by: .minute())
+
+        let samples: [Double] = await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(
+                sampleType: hrType,
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: nil
+            ) { _, samples, _ in
+                let bpms = (samples as? [HKQuantitySample] ?? [])
+                    .map { $0.quantity.doubleValue(for: bpmUnit) }
+                continuation.resume(returning: bpms)
+            }
+            store.execute(query)
+        }
+
+        // 4-sample minimum — below that, std dev is single-
+        // outlier-dominated and reads as noise rather than
+        // signal. A 30-second sled push at 1Hz easily clears
+        // this; only abnormally-short stations or sparse-data
+        // situations fail.
+        guard samples.count >= 4 else { return nil }
+
+        let mean = samples.reduce(0, +) / Double(samples.count)
+        let variance = samples
+            .map { pow($0 - mean, 2) }
+            .reduce(0, +) / Double(samples.count)
+        return sqrt(variance)
+    }
+
+    // MARK: - SpO2 (segment window)
+
+    // Lowest blood-oxygen saturation reading within a window —
+    // §13.8 Tier 4 post-race anaerobic-threshold proxy.
+    //
+    // SpO2 normally sits 95-100% at rest. During high-intensity
+    // exercise, even healthy athletes can dip into 92-94% as the
+    // body's oxygen demand exceeds delivery — that's the
+    // anaerobic-threshold signal. Sustained drops below 92% on
+    // a specific station mean the athlete is well above their
+    // aerobic threshold there.
+    //
+    // Returns the LOWEST sample (discreteMin) — peak oxygen
+    // debt for the segment. Returns nil when:
+    //   • HealthKit unavailable / read auth denied
+    //   • Apple Watch model doesn't support SpO2 (Series 1-5)
+    //   • No SpO2 samples in the window (the Watch samples SpO2
+    //     periodically, not continuously — short stations may
+    //     legitimately have no reading)
+    //
+    // Value comes back as a fraction (0.0-1.0); UI renders as %.
+    func lowestOxygenSaturation(
+        from start: Date,
+        to end: Date
+    ) async -> Double? {
+        guard isAvailable else { return nil }
+        guard let spo2Type = HKObjectType.quantityType(forIdentifier: .oxygenSaturation) else {
+            return nil
+        }
+        guard end > start else { return nil }
+
+        let predicate = HKQuery.predicateForSamples(
+            withStart: start,
+            end: end,
+            options: .strictStartDate
+        )
+
+        return await withCheckedContinuation { continuation in
+            let query = HKStatisticsQuery(
+                quantityType: spo2Type,
+                quantitySamplePredicate: predicate,
+                options: .discreteMin
+            ) { _, stats, _ in
+                let unit = HKUnit.percent()
+                let value = stats?.minimumQuantity()?.doubleValue(for: unit)
+                continuation.resume(returning: value)
             }
             store.execute(query)
         }

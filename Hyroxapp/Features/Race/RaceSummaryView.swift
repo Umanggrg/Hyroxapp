@@ -280,6 +280,26 @@ struct RaceSummaryView: View {
                                 .foregroundStyle(Color.accentDim)
                         }
 
+                        // Guardrail compliance (§17.1 phase 2) —
+                        // post-race evaluation of the per-
+                        // station HR ceiling system. Reads as
+                        // "Guardrails 14/16 · 88%" with hero-
+                        // dim tint when strong, warning amber
+                        // when moderate, accent coral when
+                        // poor. Silent when no workout
+                        // stations had HR data.
+                        if let race = viewModel.activeRace,
+                           let compliance = RaceStats.guardrailCompliance(
+                               for: race,
+                               across: allFinishedRaces,
+                               maxHR: maxHeartRate
+                           ) {
+                            Text("Guardrails \(compliance.compliantCount)/\(compliance.totalEvaluated) · \(compliance.percent)%")
+                                .font(.caption.weight(.semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(complianceTint(compliance.tier))
+                        }
+
                     // Target outcome — only shown if the athlete set a
                     // goal. "Goal met" + green delta when beaten,
                     // warning delta when missed. Centralized in
@@ -583,6 +603,19 @@ struct RaceSummaryView: View {
         case .elite:    return .success
         case .steady:   return .textPrimary
         case .building: return .warning
+        }
+    }
+
+    // Guardrail-compliance tint contract — strong reads as the
+    // dim hero tint (consistent with other compliance lines),
+    // moderate reads as warning amber, poor reads as coral.
+    // Reading at a glance: dim = good, amber = caution, coral
+    // = action required.
+    private func complianceTint(_ tier: RaceStats.GuardrailCompliance.Tier) -> Color {
+        switch tier {
+        case .strong:   return .accentDim
+        case .moderate: return .warning
+        case .poor:     return .accent
         }
     }
 

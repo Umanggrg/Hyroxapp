@@ -53,25 +53,44 @@ struct RaceDetailView: View {
     // row. Same wrapper pattern as RaceSummaryView.
     @State private var editingSplitIndex: IdentifiedIndex?
 
+    // §16 Layer 3 — selected tab state. Defaults to Overview so
+    // the screen opens with the chronological race recap; the
+    // Story tab is one tap away on the right.
+    @State private var selectedTab: RaceDetailTab = .overview
+
+    // Reflection (photo, title, notes, tags, privacy) lives in
+    // a sheet now rather than at the bottom of a long scroll.
+    // Toolbar button opens it; sheet presents the existing
+    // reflection sections in a modal Form-style layout.
+    @State private var isShowingReflectionSheet = false
+
     var body: some View {
         ZStack {
-            // Hero backdrop bleeds full-width behind the scroll
-            // content. Standard intensity — this is a review
-            // surface, not a finish moment, so we keep the glow
-            // gentler than RaceSummaryView's intense backdrop.
+            // Hero backdrop bleeds full-width behind everything.
+            // Standard intensity — this is a review surface, not
+            // a finish moment, so we keep the glow gentler than
+            // RaceSummaryView's intense backdrop.
             HeroBackdrop(.standard)
 
-            ScrollView {
-                VStack(spacing: 24) {
-                    detailHeroSection.applyScrollAppearTransition()
-                    insightsGroupSection.applyScrollAppearTransition()
-                    analysisGroupSection.applyScrollAppearTransition()
-                    splitsGroupSection.applyScrollAppearTransition()
-                    reflectionGroupSection.applyScrollAppearTransition()
-                }
-                .padding(.horizontal, Layout.screenMargin)
-                .padding(.bottom, Layout.screenMargin)
-                .padding(.top, 8)
+            // §16 layout: pinned hero + tab bar + scrolling tab
+            // content. Three vertical regions; only the bottom
+            // region scrolls. Apple Fitness uses the same pattern
+            // for its workout detail view.
+            VStack(spacing: 0) {
+                detailHeroSection
+                    .padding(.horizontal, Layout.screenMargin)
+                    .padding(.top, 8)
+                    .padding(.bottom, 16)
+
+                RaceDetailTabBar(selection: $selectedTab)
+
+                // The active tab's content. Each tab view owns
+                // its own ScrollView so the hero + tab bar stay
+                // pinned while the body scrolls. Switching tabs
+                // resets scroll position (default SwiftUI
+                // behavior, which matches what users expect from
+                // a tab bar).
+                tabContent(for: selectedTab)
             }
         }
         // Show the user-set title in the nav bar when present;
@@ -105,8 +124,43 @@ struct RaceDetailView: View {
                     shareMenu
                 }
             }
+            // §16 Post-Race phase 2 — reflection (photo, title,
+            // notes, tags, privacy) moved out of the long scroll
+            // into a sheet accessed via this pencil button.
+            // Reflection is editing UI, not viewing UI, so a
+            // sheet is the right surface. Athletes still get
+            // every existing edit affordance, just one tap deeper.
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    isShowingReflectionSheet = true
+                } label: {
+                    Image(systemName: "square.and.pencil")
+                }
+                .accessibilityLabel("Edit race notes")
+            }
             #endif
         }
+        #if canImport(UIKit) && !os(watchOS)
+        .sheet(isPresented: $isShowingReflectionSheet) {
+            NavigationStack {
+                ScrollView {
+                    reflectionGroupSection
+                        .padding(.horizontal, Layout.screenMargin)
+                        .padding(.vertical, 16)
+                }
+                .background(Color.background.ignoresSafeArea())
+                .navigationTitle("Reflection")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") {
+                            isShowingReflectionSheet = false
+                        }
+                    }
+                }
+            }
+        }
+        #endif
         .onAppear(perform: prepareShareImages)
         // Re-bake the share cards when the photo changes. Same
         // rationale as RaceSummaryView — the cached images would
@@ -160,6 +214,17 @@ struct RaceDetailView: View {
         case .elite:    return .success
         case .steady:   return .textPrimary
         case .building: return .warning
+        }
+    }
+
+    // Guardrail-compliance tint — matches RaceSummaryView's
+    // contract: strong dims to accentDim, moderate goes warning
+    // amber, poor goes accent coral.
+    private func complianceTint(_ tier: RaceStats.GuardrailCompliance.Tier) -> Color {
+        switch tier {
+        case .strong:   return .accentDim
+        case .moderate: return .warning
+        case .poor:     return .accent
         }
     }
 
@@ -235,6 +300,17 @@ struct RaceDetailView: View {
                 .font(.caption2.weight(.heavy))
                 .tracking(1.4)
                 .foregroundStyle(Color.textSecondary)
+
+            // §16 Layer 1 — 3-tile quick stat row. Avg HR /
+            // Distance / Transition Total. The "at a glance"
+            // numbers an athlete reads first when reviewing a
+            // race in History. Each tile self-omits when its
+            // data isn't available — a race without HR shows
+            // 2 tiles, a race without roxzone tracking shows
+            // 2 tiles, etc. Hidden entirely when none have
+            // data so the hero collapses cleanly on thin races.
+            quickStatRow
+                .padding(.top, 8)
 
             if let kcal = RaceStats.totalActiveCalories(race) {
                 Text("\(Int(kcal.rounded())) kcal active")
@@ -375,6 +451,20 @@ struct RaceDetailView: View {
                     .foregroundStyle(Color.accentDim)
             }
 
+            // Guardrail compliance (§17.1 phase 2) — same line
+            // treatment as RaceSummary. Hidden when no workout
+            // stations had HR data.
+            if let compliance = RaceStats.guardrailCompliance(
+                for: race,
+                across: allFinishedRaces,
+                maxHR: maxHeartRate
+            ) {
+                Text("Guardrails \(compliance.compliantCount)/\(compliance.totalEvaluated) · \(compliance.percent)%")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(complianceTint(compliance.tier))
+            }
+
             // Target outcome readout — only shown if a target
             // was set on this race. Tucks into the hero so the
             // success/over-target framing reads as part of the
@@ -416,6 +506,298 @@ struct RaceDetailView: View {
                         .stroke(Color(hex: 0xFFD60A).opacity(0.4), lineWidth: 1)
                 )
         )
+    }
+
+    // §16 Layer 1 quick stat row — 3 compact tiles below the
+    // hero time. Each tile is value + unit on top, caps label
+    // beneath. Tiles self-omit when their data isn't available.
+    @ViewBuilder
+    private var quickStatRow: some View {
+        let tiles = quickStatTiles
+        if !tiles.isEmpty {
+            HStack(spacing: 8) {
+                ForEach(Array(tiles.enumerated()), id: \.offset) { _, tile in
+                    quickStatTile(tile)
+                }
+            }
+        }
+    }
+
+    // Builds the array of (value, unit, label) tuples to render.
+    // Returns only the populated ones — empty data → no tile.
+    // Order matches §16 spec: Avg HR / Distance / Transition.
+    private var quickStatTiles: [(value: String, unit: String, label: String)] {
+        var tiles: [(String, String, String)] = []
+
+        if let avgHR = RaceStats.averageHeartRate(for: race) {
+            tiles.append(("\(Int(avgHR.rounded()))", "bpm", "AVG HR"))
+        }
+
+        let runsCount = race.splits.filter { $0.station.kind == .run }.count
+        if runsCount > 0 {
+            // Each run is 1km in HYROX. Sum of run kilometers
+            // is the "running distance" — a quick glance at
+            // how much of the race was run vs station work.
+            tiles.append(("\(runsCount)", "km", "RUN"))
+        }
+
+        if let total = RaceStats.totalRoxzoneTime(race) {
+            tiles.append((RaceStats.format(total), "", "TRANS"))
+        }
+
+        return tiles
+    }
+
+    private func quickStatTile(_ tile: (value: String, unit: String, label: String)) -> some View {
+        VStack(spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(tile.value)
+                    .font(.system(.title3, design: .rounded).weight(.heavy))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.textPrimary)
+                if !tile.unit.isEmpty {
+                    Text(tile.unit)
+                        .font(.caption2.weight(.heavy))
+                        .foregroundStyle(Color.textTertiary)
+                }
+            }
+            Text(tile.label)
+                .font(.system(size: 9, weight: .heavy))
+                .tracking(0.6)
+                .foregroundStyle(Color.textTertiary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color.surface)
+        )
+    }
+
+    // MARK: - §16 tab dispatch
+
+    // Renders the content for the currently-selected tab. Each
+    // case routes to a private view builder that returns a
+    // ScrollView containing the relevant sections from the
+    // pre-§16 long-scroll layout. This keeps the existing
+    // section helpers (insightsGroupSection, etc.) intact —
+    // we're regrouping their renders, not rewriting them.
+    @ViewBuilder
+    private func tabContent(for tab: RaceDetailTab) -> some View {
+        switch tab {
+        case .overview: overviewTabContent
+        case .runs:     runsTabContent
+        case .stations: stationsTabContent
+        case .hr:       hrTabContent
+        case .story:    storyTabContent
+        }
+    }
+
+    // OVERVIEW tab — chronological race recap. The post-race
+    // "what just happened" surface: splits + recovery
+    // estimate + race-day projection. The athlete's first stop
+    // after a finish.
+    private var overviewTabContent: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                splitsGroupSection
+                    .padding(.horizontal, Layout.screenMargin)
+
+                let hasRecovery = RaceStats.recoveryDemand(for: race, maxHR: maxHeartRate) != nil
+                let hasProjection = RaceStats.raceDayProjectedTotal(
+                    for: race,
+                    division: profiles.first?.resolvedDivision ?? .mensOpen
+                ) != nil
+                if hasRecovery {
+                    RecoveryEstimateView(race: race, maxHR: maxHeartRate)
+                        .padding(.horizontal, Layout.screenMargin)
+                }
+                if hasProjection {
+                    RaceDayProjectionView(
+                        race: race,
+                        division: profiles.first?.resolvedDivision ?? .mensOpen
+                    )
+                    .padding(.horizontal, Layout.screenMargin)
+                }
+            }
+            .padding(.vertical, 16)
+        }
+    }
+
+    // RUNS tab — the 8 runs deep. Currently surfaces the
+    // Compromised Running view (which IS the run degradation
+    // analysis); future phase 2.5 work could break out
+    // individual run cards with HR arc + post-station context
+    // per the §16 spec.
+    @ViewBuilder
+    private var runsTabContent: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                if CompromisedRunningView.hasData(in: race) {
+                    compromisedRunningSection
+                        .padding(.horizontal, Layout.screenMargin)
+                } else {
+                    emptyTabState(message: "Run analysis appears once 8 runs have HR or pace data.")
+                }
+            }
+            .padding(.vertical, 16)
+        }
+    }
+
+    // STATIONS tab — the 8 workout stations. v1 lists the
+    // workout-kind splits as tappable rows pushing into
+    // StationDetailView. Future enhancement: Station Strength
+    // Map (radar chart) + per-station performance cards per the
+    // §16 spec.
+    @ViewBuilder
+    private var stationsTabContent: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                let workoutSplits = race.splits.filter { $0.station.kind == .workout }
+                if !workoutSplits.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Stations").capsLabelStyle()
+                            Spacer()
+                        }
+                        .padding(.horizontal, 4)
+
+                        VStack(spacing: 0) {
+                            ForEach(Array(workoutSplits.enumerated()), id: \.offset) { index, split in
+                                stationRow(split: split, index: index)
+                                if index < workoutSplits.count - 1 {
+                                    Divider().background(Color.divider)
+                                }
+                            }
+                        }
+                        .background(
+                            RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                                .fill(Color.surface)
+                        )
+                    }
+                    .padding(.horizontal, Layout.screenMargin)
+                } else {
+                    emptyTabState(message: "Workout stations appear once you've completed a race with workout splits.")
+                }
+            }
+            .padding(.vertical, 16)
+        }
+    }
+
+    // Single tappable row in the Stations tab. Pushes into
+    // StationDetailView for the deeper per-station analysis
+    // (PB, trend, HR boundaries, race-day projection).
+    private func stationRow(split: Split, index: Int) -> some View {
+        NavigationLink(value: split) {
+            HStack(spacing: 12) {
+                Text(split.station.displayName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text(RaceStats.format(split.duration))
+                    .font(.subheadline.weight(.heavy))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.textPrimary)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color.textTertiary)
+            }
+            .padding(.horizontal, Layout.cardPadding)
+            .padding(.vertical, 14)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // HR tab — the engine room. HR curve + zones + pace × HR
+    // scatter. The §16 spec also calls for HR drift score and
+    // between-station recovery table — those live in the
+    // existing per-race hero metric lines (drift) and could be
+    // surfaced more prominently here in a future phase.
+    @ViewBuilder
+    private var hrTabContent: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                let hasHR = HeartRateChartView.hasAnyHeartRateData(in: race.splits)
+                let hasScatter = PaceHeartRateScatterView.hasEnoughData(for: race)
+                if hasHR {
+                    heartRateSection
+                        .padding(.horizontal, Layout.screenMargin)
+                    hrZonesSection
+                        .padding(.horizontal, Layout.screenMargin)
+                }
+                if hasScatter {
+                    paceHeartRateScatterSection
+                        .padding(.horizontal, Layout.screenMargin)
+                }
+                if !hasHR && !hasScatter {
+                    emptyTabState(message: "HR analysis appears once you race with the Watch streaming heart rate.")
+                }
+            }
+            .padding(.vertical, 16)
+        }
+    }
+
+    // STORY tab — the narrative + insight strip. The athlete's
+    // post-race "what to take away" surface. Story card is the
+    // headline; insight strip below is the bullet-list backup.
+    @ViewBuilder
+    private var storyTabContent: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                let insights = InsightGenerator.generate(
+                    for: race,
+                    allRaces: allFinishedRaces
+                )
+                let hasStory = RaceStoryView.hasContent(
+                    for: race,
+                    history: allFinishedRaces,
+                    maxHR: maxHeartRate
+                )
+                if hasStory {
+                    RaceStoryView(
+                        race: race,
+                        history: allFinishedRaces,
+                        maxHR: maxHeartRate
+                    )
+                    .padding(.horizontal, Layout.screenMargin)
+                }
+                if !insights.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Insights").capsLabelStyle()
+                            Spacer()
+                        }
+                        .padding(.horizontal, 4)
+                        RaceInsightStrip(insights: insights)
+                    }
+                    .padding(.horizontal, Layout.screenMargin)
+                }
+                if !hasStory && insights.isEmpty {
+                    emptyTabState(message: "Race story appears once enough HR or pace data is captured.")
+                }
+            }
+            .padding(.vertical, 16)
+        }
+    }
+
+    // Generic empty-state for tabs that don't have data yet.
+    // Used when a fresh race doesn't have HR yet, or a custom
+    // workout doesn't have certain station types.
+    private func emptyTabState(message: String) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: "tray")
+                .font(.title2)
+                .foregroundStyle(Color.textTertiary)
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(Color.textTertiary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(40)
     }
 
     // INSIGHTS group — narrative callouts (target outcome already

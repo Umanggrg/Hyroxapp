@@ -369,6 +369,126 @@ struct StationDetailView: View {
             if hasAnyBoundaryHR {
                 boundaryHRRow
             }
+            // HR consistency — std deviation of HR samples in the
+            // segment window. Smooth controlled effort = low std
+            // dev; surging-and-collapsing = high std dev. Reads
+            // as "HR steady ±N bpm · Smooth/Variable/Erratic"
+            // with tier tinting. Hidden when HK didn't have
+            // enough samples in the window to compute.
+            if let stdDev = split.heartRateStdDevBPM {
+                hrConsistencyRow(stdDev: stdDev)
+            }
+            // SpO2 minimum — §13.8 Tier 4 anaerobic-threshold
+            // proxy. Reads as "SpO2 92% min · Approaching
+            // Threshold" with tier tinting. Hidden when HK
+            // didn't have a sample in the segment window
+            // (Series 1-5 hardware, or short station with no
+            // SpO2 sample landing in the window).
+            if let spo2 = split.lowestSpO2 {
+                spo2Row(spo2: spo2)
+            }
+        }
+    }
+
+    // SpO2 readout — fraction comes through as 0.0-1.0;
+    // multiplied to render as %. Three-tier classification
+    // calibrated against typical exercise SpO2:
+    //   95-100% = Aerobic
+    //   92-94%  = Approaching Threshold
+    //   <92%    = Anaerobic
+    @ViewBuilder
+    private func spo2Row(spo2: Double) -> some View {
+        let pct = Int((spo2 * 100).rounded())
+        let classification: (label: String, color: Color, descriptor: String) = {
+            if pct >= 95 {
+                return ("Aerobic", .success, "Oxygen demand met — sustainable effort.")
+            }
+            if pct >= 92 {
+                return ("Approaching Threshold", .warning, "Oxygen demand exceeding delivery — near anaerobic.")
+            }
+            return ("Anaerobic", .accent, "Significant oxygen debt — high-intensity load.")
+        }()
+
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "lungs.fill")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(classification.color)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("SpO2 \(pct)% min · \(classification.label)")
+                    .font(.caption.weight(.heavy))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.textPrimary)
+                Text(classification.descriptor)
+                    .font(.caption2)
+                    .foregroundStyle(Color.textSecondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(classification.color.opacity(0.12))
+        )
+    }
+
+    // Single-line consistency readout. ±N bpm + classification.
+    // Tier thresholds calibrated against typical HYROX data:
+    //   <8 bpm = smooth (controlled, sustained tension)
+    //   8-15 bpm = variable (typical effort with some surge)
+    //   >15 bpm = erratic (start-stop pacing, surging recoveries)
+    @ViewBuilder
+    private func hrConsistencyRow(stdDev: Double) -> some View {
+        let rounded = Int(stdDev.rounded())
+        let classification: (label: String, color: Color) = {
+            if stdDev < 8 { return ("Smooth", .success) }
+            if stdDev < 15 { return ("Variable", .textPrimary) }
+            return ("Erratic", .accent)
+        }()
+
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "waveform.path")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(classification.color)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("HR steady ±\(rounded) bpm · \(classification.label)")
+                    .font(.caption.weight(.heavy))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.textPrimary)
+                Text(consistencyDescriptor(for: classification.label, station: split.station))
+                    .font(.caption2)
+                    .foregroundStyle(Color.textSecondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(classification.color.opacity(0.12))
+        )
+    }
+
+    // One-line coaching descriptor for the consistency tier.
+    // Slightly station-aware so the language matches the
+    // physiology — sled push wants "tension held" framing,
+    // runs want "pace held" framing.
+    private func consistencyDescriptor(for tier: String, station: Station) -> String {
+        switch tier {
+        case "Smooth":
+            return station.kind == .run
+                ? "Pace held — clean cardiac control."
+                : "Tension held — controlled effort throughout."
+        case "Erratic":
+            return station.kind == .run
+                ? "Pace surged + collapsed — pacing was uneven."
+                : "Stop-start effort — try maintaining tension."
+        default:
+            return station.kind == .run
+                ? "Some pace variation — typical race-pace effort."
+                : "Some tension variation — typical workout pacing."
         }
     }
 

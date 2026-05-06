@@ -487,6 +487,8 @@ struct RaceEngine: Sendable {
         heartRateMax: Double?,
         heartRateEntry: Double? = nil,
         heartRateEnd: Double? = nil,
+        heartRateStdDev: Double? = nil,
+        lowestSpO2: Double? = nil,
         activeCalories: Double?,
         atSplitIndex index: Int
     ) {
@@ -499,6 +501,8 @@ struct RaceEngine: Sendable {
                 heartRateMax: heartRateMax,
                 heartRateEntry: heartRateEntry,
                 heartRateEnd: heartRateEnd,
+                heartRateStdDev: heartRateStdDev,
+                lowestSpO2: lowestSpO2,
                 activeCalories: activeCalories
             )
         }

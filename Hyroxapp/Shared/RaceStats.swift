@@ -1617,6 +1617,102 @@ enum RaceStats {
         )
     }
 
+    // Post-race guardrail compliance — closes the §17.1 loop.
+    // Phase 1 of Guardrails fires anticipatory haptics during
+    // the race; this phase evaluates AFTER the race: "for each
+    // station, was the athlete's avg HR below the ceiling?"
+    //
+    // For each completed split with avg HR data:
+    //   • Compute the guardrail for that station type from the
+    //     athlete's history (same helper the Watch path uses).
+    //   • Compliant = avg HR ≤ ceiling.
+    //   • Non-compliant = avg HR > ceiling.
+    //
+    // Skipped splits — runs (no per-station ceiling concept;
+    // run guardrails would be the personal HR baseline, which
+    // is a separate signal), or splits without HR data.
+    //
+    // Returns a struct carrying compliant count + total count
+    // + a 0-1 fraction. Caller renders that as
+    // "Guardrails 14/16 · 88%" and flags low compliance via
+    // the existing insight pipeline.
+    struct GuardrailCompliance: Equatable {
+        let compliantCount: Int          // stations under ceiling
+        let totalEvaluated: Int          // stations with HR data + a ceiling
+        let nonCompliantStations: [Station]  // for insight phrasing
+        var fraction: Double {
+            guard totalEvaluated > 0 else { return 0 }
+            return Double(compliantCount) / Double(totalEvaluated)
+        }
+        var percent: Int {
+            Int((fraction * 100).rounded())
+        }
+
+        // Tier classification for hero-line tinting + insight
+        // gating. Calibrated against typical compliance rates
+        // — a strong amateur should hit 75%+; missing more
+        // than half the ceilings flags real pacing issues.
+        enum Tier: Equatable {
+            case strong       // 75%+
+            case moderate     // 50-74%
+            case poor         // <50%
+        }
+
+        var tier: Tier {
+            if fraction >= 0.75 { return .strong }
+            if fraction >= 0.50 { return .moderate }
+            return .poor
+        }
+    }
+
+    static func guardrailCompliance(
+        for race: Race,
+        across history: [Race],
+        maxHR: Int
+    ) -> GuardrailCompliance? {
+        // Only workout-kind stations have per-station guardrails.
+        // Run stations would use the personal HR baseline as their
+        // "ceiling" but that's a separate concept; runs are
+        // excluded from this evaluation to keep the metric crisp.
+        let evaluable = race.splits.filter { split in
+            split.station.kind == .workout && split.heartRateAvgBPM != nil
+        }
+        guard !evaluable.isEmpty else { return nil }
+
+        var compliant = 0
+        var nonCompliant: [Station] = []
+
+        for split in evaluable {
+            // Pick the personalized guardrail when history
+            // exists for this station; fall back to textbook
+            // (~90% of max) when not — same priority order as
+            // phase 1's Watch-side ceiling chip.
+            let g = guardrail(
+                for: split.station,
+                across: history,
+                excludingRace: race
+            ) ?? textbookGuardrail(forMaxHR: maxHR)
+
+            guard let ceiling = g?.ceiling,
+                  let avgHR = split.heartRateAvgBPM else { continue }
+
+            if avgHR <= ceiling {
+                compliant += 1
+            } else {
+                nonCompliant.append(split.station)
+            }
+        }
+
+        let total = compliant + nonCompliant.count
+        guard total > 0 else { return nil }
+
+        return GuardrailCompliance(
+            compliantCount: compliant,
+            totalEvaluated: total,
+            nonCompliantStations: nonCompliant
+        )
+    }
+
     // MARK: - Per-station HR tendency (aggregated)
 
     // Athlete-level station HR fingerprint — the "who you are as
@@ -3099,6 +3195,59 @@ enum RaceStats {
         return data
             .dropFirst()
             .max { $0.percentSlower < $1.percentSlower }
+    }
+
+    // MARK: - Fatigue Fingerprint
+
+    // The "fade cliff" — earliest run number (1-8) where pace
+    // dropped meaningfully off the Run 1 baseline. Per §17.2 /
+    // §18 Pillar 1, this is the longitudinal signature of WHERE
+    // the athlete characteristically falls apart.
+    //
+    // Returns nil when no run faded by 10%+ (perfect race or
+    // single-run custom workout — no cliff to identify). The
+    // 10% threshold is calibrated against typical HYROX
+    // amateur data: anything over 10% slower than fresh-legs
+    // pace reads as "this run is hurting" rather than normal
+    // race-pace variance.
+    //
+    // Used by `FatigueFingerprintView` to chart cliff position
+    // over time. Cliff moving later (Run 4 → 6 → 8) is the
+    // visible adaptation arrow. Cliff staying at Run 3-4 across
+    // a training block = athlete needs more aerobic base work.
+    static func fadeCliffRun(for race: Race) -> Int? {
+        let data = compromisedRunData(for: race)
+        // Find the first non-baseline run where slowdown exceeded
+        // the 10% threshold. Walk in order so we capture the
+        // EARLIEST cliff, not the worst.
+        guard let first = data.dropFirst().first(where: { $0.percentSlower >= 10.0 }) else {
+            return nil
+        }
+        return first.runIndex
+    }
+
+    // Athlete-level fingerprint trend — for each finished race,
+    // the fade-cliff position (or nil for no-cliff races, which
+    // we render as "Run 9" — off the chart, ideal). The view
+    // converts the array into a line chart showing cliff
+    // movement over time.
+    struct FatigueFingerprintPoint: Equatable {
+        let date: Date
+        let race: Race
+        let cliffRun: Int?    // nil = no fade at all (better than 8)
+    }
+
+    static func fatigueFingerprintTrend(across races: [Race]) -> [FatigueFingerprintPoint] {
+        races
+            .filter(\.isFinished)
+            .sorted { $0.createdAt < $1.createdAt }
+            .map { race in
+                FatigueFingerprintPoint(
+                    date: race.createdAt,
+                    race: race,
+                    cliffRun: fadeCliffRun(for: race)
+                )
+            }
     }
 
     // Cross-race aggregation result: for each workout station that
