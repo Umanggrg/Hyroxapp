@@ -41,14 +41,16 @@ struct WatchAlertOverlay: View {
                 // text — the icon lands in the eye first, then
                 // the word confirms.
                 Image(systemName: glyphName)
-                    .font(.system(size: 38, weight: .heavy))
+                    .font(WatchMetrics.font(size: 38, weight: .heavy))
                     .foregroundStyle(Color.onAccent)
 
                 // The state word — huge, all caps, monospaced-
                 // weight rounded font. This is what the athlete
-                // glances at and reads in <0.5s.
+                // glances at and reads in <0.5s. Scaled per
+                // hardware so it fills the smaller watches and
+                // dominates the bigger ones equally well.
                 Text(stateWord)
-                    .font(.system(size: 32, weight: .black, design: .rounded))
+                    .font(WatchMetrics.font(size: 32, weight: .black, design: .rounded))
                     .tracking(2.0)
                     .foregroundStyle(Color.onAccent)
                     .lineLimit(1)
@@ -181,7 +183,7 @@ struct WatchSegmentTransitionOverlay: View {
                 // rather than a system notification.
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 18, weight: .heavy))
+                        .font(WatchMetrics.font(size: 18, weight: .heavy))
                     Text("\(completedStationLabel) COMPLETE")
                         .font(.system(size: 13, weight: .heavy, design: .rounded))
                         .tracking(0.6)
@@ -194,7 +196,7 @@ struct WatchSegmentTransitionOverlay: View {
                 // Big, monospaced, with a soft coral underglow
                 // matching the §15 brand language.
                 Text(RaceStats.format(completedDuration))
-                    .font(.system(size: 30, weight: .heavy, design: .rounded))
+                    .font(WatchMetrics.font(size: 30, weight: .heavy, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(Color.textPrimary)
                     .shadow(color: Color.accent.opacity(0.30), radius: 10, y: 0)
@@ -210,7 +212,7 @@ struct WatchSegmentTransitionOverlay: View {
                         .tracking(1.4)
                         .foregroundStyle(Color.textSecondary)
                     Text(nextStationLabel.uppercased())
-                        .font(.system(size: 16, weight: .heavy, design: .rounded))
+                        .font(WatchMetrics.font(size: 16, weight: .heavy, design: .rounded))
                         .foregroundStyle(Color.textPrimary)
                         .lineLimit(2)
                         .multilineTextAlignment(.center)

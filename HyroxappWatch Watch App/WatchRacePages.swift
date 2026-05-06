@@ -148,8 +148,12 @@ struct WatchRaceMainPage: View {
     // monospace digit set so the digits don't dance as they tick.
     private var segmentTime: some View {
         let elapsed = snapshot.currentSegmentStartedAt.map { now.timeIntervalSince($0) } ?? 0
+        // 44pt is the §15 hero size on the 41mm baseline; WatchMetrics
+        // scales it down to ~39pt on a 40mm Series 4 (so it doesn't
+        // overflow) and up to ~52pt on a 49mm Ultra (so it doesn't
+        // look anaemic on the bigger viewport).
         return Text(RaceStats.format(elapsed))
-            .font(.system(size: 44, weight: .heavy, design: .rounded))
+            .font(WatchMetrics.font(size: 44, weight: .heavy, design: .rounded))
             .monospacedDigit()
             .foregroundStyle(Color.textPrimary)
             .shadow(color: Color.accent.opacity(0.30), radius: 12, y: 0)
@@ -384,13 +388,17 @@ struct WatchRaceMainPage: View {
         Button(action: onAdvance) {
             HStack(spacing: 4) {
                 Text("Next")
-                    .font(.system(size: 14, weight: .heavy, design: .rounded))
+                    .font(WatchMetrics.font(size: 14, weight: .heavy, design: .rounded))
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .heavy))
+                    .font(WatchMetrics.font(size: 12, weight: .heavy))
             }
             .foregroundStyle(Color.onAccent)
             .frame(maxWidth: .infinity)
-            .frame(height: 36)
+            // Button height tracks the hero scale so the tap target
+            // stays proportional on every watch — taller on Ultra,
+            // a touch shorter on 40mm so the rest of the layout
+            // (timer + pace + HR row) still fits comfortably.
+            .frame(height: WatchMetrics.dim(36))
             .background(
                 RoundedRectangle(cornerRadius: 12)
                     .fill(Color.accent)
@@ -599,9 +607,9 @@ struct WatchRaceHRPage: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Image(systemName: "heart.fill")
-                        .font(.system(size: 16, weight: .heavy))
+                        .font(WatchMetrics.font(size: 16, weight: .heavy))
                     Text("\(Int(hr.rounded()))")
-                        .font(.system(size: 36, weight: .heavy, design: .rounded))
+                        .font(WatchMetrics.font(size: 36, weight: .heavy, design: .rounded))
                         .monospacedDigit()
                         .contentTransition(.numericText())
                     Text("bpm")
@@ -632,7 +640,7 @@ struct WatchRaceHRPage: View {
         } else {
             VStack(alignment: .leading, spacing: 2) {
                 Text("—")
-                    .font(.system(size: 36, weight: .heavy, design: .rounded))
+                    .font(WatchMetrics.font(size: 36, weight: .heavy, design: .rounded))
                     .foregroundStyle(Color.textTertiary)
                 Text("waiting for sample")
                     .font(.system(size: 10, weight: .semibold))

@@ -551,7 +551,7 @@ struct WatchRaceView: View {
             Spacer(minLength: 2)
 
             Text(RaceStats.format(frozen))
-                .font(.system(size: 38, weight: .heavy, design: .rounded))
+                .font(WatchMetrics.font(size: 38, weight: .heavy, design: .rounded))
                 .monospacedDigit()
                 // Dimmer than the running state's textPrimary —
                 // textSecondary signals "frozen / inactive."
@@ -580,13 +580,13 @@ struct WatchRaceView: View {
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "play.fill")
-                        .font(.system(size: 13, weight: .heavy))
+                        .font(WatchMetrics.font(size: 13, weight: .heavy))
                     Text("Resume")
-                        .font(.system(size: 14, weight: .heavy, design: .rounded))
+                        .font(WatchMetrics.font(size: 14, weight: .heavy, design: .rounded))
                 }
                 .foregroundStyle(Color.onAccent)
                 .frame(maxWidth: .infinity)
-                .frame(height: 38)
+                .frame(height: WatchMetrics.dim(38))
                 .background(
                     LinearGradient(
                         colors: [Color.accent, Color.accent.opacity(0.85)],
@@ -655,7 +655,7 @@ struct WatchRaceView: View {
                 // textPrimary used during a station, signaling
                 // "this is non-work time, keep moving."
                 Text(RaceStats.format(transitionElapsed))
-                    .font(.system(size: 38, weight: .heavy, design: .rounded))
+                    .font(WatchMetrics.font(size: 38, weight: .heavy, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(Color.warning)
                     .shadow(color: Color.warning.opacity(0.35), radius: 10, y: 0)
@@ -679,15 +679,15 @@ struct WatchRaceView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "play.fill")
-                            .font(.system(size: 13, weight: .heavy))
+                            .font(WatchMetrics.font(size: 13, weight: .heavy))
                         Text("Start \(snapshot.currentStation?.displayName ?? "Next")")
-                            .font(.system(size: 14, weight: .heavy, design: .rounded))
+                            .font(WatchMetrics.font(size: 14, weight: .heavy, design: .rounded))
                             .lineLimit(1)
                             .minimumScaleFactor(0.6)
                     }
                     .foregroundStyle(Color.onAccent)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 38)
+                    .frame(height: WatchMetrics.dim(38))
                     .background(
                         LinearGradient(
                             colors: [Color.accent, Color.accent.opacity(0.85)],
@@ -724,7 +724,7 @@ struct WatchRaceView: View {
                 )
 
             Text(snapshot.currentStation?.displayName ?? "—")
-                .font(.system(size: 18, weight: .heavy, design: .rounded))
+                .font(WatchMetrics.font(size: 18, weight: .heavy, design: .rounded))
                 .foregroundStyle(Color.textPrimary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
@@ -750,7 +750,7 @@ struct WatchRaceView: View {
 
         return VStack(spacing: 2) {
             Text(RaceStats.format(total))
-                .font(.system(size: 38, weight: .heavy, design: .rounded))
+                .font(WatchMetrics.font(size: 38, weight: .heavy, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(Color.textPrimary)
                 // Subtle coral underglow — same brand language as
@@ -875,7 +875,7 @@ struct WatchRaceView: View {
             )
 
             Text(RaceStats.format(total))
-                .font(.system(size: 38, weight: .heavy, design: .rounded))
+                .font(WatchMetrics.font(size: 38, weight: .heavy, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(Color.textPrimary)
                 .shadow(color: Color.success.opacity(0.35), radius: 10, y: 0)
@@ -909,15 +909,15 @@ struct WatchRaceView: View {
             ZStack {
                 Circle()
                     .fill(Color.accent.opacity(0.14))
-                    .frame(width: 48, height: 48)
+                    .frame(width: WatchMetrics.dim(48), height: WatchMetrics.dim(48))
                 Image(systemName: "iphone.gen3")
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(WatchMetrics.font(size: 22, weight: .semibold))
                     .foregroundStyle(Color.accent)
             }
 
             VStack(spacing: 2) {
                 Text("Ready")
-                    .font(.system(size: 18, weight: .heavy, design: .rounded))
+                    .font(WatchMetrics.font(size: 18, weight: .heavy, design: .rounded))
                     .foregroundStyle(Color.textPrimary)
 
                 Text("Start a race on iPhone")
@@ -973,9 +973,9 @@ struct WatchRaceView: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "arrow.right.circle.fill")
-                    .font(.system(size: 13, weight: .heavy))
+                    .font(WatchMetrics.font(size: 13, weight: .heavy))
                 Text("Next Station")
-                    .font(.system(size: 14, weight: .heavy, design: .rounded))
+                    .font(WatchMetrics.font(size: 14, weight: .heavy, design: .rounded))
             }
             // Brand contract: white-on-coral for primary CTAs.
             // Color.onAccent stays fixed across modes (and on
@@ -983,7 +983,7 @@ struct WatchRaceView: View {
             // token keeps the call site consistent with iOS).
             .foregroundStyle(Color.onAccent)
             .frame(maxWidth: .infinity)
-            .frame(height: 38)
+            .frame(height: WatchMetrics.dim(38))
             .background(
                 LinearGradient(
                     colors: [Color.accent, Color.accent.opacity(0.85)],
@@ -1079,9 +1079,9 @@ struct WatchHoldToFinishButton: View {
                     HStack(spacing: 4) {
                         Spacer()
                         Image(systemName: "flag.checkered")
-                            .font(.system(size: 13, weight: .heavy))
+                            .font(WatchMetrics.font(size: 13, weight: .heavy))
                         Text("Hold to Finish")
-                            .font(.system(size: 14, weight: .heavy, design: .rounded))
+                            .font(WatchMetrics.font(size: 14, weight: .heavy, design: .rounded))
                         Spacer()
                     }
                     .foregroundStyle(Color.onAccent)
@@ -1114,7 +1114,7 @@ struct WatchHoldToFinishButton: View {
                 }
             }
         }
-        .frame(height: 38)
+        .frame(height: WatchMetrics.dim(38))
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .shadow(color: Color.accent.opacity(0.4), radius: 10, y: 0)
     }
