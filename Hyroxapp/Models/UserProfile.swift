@@ -166,6 +166,51 @@ final class UserProfile {
     // forthcoming UI has something to bind to.
     var manualRunStartEnabled: Bool = false
 
+    // ─── In-race display preferences ──────────────────────────
+    //
+    // Per-feature toggles for the live race screen. Defaults all
+    // ON because dogfooding showed these are the things that
+    // actually make the race screen useful. Athletes who find
+    // them distracting (or just want a minimalist screen) can
+    // turn them off in Settings → In-race displays.
+    //
+    // All Bool-with-default for SwiftData lightweight migration
+    // safety — pre-existing rows pick up `true` cleanly.
+
+    // HR coaching pill (HOLD / SLOW / PUSH / WORK) on the live
+    // HR chip mid-race. Mirrors to the Watch via the snapshot.
+    // Off → the chip just shows BPM + zone color, no command.
+    var coachingCuesEnabled: Bool = true
+
+    // Pace ahead/behind chip in the in-race header. Compares
+    // actual elapsed vs naïve split of target finish time.
+    // Off → no pace chip at all. Athletes who race by feel
+    // rather than by clock benefit from turning this off.
+    var paceChipEnabled: Bool = true
+
+    // Predicted finish projection on the in-race screen
+    // ("projected H:MM:SS" line). Linear extrapolation of
+    // current pace forward. Off → only the elapsed timer
+    // shows. Reduces pressure for athletes who don't want
+    // a verdict mid-race.
+    var predictedFinishEnabled: Bool = true
+
+    // Live Activity (lock screen + Dynamic Island race timer).
+    // Off → race runs entirely in-app, nothing on the lock
+    // screen. Saves a small amount of battery and reduces
+    // notification surface area for users who don't want
+    // race state visible when the phone is locked.
+    var liveActivityEnabled: Bool = true
+
+    // ─── Privacy ──────────────────────────────────────────────
+    //
+    // When on, every new race starts with `isPrivate = true`.
+    // The athlete can still flip the per-race toggle on the
+    // summary screen if they want this race public after all.
+    // Forward-compat for v2 social feed: private races stay
+    // out of any future public surface automatically.
+    var defaultRacePrivate: Bool = false
+
     var createdAt: Date
     var updatedAt: Date
 

@@ -210,7 +210,8 @@ final class RaceViewModel {
         maxHR: Int = 190,
         personalHRBaseline: RaceStats.PersonalHRBaseline? = nil,
         targetDuration: TimeInterval? = nil,
-        guardrailHistory: [Race] = []
+        guardrailHistory: [Race] = [],
+        coachingCuesEnabled: Bool? = nil
     ) -> RaceStateSnapshot? {
         let phase: RaceStateSnapshot.Phase
         let startedAt: Date?
@@ -293,7 +294,8 @@ final class RaceViewModel {
             personalHRUpperQuartile: personalHRBaseline?.upperQuartile,
             targetDuration: targetDuration ?? activeRace?.targetDuration,
             segmentHRApproachThreshold: guardrail?.approachThreshold,
-            segmentHRCeiling: guardrail?.ceiling
+            segmentHRCeiling: guardrail?.ceiling,
+            coachingCuesEnabled: coachingCuesEnabled
         )
     }
 
@@ -453,12 +455,19 @@ final class RaceViewModel {
     func startRaceWithCountdown(
         sequence: [Station] = Station.raceSequence,
         targetDuration: TimeInterval? = nil,
-        countdownEnabled: Bool
+        countdownEnabled: Bool,
+        defaultPrivate: Bool = false,
+        liveActivityEnabled: Bool = true
     ) {
         guard !isCountingDown, !isRacing else { return }
 
         guard countdownEnabled else {
-            startRace(sequence: sequence, targetDuration: targetDuration)
+            startRace(
+                sequence: sequence,
+                targetDuration: targetDuration,
+                defaultPrivate: defaultPrivate,
+                liveActivityEnabled: liveActivityEnabled
+            )
             return
         }
 
@@ -482,7 +491,12 @@ final class RaceViewModel {
             if Task.isCancelled { return }
 
             self.countdownValue = nil
-            self.startRace(sequence: sequence, targetDuration: targetDuration)
+            self.startRace(
+                sequence: sequence,
+                targetDuration: targetDuration,
+                defaultPrivate: defaultPrivate,
+                liveActivityEnabled: liveActivityEnabled
+            )
         }
     }
 
@@ -499,18 +513,27 @@ final class RaceViewModel {
     // them in @State on RaceStartView).
     func skipCountdown(
         sequence: [Station] = Station.raceSequence,
-        targetDuration: TimeInterval? = nil
+        targetDuration: TimeInterval? = nil,
+        defaultPrivate: Bool = false,
+        liveActivityEnabled: Bool = true
     ) {
         guard isCountingDown else { return }
         countdownTask?.cancel()
         countdownTask = nil
         countdownValue = nil
-        startRace(sequence: sequence, targetDuration: targetDuration)
+        startRace(
+            sequence: sequence,
+            targetDuration: targetDuration,
+            defaultPrivate: defaultPrivate,
+            liveActivityEnabled: liveActivityEnabled
+        )
     }
 
     func startRace(
         sequence: [Station] = Station.raceSequence,
-        targetDuration: TimeInterval? = nil
+        targetDuration: TimeInterval? = nil,
+        defaultPrivate: Bool = false,
+        liveActivityEnabled: Bool = true
     ) {
         guard !sequence.isEmpty else { return }
 
@@ -524,6 +547,12 @@ final class RaceViewModel {
             sequence: engine.sequence,
             targetDuration: targetDuration
         )
+        // Apply Settings → Privacy → "default new races private."
+        // The athlete can still flip this on the summary screen
+        // if they want this race public after all. Race init
+        // doesn't take isPrivate as a param to keep that signature
+        // tight; setting it post-init is equivalent.
+        race.isPrivate = defaultPrivate
         modelContext?.insert(race)
         activeRace = race
         saveContextSilently()
@@ -549,8 +578,13 @@ final class RaceViewModel {
         // we just started. Failures are silent — the in-app
         // race UI is the source of truth, the activity is
         // additive.
+        //
+        // Settings → "Live Activity" toggle gates this entirely.
+        // Off → no lock-screen race timer at all. The flag is
+        // captured at start time; flipping the setting mid-race
+        // doesn't retroactively kill / spawn an activity.
         #if canImport(ActivityKit)
-        if let state = currentLiveActivityState() {
+        if liveActivityEnabled, let state = currentLiveActivityState() {
             let attributes = RaceActivityAttributes(
                 raceName: race.name.isEmpty ? "HYROX Race" : race.name
             )

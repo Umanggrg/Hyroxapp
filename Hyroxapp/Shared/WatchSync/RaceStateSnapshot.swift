@@ -147,6 +147,15 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
     let segmentHRApproachThreshold: Double?
     let segmentHRCeiling: Double?
 
+    // Settings → In-race displays → "Coaching cues" mirror.
+    // When `false`, the Watch resolves the cue to .none (silent
+    // BPM + zone color, no HOLD/SLOW/PUSH pill, no cue-transition
+    // haptic). Optional rather than `Bool` for forward/backward
+    // Codable compat — older snapshots that don't carry the field
+    // decode as `nil`, and the helper coalesces nil to `true` so
+    // pre-toggle behavior is preserved exactly.
+    let coachingCuesEnabled: Bool?
+
     // 0-based index into `Station.raceSequence`. The watch resolves this
     // to a `Station` case and uses `station.displayName` /
     // `station.target(for: division)` for the header + subtitle.
@@ -191,7 +200,8 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         personalHRUpperQuartile: Double? = nil,
         targetDuration: TimeInterval? = nil,
         segmentHRApproachThreshold: Double? = nil,
-        segmentHRCeiling: Double? = nil
+        segmentHRCeiling: Double? = nil,
+        coachingCuesEnabled: Bool? = nil
     ) {
         self.phase = phase
         self.startedAt = startedAt
@@ -210,6 +220,7 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         self.targetDuration = targetDuration
         self.segmentHRApproachThreshold = segmentHRApproachThreshold
         self.segmentHRCeiling = segmentHRCeiling
+        self.coachingCuesEnabled = coachingCuesEnabled
     }
 
     // MARK: - Dictionary encoding (WCSession transport)
@@ -234,6 +245,7 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         static let targetDuration = "targetDuration"
         static let segmentHRApproachThreshold = "segmentHRApproachThreshold"
         static let segmentHRCeiling = "segmentHRCeiling"
+        static let coachingCuesEnabled = "coachingCuesEnabled"
     }
 
     // Build a plist-compatible dictionary suitable for
@@ -278,6 +290,13 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         }
         if let segmentHRCeiling {
             dict[Key.segmentHRCeiling] = segmentHRCeiling
+        }
+        // Optional + present-only-when-set encoding mirrors the
+        // other forward-compat fields above. Older Watches that
+        // pre-date this field default to true via the helper; new
+        // Watches see explicit true / false from the host.
+        if let coachingCuesEnabled {
+            dict[Key.coachingCuesEnabled] = coachingCuesEnabled
         }
         return dict
     }
@@ -356,6 +375,11 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         self.segmentHRApproachThreshold = dictionary[Key.segmentHRApproachThreshold] as? Double
         self.segmentHRCeiling = dictionary[Key.segmentHRCeiling] as? Double
 
+        // Coaching cues toggle — read as Optional<Bool>. Missing
+        // key → nil, helper coalesces to `true` so pre-toggle
+        // behavior is preserved for version-skewed receivers.
+        self.coachingCuesEnabled = dictionary[Key.coachingCuesEnabled] as? Bool
+
         // Splits aren't carried over the WCSession dictionary path.
         // The watch doesn't render per-split detail; the duo/Codable
         // path is the only consumer of `splits`. Initialize empty
@@ -373,7 +397,17 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
     // semantics apply: when both bounds are present and ordered,
     // use the personal band; otherwise fall back to textbook Z3.
     func coachingCue(forCurrentHR currentHR: Double?) -> RaceStats.CoachingCue {
-        RaceStats.coachingCue(
+        // Settings → In-race displays → "Coaching cues" gate.
+        // When the athlete has cues turned off, the Watch sees
+        // .none here — chip still renders BPM + zone color but
+        // skips the prescriptive command and the cue-transition
+        // haptic. Mirrors the iPhone gate exactly.
+        //
+        // Nil (older snapshots that don't carry the field) is
+        // treated as enabled — preserves pre-toggle behavior so
+        // Watch + Duo guests on older builds keep seeing cues.
+        guard coachingCuesEnabled ?? true else { return .none }
+        return RaceStats.coachingCue(
             currentHR: currentHR,
             maxHR: maxHeartRate,
             currentStation: currentStation,

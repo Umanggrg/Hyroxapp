@@ -1,5 +1,8 @@
 import SwiftUI
 import SwiftData
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // The Settings sheet. Home for app-wide preferences — today just the HYROX
 // division, tomorrow a growing list (audio cues, run distance defaults,
@@ -40,13 +43,22 @@ struct SettingsView: View {
     @State private var isShowingClearConfirm = false
     @State private var isShowingResetConfirm = false
 
+    // Drives the Edit Profile sheet pushed from the profile row
+    // at the top of Settings. Keeps the editor near where the
+    // athlete reads their identity — they don't have to back out
+    // of Settings, navigate to Profile, then tap the pencil.
+    @State private var isEditingProfile = false
+
     var body: some View {
         NavigationStack {
             Form {
+                profileSection
                 appearanceSection
                 hyroxSection
+                inRaceDisplaysSection
                 audioCuesSection
                 notificationsSection
+                privacySection
                 dataSection
                 aboutSection
             }
@@ -67,9 +79,72 @@ struct SettingsView: View {
         // sheets present in their own scene and don't inherit
         // the host's `.preferredColorScheme`. nil = follow system.
         .preferredColorScheme(profile.resolvedThemePreference.colorScheme)
+        .sheet(isPresented: $isEditingProfile) {
+            EditProfileView(profile: profile)
+        }
     }
 
     // MARK: - Sections
+
+    // Top-of-Settings profile row — avatar + display name + handle
+    // with a chevron, tap to open EditProfileView. Lives at the top
+    // so the athlete's identity is the first thing they see when
+    // they open Settings, mirroring the iOS Settings → Apple ID row.
+    //
+    // Compact: 44pt avatar, two lines of text, no padding overrides
+    // so the row matches Form's standard chevron-list cell metrics.
+    // Tapping anywhere on the row triggers the sheet — not just the
+    // chevron — so the tap target stays huge.
+    private var profileSection: some View {
+        Section {
+            Button {
+                isEditingProfile = true
+            } label: {
+                HStack(spacing: 12) {
+                    profileAvatar
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(profile.displayName.isEmpty ? "Athlete" : profile.displayName)
+                            .font(.headline)
+                            .foregroundStyle(Color.textPrimary)
+                        Text(profile.handle.isEmpty ? "@athlete" : profile.handle)
+                            .font(.footnote)
+                            .foregroundStyle(Color.textSecondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.textTertiary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .listRowBackground(Color.surface)
+        }
+    }
+
+    // Avatar bubble — uses profile.avatarData if set, otherwise the
+    // SF Symbol fallback (matches ProfileHeaderView's treatment).
+    // 44pt diameter is the iOS standard for compact-row avatars.
+    @ViewBuilder
+    private var profileAvatar: some View {
+        if let data = profile.avatarData,
+           let image = UIImage(data: data) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 44, height: 44)
+                .clipShape(Circle())
+        } else {
+            ZStack {
+                Circle()
+                    .fill(Color.surfaceElevated)
+                Image(systemName: "person.crop.circle.fill")
+                    .font(.system(size: 30))
+                    .foregroundStyle(Color.textTertiary)
+            }
+            .frame(width: 44, height: 44)
+        }
+    }
 
     // Light vs dark vs system mode picker. Same three-way model
     // iOS Settings → Display & Brightness uses, so the affordance
@@ -197,6 +272,71 @@ struct SettingsView: View {
             .listRowBackground(Color.surface)
         } header: {
             Text("Race ritual")
+        }
+    }
+
+    // In-race displays section. Toggles for the optional
+    // information layers on the live race screen — coaching cues,
+    // pace chip, predicted finish, Live Activity. All default ON
+    // because each adds genuine value during a race; turn off the
+    // ones that feel distracting for the athlete's particular
+    // racing style. The chips themselves still render minimally
+    // (HR + zone color, timer + target line) when toggled off —
+    // these are display additions, not core functionality.
+    private var inRaceDisplaysSection: some View {
+        Section {
+            Toggle("Coaching cues", isOn: $profile.coachingCuesEnabled)
+                .listRowBackground(Color.surface)
+
+            footnote(
+                "HR-based prompts on the live HR chip — HOLD, SLOW, PUSH on runs, WORK on stations. Off → only BPM and zone color."
+            )
+            .listRowBackground(Color.surface)
+
+            Toggle("Pace chip", isOn: $profile.paceChipEnabled)
+                .listRowBackground(Color.surface)
+
+            footnote(
+                "Shows whether you're ahead or behind your target finish time. Calculated from a naïve split of target across all 16 segments."
+            )
+            .listRowBackground(Color.surface)
+
+            Toggle("Predicted finish", isOn: $profile.predictedFinishEnabled)
+                .listRowBackground(Color.surface)
+
+            footnote(
+                "Projects your final time from current pace. Tinted green when on track to beat your target, amber when projecting to miss."
+            )
+            .listRowBackground(Color.surface)
+
+            Toggle("Live Activity", isOn: $profile.liveActivityEnabled)
+                .listRowBackground(Color.surface)
+
+            footnote(
+                "Shows the race timer + current station on your lock screen and Dynamic Island. Off → race runs in-app only. Takes effect on the next race."
+            )
+            .listRowBackground(Color.surface)
+        } header: {
+            Text("In-race displays")
+        }
+    }
+
+    // Privacy section. Today: a single toggle for default-private
+    // races (every fresh race starts with `isPrivate = true`). The
+    // per-race summary toggle still works to flip individual races
+    // public after the fact. Forward-compat for v2 social feed —
+    // private races stay out of any future cross-athlete surface.
+    private var privacySection: some View {
+        Section {
+            Toggle("Default new races private", isOn: $profile.defaultRacePrivate)
+                .listRowBackground(Color.surface)
+
+            footnote(
+                "New races start hidden from any future social feed and leaderboards. You can still flip individual races public from the summary screen. Local History and Profile stats always include every race."
+            )
+            .listRowBackground(Color.surface)
+        } header: {
+            Text("Privacy")
         }
     }
 

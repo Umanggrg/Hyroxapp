@@ -80,6 +80,23 @@ struct RaceStartView: View {
         profiles.first?.countdownEnabled ?? true
     }
 
+    // Settings → Privacy → "Default new races private." When on,
+    // every freshly-started race begins with `isPrivate = true`;
+    // the athlete can still flip the per-race summary toggle if
+    // they want this race public. Defaults to false (public) when
+    // no profile exists — matches the historical behavior.
+    private var defaultRacePrivate: Bool {
+        profiles.first?.defaultRacePrivate ?? false
+    }
+
+    // Settings → In-race displays → "Live Activity." Captured at
+    // race-start time and passed to the VM. Flipping the toggle
+    // mid-race doesn't retroactively kill / spawn an activity —
+    // it only affects the next race the athlete starts.
+    private var liveActivityEnabled: Bool {
+        profiles.first?.liveActivityEnabled ?? true
+    }
+
     // Drives the Custom Workout Builder sheet. Stays false until the
     // user explicitly taps the secondary button below the primary
     // Start Race CTA.
@@ -187,7 +204,9 @@ struct RaceStartView: View {
                 viewModel.startRaceWithCountdown(
                     sequence: sequence,
                     targetDuration: targetDuration,
-                    countdownEnabled: countdownEnabled
+                    countdownEnabled: countdownEnabled,
+                    defaultPrivate: defaultRacePrivate,
+                    liveActivityEnabled: liveActivityEnabled
                 )
             }
         }
@@ -376,7 +395,9 @@ struct RaceStartView: View {
             Haptics.impact(.heavy)
             viewModel.startRaceWithCountdown(
                 targetDuration: targetDuration,
-                countdownEnabled: countdownEnabled
+                countdownEnabled: countdownEnabled,
+                defaultPrivate: defaultRacePrivate,
+                liveActivityEnabled: liveActivityEnabled
             )
         } label: {
             HStack(spacing: 10) {

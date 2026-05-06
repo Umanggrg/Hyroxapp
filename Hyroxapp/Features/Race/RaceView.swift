@@ -684,7 +684,12 @@ struct RaceView: View {
             // projecting over (going to miss). Without a target
             // set, renders neutral textTertiary — informational
             // rather than a verdict.
-            if let predicted = RaceStats.predictedFinishTime(
+            // Gated on Settings → In-race displays → "Predicted
+            // finish." Off → no projection line at all (only the
+            // elapsed timer + target line render). Reduces pressure
+            // for athletes who don't want a verdict mid-race.
+            if profiles.first?.predictedFinishEnabled ?? true,
+               let predicted = RaceStats.predictedFinishTime(
                 segmentsCompleted: viewModel.completedSegmentsCount,
                 totalSegments: viewModel.totalSegments,
                 actualElapsed: elapsed
@@ -812,6 +817,13 @@ struct RaceView: View {
     }
 
     private func paceChipState(now: Date) -> PaceChipState? {
+        // Gated on Settings → In-race displays → "Pace chip."
+        // Off → no chip at all, even with a target set. Athletes
+        // who race by feel rather than by clock benefit from
+        // turning this off and seeing only the timer.
+        guard profiles.first?.paceChipEnabled ?? true else {
+            return nil
+        }
         guard let target = viewModel.activeRace?.targetDuration else {
             return nil
         }
@@ -873,13 +885,22 @@ struct RaceView: View {
             // comment). Replaces the previous bare "Z3" tag —
             // coaching language is more useful mid-race than the
             // training-plan zone number.
-            let cue = RaceStats.coachingCue(
-                currentHR: bpm,
-                maxHR: maxHeartRate,
-                currentStation: viewModel.engine.currentStation,
-                personalLowerHR: personalHRBaseline?.lowerQuartile,
-                personalUpperHR: personalHRBaseline?.upperQuartile
-            )
+            // Settings → In-race displays → "Coaching cues" gates
+            // the HOLD/SLOW/PUSH/WORK pill. When off, we resolve
+            // to .none so the chip still renders zone color + BPM
+            // but skips the prescriptive command. The chip's
+            // shape stays identical either way; only the inner
+            // pill toggles.
+            let coachingCuesEnabled = profiles.first?.coachingCuesEnabled ?? true
+            let cue: RaceStats.CoachingCue = coachingCuesEnabled
+                ? RaceStats.coachingCue(
+                    currentHR: bpm,
+                    maxHR: maxHeartRate,
+                    currentStation: viewModel.engine.currentStation,
+                    personalLowerHR: personalHRBaseline?.lowerQuartile,
+                    personalUpperHR: personalHRBaseline?.upperQuartile
+                )
+                : .none
             // For run stations the chip tint follows the cue
             // (green hold / red slow / blue push) so the same
             // color signal reads at a glance whether you're racing
@@ -1132,7 +1153,16 @@ struct RaceView: View {
         }
         .contentShape(Rectangle())  // make whole area tappable
         .onTapGesture {
-            viewModel.skipCountdown(targetDuration: viewModel.activeRace?.targetDuration)
+            // Forward the same Settings flags the countdown was
+            // started with so a tap-to-skip race honors privacy +
+            // Live Activity prefs. Without these, skip would fall
+            // back to defaults (public, live activity on) — wrong
+            // for athletes who set Privacy → "default private."
+            viewModel.skipCountdown(
+                targetDuration: viewModel.activeRace?.targetDuration,
+                defaultPrivate: profiles.first?.defaultRacePrivate ?? false,
+                liveActivityEnabled: profiles.first?.liveActivityEnabled ?? true
+            )
             Haptics.impact(.heavy)
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.6), value: value)
@@ -1418,7 +1448,8 @@ struct RaceView: View {
             division: division,
             maxHR: maxHeartRate,
             personalHRBaseline: personalHRBaseline,
-            guardrailHistory: allRaces
+            guardrailHistory: allRaces,
+            coachingCuesEnabled: profiles.first?.coachingCuesEnabled ?? true
         ) {
             WatchCompanionService.shared.publish(snapshot)
         } else {
