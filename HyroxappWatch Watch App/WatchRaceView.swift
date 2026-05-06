@@ -172,6 +172,30 @@ struct WatchRaceView: View {
         .onChange(of: client.snapshot?.currentStationIndex) { _, newIndex in
             handleStationIndexChange(to: newIndex)
         }
+        // Self-heal HKWorkoutSession state from the snapshot phase.
+        // This is the resilience fix for "HR not showing" — if the
+        // iPhone's `sendControl(.startWorkout)` was dropped because
+        // the Watch app wasn't reachable at race-start (sendMessage
+        // silently fails when isReachable == false), the Watch
+        // never started its HK session and HR samples never flowed.
+        // The snapshot `updateApplicationContext` IS queued and
+        // delivered when the Watch app comes up — so by the time
+        // we observe `phase == .inProgress`, we have everything we
+        // need to start the session locally, backdated to the
+        // snapshot's `startedAt`. WatchWorkoutManager.start guards
+        // against double-start, so this is idempotent against the
+        // happy-path case where the control DID arrive.
+        .onChange(of: client.snapshot?.phase) { _, newPhase in
+            synchronizeWorkoutSession(forPhase: newPhase)
+        }
+        // Also sync on first appearance — the Watch app may launch
+        // straight into a mid-race state (snapshot already pending
+        // from the activation callback) and we need to start the
+        // HK session even though no `.onChange` will fire for that
+        // initial value.
+        .onAppear {
+            synchronizeWorkoutSession(forPhase: client.snapshot?.phase)
+        }
         // Guardrail state watcher — fires the anticipatory
         // haptic when HR enters the approach band (§17.1). The
         // computed `currentGuardrailState` reads the latest HR
@@ -420,6 +444,61 @@ struct WatchRaceView: View {
             try? await Task.sleep(for: .seconds(Self.transitionOverlayDuration))
             guard !Task.isCancelled else { return }
             activeTransitionOverlay = nil
+        }
+    }
+
+    // Sync the Watch's HKWorkoutSession state with whatever the
+    // snapshot says about the race phase. Idempotent — calling it
+    // when the session is already in the right state is a no-op
+    // (WatchWorkoutManager guards both start and end).
+    //
+    // This is the resilience layer for the "Watch app wasn't
+    // reachable when iPhone tapped Start" failure mode:
+    //
+    //   1. iPhone fires `sendControl(.startWorkout)` via
+    //      sendMessage — REQUIRES `session.isReachable == true`.
+    //   2. iPhone fires `updateApplicationContext(snapshot)` —
+    //      QUEUED, delivered whenever the Watch app next runs.
+    //
+    // If the Watch app is asleep at step 1, the start command is
+    // dropped (sendMessage doesn't queue). The snapshot still
+    // arrives at step 2 when the user raises their wrist, so the
+    // Watch UI shows the race state — but the HK session was
+    // never created and no HR samples flow.
+    //
+    // This method closes that gap: when we OBSERVE a phase that
+    // implies a session should be running, we start one locally
+    // backdated to the snapshot's `startedAt`. HKWorkoutSession
+    // accepts a past start date — Apple's docs use that exact
+    // pattern for "athlete forgot to start the workout" UX.
+    //
+    // Symmetric on the end side: if we observe `.finished` while
+    // we still have an active session (e.g. the iPhone's
+    // `.endWorkout` was dropped), we end the session.
+    private func synchronizeWorkoutSession(forPhase phase: RaceStateSnapshot.Phase?) {
+        let manager = WatchWorkoutManager.shared
+
+        switch phase {
+        case .inProgress, .inRoxzone, .paused:
+            // A race is running. We should have an active HK
+            // session. Start one if we don't (backdated to the
+            // snapshot's startedAt so the duration is accurate).
+            guard let startedAt = client.snapshot?.startedAt else { return }
+            guard !manager.isWorkoutActive else { return }
+            manager.handle(.startWorkout(at: startedAt))
+
+        case .finished:
+            // Race ended. End any session we've still got open.
+            // Idempotent — handle() guards against ending a
+            // non-active session.
+            guard manager.isWorkoutActive else { return }
+            manager.handle(.endWorkout(at: client.snapshot?.endedAt ?? Date()))
+
+        case .notStarted, .none:
+            // No race. If we somehow have a leftover session
+            // (e.g. crash + relaunch), discard it.
+            guard manager.isWorkoutActive else { return }
+            manager.handle(.discardWorkout)
         }
     }
 

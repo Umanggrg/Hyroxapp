@@ -235,4 +235,34 @@ extension WatchRaceClient: WCSessionDelegate {
             WatchWorkoutManager.shared.handle(control)
         }
     }
+
+    // Queued user-info delivery. WatchCompanionService falls back
+    // to `transferUserInfo` for `WatchControl` commands when the
+    // Watch app wasn't reachable at send time (e.g. iPhone tapped
+    // Start while the Watch app was asleep). The queued payload
+    // lands here whenever the Watch app next runs — we decode the
+    // same `WatchControl` shape and dispatch it to the workout
+    // manager. Late delivery is fine because controls carry their
+    // own timestamp; `startWorkout(at:)` backdates the HK session
+    // accordingly.
+    //
+    // Distinct from `didReceiveMessage` (live transport, only
+    // fires when both apps are foregrounded). Both routes
+    // converge on `WatchWorkoutManager.handle` so the lifecycle
+    // behavior is identical regardless of transport.
+    nonisolated func session(
+        _ session: WCSession,
+        didReceiveUserInfo userInfo: [String : Any] = [:]
+    ) {
+        print("[WatchClient] didReceiveUserInfo FIRED — keys: \(userInfo.keys.sorted())")
+        guard let control = WatchControl(dictionary: userInfo) else {
+            print("[WatchClient] didReceiveUserInfo — not a control, ignoring")
+            return
+        }
+        print("[WatchClient] didReceiveUserInfo decoded control=\(control)")
+
+        Task { @MainActor in
+            WatchWorkoutManager.shared.handle(control)
+        }
+    }
 }

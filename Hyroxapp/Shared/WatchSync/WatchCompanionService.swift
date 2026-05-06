@@ -167,14 +167,29 @@ final class WatchCompanionService: NSObject {
         }
 
         guard session.isReachable else {
-            // Reachable means the watch app is reachable (typically
-            // foregrounded or with a recent app session). For
-            // workout lifecycle commands, immediate delivery is
-            // strongly preferred over queued — a `startWorkout`
-            // delivered 5 minutes late is worse than not delivered.
-            // We log + drop. If this becomes a real issue, fall
-            // through to `transferUserInfo` for queued delivery.
-            print("[WatchCompanion] sendControl SKIPPED — watch not reachable control=\(control)")
+            // Watch isn't currently reachable (app asleep / wrist
+            // down / out of range). `sendMessage` would silently
+            // drop the command — that was the root cause of the
+            // "HR not showing" bug: iPhone tap → start command
+            // dropped → Watch never started its HKWorkoutSession
+            // → no HR samples on either surface.
+            //
+            // Fall through to `transferUserInfo` so the command is
+            // queued for delivery as soon as the Watch app runs
+            // again. WatchRaceClient's `didReceiveUserInfo`
+            // handler decodes it and dispatches it to the
+            // workout manager. Late delivery is acceptable here
+            // because:
+            //   • WatchRaceView ALSO self-heals from the snapshot
+            //     phase (see synchronizeWorkoutSession) — even if
+            //     this queued message never lands, the snapshot
+            //     alone is enough to start the session.
+            //   • Both the start and end controls carry their own
+            //     timestamp, so a delayed `startWorkout` still
+            //     backdates the HK session to the actual race
+            //     start, not to delivery time.
+            print("[WatchCompanion] sendControl QUEUED via transferUserInfo — watch not reachable control=\(control)")
+            session.transferUserInfo(control.toDictionary())
             return
         }
 
@@ -183,6 +198,11 @@ final class WatchCompanionService: NSObject {
             replyHandler: nil,
             errorHandler: { error in
                 print("[WatchCompanion] sendControl FAILED — \(error.localizedDescription)")
+                // Live delivery failed (watch became unreachable
+                // mid-flight, transient WCSession error, etc.).
+                // Re-queue via the durable transport so the
+                // command isn't lost.
+                session.transferUserInfo(control.toDictionary())
             }
         )
         print("[WatchCompanion] sendControl dispatched control=\(control)")
