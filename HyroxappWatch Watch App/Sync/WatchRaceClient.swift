@@ -27,6 +27,14 @@ final class WatchRaceClient: NSObject {
     // that case. Set on receipt of an application-context update.
     var snapshot: RaceStateSnapshot?
 
+    // The latest Free Run state pushed by the phone. Mutually
+    // exclusive with `snapshot` at the rendering layer — the
+    // Watch's main view dispatches to either the race UI or the
+    // free-run UI based on which one is active. nil means "no
+    // free run in progress." Set on receipt of an application-
+    // context update with the FreeRunStateSnapshot discriminator.
+    var freeRunSnapshot: FreeRunStateSnapshot?
+
     private override init() {
         super.init()
     }
@@ -163,6 +171,30 @@ final class WatchRaceClient: NSObject {
     // contract @Observable requires.
     nonisolated private func ingest(_ dictionary: [String: Any]) {
         print("[WatchClient] ingest called — keys: \(dictionary.keys.sorted())")
+
+        // Try the Free Run discriminator first — the dictionary
+        // carries `kind = "freeRunSnapshot"` when it's a free-run
+        // payload. Race snapshots have no such discriminator, so
+        // they fall through to RaceStateSnapshot decoding.
+        if let freeRun = FreeRunStateSnapshot(dictionary: dictionary) {
+            print("[WatchClient] ingest OK FREE-RUN phase=\(freeRun.phase.rawValue) distance=\(Int(freeRun.distanceMetres))m")
+            Task { @MainActor in
+                // Activating a free run clears any prior race
+                // snapshot so the wrist UI dispatcher picks the
+                // free-run surface unambiguously. Conversely, a
+                // .notStarted free-run snapshot means "free run
+                // ended" — clear so the wrist returns to its
+                // race / idle UI.
+                if freeRun.phase == .notStarted {
+                    self.freeRunSnapshot = nil
+                } else {
+                    self.freeRunSnapshot = freeRun
+                    self.snapshot = nil
+                }
+            }
+            return
+        }
+
         guard let snapshot = RaceStateSnapshot(dictionary: dictionary) else {
             print("[WatchClient] ingest FAILED to decode snapshot")
             return
@@ -171,6 +203,10 @@ final class WatchRaceClient: NSObject {
         print("[WatchClient] ingest OK phase=\(snapshot.phase.rawValue) stationIndex=\(snapshot.currentStationIndex)")
         Task { @MainActor in
             self.snapshot = snapshot
+            // A race snapshot pushing in implies no free run is
+            // active (mutually exclusive surfaces); clear stale
+            // free-run state defensively.
+            self.freeRunSnapshot = nil
             print("[WatchClient] snapshot assigned on MainActor")
         }
     }

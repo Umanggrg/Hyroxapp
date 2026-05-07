@@ -111,10 +111,18 @@ struct WatchRaceView: View {
         ZStack {
             Color.background.ignoresSafeArea()
 
-            // Switch on phase. The `case` bindings pull the snapshot into
-            // each branch so we can pass concrete values to the subviews
-            // without having to unwrap optional fields everywhere.
-            if let snapshot = client.snapshot {
+            // Free Run takes precedence — when the iPhone is
+            // pushing a free-run snapshot, render that surface
+            // and ignore any stale race state (the two are
+            // mutually exclusive on the iPhone side; clearing
+            // is handled by `WatchRaceClient.ingest`).
+            if let freeRun = client.freeRunSnapshot,
+               freeRun.phase != .notStarted {
+                WatchFreeRunView(snapshot: freeRun)
+            } else if let snapshot = client.snapshot {
+                // Switch on phase. The `case` bindings pull the snapshot into
+                // each branch so we can pass concrete values to the subviews
+                // without having to unwrap optional fields everywhere.
                 switch snapshot.phase {
                 case .inProgress:
                     inProgressView(snapshot: snapshot)

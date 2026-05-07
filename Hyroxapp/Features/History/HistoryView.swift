@@ -25,6 +25,15 @@ struct HistoryView: View {
         sort: [SortDescriptor(\Race.createdAt, order: .reverse)]
     ) private var races: [Race]
 
+    // FreeRun rows — surfaced alongside races as part of the
+    // unified History feed. Filter to finished runs (endedAt != nil)
+    // for the same reason as Race: in-progress rows are resumable
+    // state, not history. Newest first.
+    @Query(
+        filter: #Predicate<FreeRun> { $0.endedAt != nil },
+        sort: [SortDescriptor(\FreeRun.createdAt, order: .reverse)]
+    ) private var freeRuns: [FreeRun]
+
     // User profile for max HR — drives the effort-category chip on
     // each RaceCardView. Singleton-via-Query pattern matches every
     // other surface that reads UserProfile; when no profile exists
@@ -38,6 +47,12 @@ struct HistoryView: View {
 
     @State private var searchText = ""
     @State private var selectedFilter: HistoryFilter = .all
+
+    // Activity-kind filter — top-level segmented control that
+    // determines which row types render. `all` mixes races + free
+    // runs chronologically; `races` shows only HYROX races (with
+    // the existing chip filters); `runs` shows only Free Runs.
+    @State private var selectedActivity: HistoryActivityKind = .all
 
     // Selected tag (nil = no tag filter). Composes with selectedFilter
     // — both apply in series, so the user can do "PBs Only" + tag
@@ -64,7 +79,7 @@ struct HistoryView: View {
             ZStack {
                 Color.background.ignoresSafeArea()
 
-                if races.isEmpty {
+                if races.isEmpty && freeRuns.isEmpty {
                     emptyState
                 } else {
                     ScrollView {
@@ -76,46 +91,50 @@ struct HistoryView: View {
                             HistoryHero(races: races)
                                 .padding(.bottom, 2)
 
-                            // Filter chips ride above the cards
-                            // inside the scroll view so they
-                            // scroll out of the way as the user
-                            // browses — common iOS pattern,
-                            // matches the search bar's behavior
-                            // immediately above.
+                            // Activity-kind switch — All / Races /
+                            // Runs. Pinned above the race-specific
+                            // filter chips so the user picks "what
+                            // am I looking at" first, then narrows
+                            // within that category.
                             FilterChipRow(
-                                filters: HistoryFilter.allCases,
-                                selection: $selectedFilter,
+                                filters: HistoryActivityKind.allCases,
+                                selection: $selectedActivity,
                                 label: \.displayName
                             )
                             .padding(.horizontal, -Layout.screenMargin)
 
-                            // Tag filter row sits below the preset
-                            // chips. Composes with the active preset
-                            // — both filters apply in series. Auto-
-                            // hides when no tags exist on any race.
-                            TagFilterRow(
-                                tags: availableTags,
-                                selection: $selectedTag
-                            )
-                            .padding(.horizontal, -Layout.screenMargin)
+                            // Race-specific filter chips. Hidden
+                            // when the user has selected the Runs-
+                            // only view since the chips don't apply
+                            // (PBs / customWorkouts / mode are race
+                            // concepts).
+                            if selectedActivity != .runs {
+                                FilterChipRow(
+                                    filters: HistoryFilter.allCases,
+                                    selection: $selectedFilter,
+                                    label: \.displayName
+                                )
+                                .padding(.horizontal, -Layout.screenMargin)
 
-                            if filteredRaces.isEmpty {
+                                // Tag filter row sits below the
+                                // preset chips. Composes with the
+                                // active preset — both filters
+                                // apply in series. Auto-hides when
+                                // no tags exist on any race.
+                                TagFilterRow(
+                                    tags: availableTags,
+                                    selection: $selectedTag
+                                )
+                                .padding(.horizontal, -Layout.screenMargin)
+                            }
+
+                            if filteredItems.isEmpty {
                                 noResultsState
                                     .padding(.top, 40)
                             } else {
-                                ForEach(filteredRaces) { race in
-                                    NavigationLink(value: race) {
-                                        RaceCardView(race: race, allRaces: races, maxHR: maxHeartRate)
-                                    }
-                                    .buttonStyle(.pressableCard)
-                                    // Same scroll-appearance polish
-                                    // ProfileView's sections get —
-                                    // cards fade + scale slightly as
-                                    // they enter the viewport. Long
-                                    // History scrolls feel more
-                                    // alive without manual stagger
-                                    // state.
-                                    .applyScrollAppearTransition()
+                                ForEach(filteredItems) { item in
+                                    historyRow(for: item)
+                                        .applyScrollAppearTransition()
                                 }
                             }
                         }
@@ -136,6 +155,13 @@ struct HistoryView: View {
             )
             .navigationDestination(for: Race.self) { race in
                 RaceDetailView(race: race)
+            }
+            .navigationDestination(for: FreeRun.self) { run in
+                // No onClose — the summary's Done button falls
+                // through to its own `dismiss` env value, which
+                // pops the nav stack and lands the user back on
+                // the History feed.
+                FreeRunSummaryView(run: run)
             }
             .navigationDestination(for: HistoryDestination.self) { destination in
                 switch destination {
@@ -183,6 +209,67 @@ struct HistoryView: View {
     // the gallery would actually have something to show.
     private var hasAnyPhoto: Bool {
         races.contains { $0.photoData != nil }
+    }
+
+    // Render a history row for a unified `HistoryItem` —
+    // dispatches to the appropriate card view (RaceCardView or
+    // FreeRunCardView). Each card pushes via NavigationLink to
+    // the right destination. Same pressableCard styling on both
+    // so the feed feels homogeneous.
+    @ViewBuilder
+    private func historyRow(for item: HistoryItem) -> some View {
+        switch item {
+        case .race(let race):
+            NavigationLink(value: race) {
+                RaceCardView(race: race, allRaces: races, maxHR: maxHeartRate)
+            }
+            .buttonStyle(.pressableCard)
+        case .run(let run):
+            NavigationLink(value: run) {
+                FreeRunCardView(run: run)
+            }
+            .buttonStyle(.pressableCard)
+        }
+    }
+
+    // Unified, filtered, sorted feed of races + free runs. Honors
+    // the activity-kind filter (top-level), the race-specific
+    // chip filter (when the user hasn't switched to runs-only),
+    // the tag filter (race-only), and the search query.
+    //
+    // Mixed-type sorting uses createdAt descending so the most
+    // recent activity is on top regardless of whether it's a
+    // race or a run.
+    private var filteredItems: [HistoryItem] {
+        var items: [HistoryItem] = []
+
+        // Race side — only included when the activity filter is
+        // .all or .races. Runs through the existing chip filter
+        // chain (preset + tag + search).
+        if selectedActivity != .runs {
+            let raceMatches = filteredRaces
+            items.append(contentsOf: raceMatches.map { HistoryItem.race($0) })
+        }
+
+        // Run side — included when activity filter is .all or
+        // .runs. The race chip filters don't apply (PBs /
+        // customWorkouts are race concepts), but the search
+        // query DOES — matches against run.name.
+        if selectedActivity != .races {
+            var runs = freeRuns
+            let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !query.isEmpty {
+                runs = runs.filter {
+                    $0.name.localizedCaseInsensitiveContains(query)
+                }
+            }
+            items.append(contentsOf: runs.map { HistoryItem.run($0) })
+        }
+
+        // Sort the mixed feed by createdAt descending. Both
+        // models share the same sort key so this is straightforward.
+        items.sort { $0.createdAt > $1.createdAt }
+        return items
     }
 
     // Apply the active chip + the search query in series. Order
@@ -287,6 +374,52 @@ struct HistoryView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 32)
+    }
+}
+
+// Wrapper enum that lets the unified History feed render either
+// a Race row or a Free Run row in the same scroll. Identifiable
+// via the wrapped model's id (both Race and FreeRun have stable
+// UUIDs), Hashable so SwiftUI's diffing identifies rows on
+// updates.
+//
+// `createdAt` is the unified sort key — both models share the
+// same field so a chronological mixed feed Just Works.
+enum HistoryItem: Identifiable, Hashable {
+    case race(Race)
+    case run(FreeRun)
+
+    var id: UUID {
+        switch self {
+        case .race(let r): return r.id
+        case .run(let r): return r.id
+        }
+    }
+
+    var createdAt: Date {
+        switch self {
+        case .race(let r): return r.createdAt
+        case .run(let r): return r.createdAt
+        }
+    }
+}
+
+// Top-level activity-type filter. Sits ABOVE the existing race
+// chips and gates which model types render. .runs short-circuits
+// the race chips (which don't apply to free runs).
+enum HistoryActivityKind: Int, CaseIterable, Identifiable, Hashable {
+    case all
+    case races
+    case runs
+
+    var id: Int { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .all:   return "All"
+        case .races: return "Races"
+        case .runs:  return "Runs"
+        }
     }
 }
 

@@ -38,8 +38,8 @@ Strava nails this duality. The app is quiet and utilitarian during a run, then t
 
 ### Explicit non-goals
 
-- **No GPS tracking.** The 1km runs are manual start/stop. HYROX is an indoor-first race format; GPS tracking would only matter for outdoor run training, and keeping it out of scope simplifies the tracking layer, battery cost, and privacy surface. Distance (when it matters) is entered manually or derived from station rules.  
-- **Not a generic fitness / workout logger.** Freeform lifting, yoga, running-for-running's-sake aren't the target. HYROX-shaped workouts only.
+- **No GPS tracking — for HYROX races.** The 1km runs inside a HYROX race are manual start/stop. HYROX is an indoor-first race format; GPS would add no signal there. Distance for HYROX (when it matters) is entered manually or derived from station rules. **Exception:** the *Free Run* mode (a deliberately separate flow from Race Mode) uses opt-in GPS for outdoor runs and pedometer-only for indoor. Free Run does not pollute HYROX-shaped analytics — it's a parallel surface for athletes who want to track their easy runs without reaching for Strava.
+- **Not a generic fitness / workout logger.** Freeform lifting, yoga, calisthenics, etc. aren't the target. HYROX-shaped workouts plus the single Free Run exception above. We are not trying to be Strava — Free Run intentionally has no map, no segments, no kudos; just distance, pace, splits, HR.
 
 ---
 

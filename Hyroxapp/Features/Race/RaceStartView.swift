@@ -102,6 +102,24 @@ struct RaceStartView: View {
     // Start Race CTA.
     @State private var isBuilderPresented = false
 
+    // Free Run pending state — set when the Custom Workout
+    // Builder forwards a Free Run pick. Drives the
+    // `.fullScreenCover` push of FreeRunView once the builder
+    // sheet has fully dismissed (presenting a fullscreen on top
+    // of a still-dismissing sheet causes the dreaded "view not
+    // in window hierarchy" flash, so we set the value and let
+    // SwiftUI handle the next render cycle).
+    @State private var pendingFreeRun: PendingFreeRun?
+
+    // Tuple-as-struct so SwiftUI can identity-track the value
+    // for the `.fullScreenCover(item:)` modifier — ad-hoc
+    // tuples don't conform to Identifiable.
+    private struct PendingFreeRun: Identifiable {
+        let id = UUID()
+        let locationType: FreeRunLocationType
+        let splitUnit: FreeRunSplitUnit
+    }
+
     // Drives the target-time picker sheet.
     @State private var isTargetPickerPresented = false
 
@@ -199,14 +217,40 @@ struct RaceStartView: View {
         }
         #if canImport(UIKit)
         .sheet(isPresented: $isBuilderPresented) {
-            CustomWorkoutBuilderView { sequence in
-                Haptics.impact(.medium)
-                viewModel.startRaceWithCountdown(
-                    sequence: sequence,
-                    targetDuration: targetDuration,
-                    countdownEnabled: countdownEnabled,
-                    defaultPrivate: defaultRacePrivate,
-                    liveActivityEnabled: liveActivityEnabled
+            CustomWorkoutBuilderView(
+                onStart: { sequence in
+                    Haptics.impact(.medium)
+                    viewModel.startRaceWithCountdown(
+                        sequence: sequence,
+                        targetDuration: targetDuration,
+                        countdownEnabled: countdownEnabled,
+                        defaultPrivate: defaultRacePrivate,
+                        liveActivityEnabled: liveActivityEnabled
+                    )
+                },
+                onStartFreeRun: { locationType, splitUnit in
+                    // Stash the pick; the builder sheet's own
+                    // dismissal triggers the .fullScreenCover
+                    // below to present the FreeRunView once the
+                    // sheet stack settles.
+                    pendingFreeRun = PendingFreeRun(
+                        locationType: locationType,
+                        splitUnit: splitUnit
+                    )
+                }
+            )
+        }
+        // Free Run live screen — presented as a fullscreen cover
+        // so the run UI takes over the entire viewport, same
+        // pattern RaceView uses for an in-progress race. NavigationStack
+        // wrapper gives the live view its own back-button surface
+        // (hidden mid-run; appears only after the run ends and
+        // the screen pops back).
+        .fullScreenCover(item: $pendingFreeRun) { pending in
+            NavigationStack {
+                FreeRunView(
+                    locationType: pending.locationType,
+                    splitUnit: pending.splitUnit
                 )
             }
         }

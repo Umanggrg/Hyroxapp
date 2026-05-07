@@ -27,6 +27,16 @@ struct CustomWorkoutBuilderView: View {
     // race UI takes over cleanly.
     let onStart: ([Station]) -> Void
 
+    // Optional callback fired when the athlete picks Free Run
+    // instead of building a station sequence. Free Run is a
+    // separate flow (running for distance + time, no HYROX
+    // stations) but lives under the Custom Workout umbrella
+    // because they're both "do something other than the canonical
+    // 16-station race." Keeping it optional means existing
+    // callers that only care about the station-builder flow
+    // don't have to deal with the new closure.
+    var onStartFreeRun: ((FreeRunLocationType, FreeRunSplitUnit) -> Void)? = nil
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
@@ -60,12 +70,42 @@ struct CustomWorkoutBuilderView: View {
     @State private var isSaveAlertPresented = false
     @State private var saveDraftName: String = ""
 
+    // Drives the Free Run start sheet. Tapping the Free Run card
+    // at the top of the builder presents this; the sheet collects
+    // location-type + split-unit and fires its own onStart, which
+    // we forward up via the parent's onStartFreeRun callback.
+    @State private var isFreeRunSheetPresented = false
+
     var body: some View {
         NavigationStack {
             ZStack {
                 Color.background.ignoresSafeArea()
 
                 VStack(spacing: 0) {
+                    // Free Run card — top-of-screen entry point
+                    // for the parallel "just run" flow. Only
+                    // rendered when the parent provided an
+                    // onStartFreeRun callback (today: always, but
+                    // the optional shape keeps the builder
+                    // reusable from contexts that don't want this
+                    // surface).
+                    if onStartFreeRun != nil {
+                        freeRunCard
+                            .padding(.horizontal, Layout.screenMargin)
+                            .padding(.top, 12)
+                            .padding(.bottom, 8)
+
+                        // Subtle visual divider between the Free
+                        // Run shortcut and the station-builder
+                        // workflow below — same
+                        // "or build your own" pattern Apple
+                        // Workouts uses to separate quick-start
+                        // from custom configuration.
+                        builderDivider
+                            .padding(.horizontal, Layout.screenMargin)
+                            .padding(.bottom, 4)
+                    }
+
                     if sequence.isEmpty {
                         emptyState
                     } else {
@@ -140,7 +180,91 @@ struct CustomWorkoutBuilderView: View {
             } message: {
                 Text("Give this workout a name so you can run it again later.")
             }
+            // Free Run start sheet — presents over the builder.
+            // On Start, dismisses both sheets and forwards the
+            // pick up to the parent via onStartFreeRun.
+            .sheet(isPresented: $isFreeRunSheetPresented) {
+                FreeRunStartSheet { locationType, splitUnit in
+                    isFreeRunSheetPresented = false
+                    // Dismiss the builder itself so the parent
+                    // (RaceStartView) can present the Free Run
+                    // live screen on top of the cleared stack.
+                    dismiss()
+                    onStartFreeRun?(locationType, splitUnit)
+                }
+            }
         }
+    }
+
+    // MARK: - Free Run entry
+
+    // Top-of-screen card that opens the Free Run start sheet.
+    // Visually distinct from the station-builder workflow
+    // below — coral icon hero, descriptive subtitle, chevron
+    // hinting at the sheet that follows. Same press-feedback
+    // affordance as other tappable cards in the app.
+    private var freeRunCard: some View {
+        Button {
+            Haptics.impact(.light)
+            isFreeRunSheetPresented = true
+        } label: {
+            HStack(spacing: 14) {
+                // Coral-tinted glyph — figure.run is unambiguous,
+                // and the colored background block reads as "this
+                // is a different mode" rather than another row in
+                // the station builder.
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.accent.opacity(0.14))
+                        .frame(width: 48, height: 48)
+                    Image(systemName: "figure.run")
+                        .font(.system(size: 22, weight: .heavy))
+                        .foregroundStyle(Color.accent)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Free Run")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(Color.textPrimary)
+                    Text("Just run — distance, pace, and HR. Indoor or outdoor.")
+                        .font(.caption)
+                        .foregroundStyle(Color.textSecondary)
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.heavy))
+                    .foregroundStyle(Color.textTertiary)
+            }
+            .padding(.horizontal, Layout.cardPadding)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                    .fill(Color.surface)
+            )
+        }
+        .buttonStyle(.pressableCard)
+    }
+
+    // Visual break between the Free Run shortcut and the
+    // station-builder section. "Or build your own" framing
+    // matches the Apple Workouts pattern.
+    private var builderDivider: some View {
+        HStack(spacing: 12) {
+            Rectangle()
+                .fill(Color.divider)
+                .frame(height: 0.5)
+            Text("OR BUILD YOUR OWN")
+                .font(.caption2.weight(.bold))
+                .tracking(0.8)
+                .foregroundStyle(Color.textTertiary)
+            Rectangle()
+                .fill(Color.divider)
+                .frame(height: 0.5)
+        }
+        .padding(.vertical, 12)
     }
 
     // MARK: - Persistence

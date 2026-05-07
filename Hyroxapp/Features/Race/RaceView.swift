@@ -1390,6 +1390,17 @@ struct RaceView: View {
             case .resume:
                 Haptics.success()
                 viewModel.resumeRace()
+            case .pauseFreeRun, .resumeFreeRun, .endFreeRun:
+                // Free-run wrist actions are handled by
+                // FreeRunView's own onAction registration —
+                // RaceView ignores them. The two surfaces are
+                // mutually exclusive on iPhone (you're either in
+                // a HYROX race or a free run, never both); the
+                // active screen owns the action handler. If a
+                // stale free-run action lands here (race active
+                // when wrist sends free-run), silently drop it
+                // rather than misrouting to race controls.
+                break
             }
         }
 

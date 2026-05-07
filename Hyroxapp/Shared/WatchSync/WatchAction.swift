@@ -41,6 +41,17 @@ enum WatchAction: Sendable, Equatable {
     case pause
     case resume
 
+    // Free Run controls. Distinct from .pause / .resume / .advance
+    // even though they're conceptually similar — the Watch UI for
+    // a free run is a separate surface, and the iPhone-side
+    // dispatcher routes these to FreeRunViewModel instead of
+    // RaceViewModel. Keeping the action types separate keeps the
+    // dispatch logic trivial (no "what mode are we in" check on
+    // the iPhone — the action carries the answer).
+    case pauseFreeRun
+    case resumeFreeRun
+    case endFreeRun
+
     // MARK: - Dictionary encoding
 
     private enum Key {
@@ -57,6 +68,9 @@ enum WatchAction: Sendable, Equatable {
         case .startNextSegment:  return "startNextSegment"
         case .pause:             return "pause"
         case .resume:            return "resume"
+        case .pauseFreeRun:      return "pauseFreeRun"
+        case .resumeFreeRun:     return "resumeFreeRun"
+        case .endFreeRun:        return "endFreeRun"
         }
     }
 
@@ -72,6 +86,9 @@ enum WatchAction: Sendable, Equatable {
         case "startNextSegment": self = .startNextSegment
         case "pause":            self = .pause
         case "resume":           self = .resume
+        case "pauseFreeRun":     self = .pauseFreeRun
+        case "resumeFreeRun":    self = .resumeFreeRun
+        case "endFreeRun":       self = .endFreeRun
         default: return nil
         }
     }

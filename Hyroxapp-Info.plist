@@ -46,6 +46,10 @@
 	<string>Trakrr writes completed races to Apple Health so they appear alongside your other workouts.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Trakrr uses your local network to find and connect to a partner's iPhone for Duo races. No data leaves your local Wi-Fi or Bluetooth connection.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Trakrr uses your location during outdoor Free Runs to track distance and pace. Location is only read while you're actively recording a run.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>Trakrr uses motion sensors to count steps and estimate distance during indoor Free Runs when GPS isn't available.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Trakrr lets you attach photos to races and pick a profile picture from your photo library.</string>
 	<key>NSSupportsLiveActivities</key>

@@ -137,6 +137,28 @@ final class WatchCompanionService: NSObject {
         }
     }
 
+    // Symmetric publish for Free Run state. The Watch dispatches
+    // on the snapshot's `kind` discriminator and renders the free-
+    // run live UI when this lands instead of the race UI. Same
+    // transport (updateApplicationContext) — only one
+    // application-context dictionary is in flight at a time, so
+    // the Watch never sees both a race AND a free-run snapshot
+    // simultaneously.
+    func publishFreeRun(_ snapshot: FreeRunStateSnapshot) {
+        let session = WCSession.default
+        guard session.isWatchAppInstalled else { return }
+        guard session.activationState == .activated else {
+            print("[WatchCompanion] publishFreeRun SKIPPED — not activated")
+            return
+        }
+        do {
+            try session.updateApplicationContext(snapshot.toDictionary())
+            print("[WatchCompanion] publishFreeRun OK phase=\(snapshot.phase.rawValue) distance=\(Int(snapshot.distanceMetres))m")
+        } catch {
+            print("[WatchCompanion] publishFreeRun FAILED — \(error.localizedDescription)")
+        }
+    }
+
     // Push a workout-lifecycle control to the Watch. Uses
     // `sendMessage(_:replyHandler:errorHandler:)` (not
     // `updateApplicationContext`) because:

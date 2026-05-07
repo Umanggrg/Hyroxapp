@@ -38,6 +38,17 @@ struct ProfileView: View {
     @Query(sort: [SortDescriptor(\WorkoutTemplate.createdAt, order: .forward)])
     private var templates: [WorkoutTemplate]
 
+    // Finished free runs — drives the new "Running" aggregate
+    // card. Filter to endedAt-set rows so resumable / in-progress
+    // runs don't pollute totals. Newest-first ordering doesn't
+    // matter for aggregation but matches HistoryView's query
+    // shape for consistency.
+    @Query(
+        filter: #Predicate<FreeRun> { $0.endedAt != nil },
+        sort: [SortDescriptor(\FreeRun.createdAt, order: .reverse)]
+    )
+    private var freeRuns: [FreeRun]
+
     // All race events, sorted by date ascending. SwiftData's
     // #Predicate macro doesn't allow global function calls like
     // Date() inside the filter body — it expands at compile time
@@ -140,6 +151,13 @@ struct ProfileView: View {
                             // headers needed yet.
                             VStack(spacing: 16) {
                                 raceEventBanner
+                                // Free Run stats — even without
+                                // HYROX races, an athlete who's done
+                                // free runs still has running data
+                                // worth surfacing here.
+                                if FreeRunStatsCard.hasData(freeRuns) {
+                                    FreeRunStatsCard(runs: freeRuns)
+                                }
                                 emptyStats
                             }
                             .padding(.horizontal, Layout.screenMargin)
@@ -147,6 +165,17 @@ struct ProfileView: View {
                         } else {
                             nextUpSection.applyScrollAppearTransition()
                             summarySection.applyScrollAppearTransition()
+                            // Free Run aggregates — only renders when
+                            // the user has at least one finished free
+                            // run. Slotted between summary and the
+                            // HYROX-shaped performance analytics so
+                            // running content reads as adjacent to
+                            // (not buried under) race content.
+                            if FreeRunStatsCard.hasData(freeRuns) {
+                                FreeRunStatsCard(runs: freeRuns)
+                                    .padding(.horizontal, Layout.screenMargin)
+                                    .applyScrollAppearTransition()
+                            }
                             performanceSection.applyScrollAppearTransition()
                             trainingSection.applyScrollAppearTransition()
                             personalBestsSection.applyScrollAppearTransition()
