@@ -72,25 +72,52 @@ struct RaceDetailView: View {
             // RaceSummaryView's intense backdrop.
             HeroBackdrop(.standard)
 
-            // §16 layout: pinned hero + tab bar + scrolling tab
-            // content. Three vertical regions; only the bottom
-            // region scrolls. Apple Fitness uses the same pattern
-            // for its workout detail view.
-            VStack(spacing: 0) {
-                detailHeroSection
-                    .padding(.horizontal, Layout.screenMargin)
-                    .padding(.top, 8)
-                    .padding(.bottom, 16)
+            // §16 layout (revised): single ScrollView with the
+            // hero scrolling away and the tab bar pinned as a
+            // sticky header via `LazyVStack(pinnedViews:)`.
+            //
+            // The previous layout had three fixed vertical
+            // regions — pinned hero + pinned tab bar + scrolling
+            // body — which left the tab bar permanently parked
+            // at one screen height with the hero hogging room
+            // above it. Athletes complained the tabs felt
+            // cramped and the hero wasted space they couldn't
+            // dismiss. New layout: hero scrolls out of view as
+            // you read; the tab bar hits the navigation bar and
+            // sticks there, behaving as an extended top chrome
+            // for the rest of the scroll. Same pattern Apple
+            // Music uses for an album page and Apple Health
+            // uses for a metric drill-down.
+            ScrollView {
+                LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    // Hero — scrolls away with content. No
+                    // pinning so the user reclaims its space
+                    // when they want to focus on tab content.
+                    detailHeroSection
+                        .padding(.horizontal, Layout.screenMargin)
+                        .padding(.top, 8)
+                        .padding(.bottom, 16)
 
-                RaceDetailTabBar(selection: $selectedTab)
-
-                // The active tab's content. Each tab view owns
-                // its own ScrollView so the hero + tab bar stay
-                // pinned while the body scrolls. Switching tabs
-                // resets scroll position (default SwiftUI
-                // behavior, which matches what users expect from
-                // a tab bar).
-                tabContent(for: selectedTab)
+                    Section {
+                        // Body of the active tab — the ONLY
+                        // place tabContent's content renders.
+                        // Each tabContent_*_ branch is now a
+                        // plain VStack (no inner ScrollView)
+                        // because nested ScrollViews would
+                        // break sticky-header behavior.
+                        tabContent(for: selectedTab)
+                    } header: {
+                        // Pinned tab bar. Apple's
+                        // LazyVStack(pinnedViews:) makes this
+                        // header stick to the top of the scroll
+                        // area as it crosses the navigation
+                        // bar. The tab bar's solid background
+                        // (set in RaceDetailTabBar.swift) makes
+                        // it read cleanly while content scrolls
+                        // beneath.
+                        RaceDetailTabBar(selection: $selectedTab)
+                    }
+                }
             }
         }
         // Show the user-set title in the nav bar when present;
@@ -598,30 +625,30 @@ struct RaceDetailView: View {
     // estimate + race-day projection. The athlete's first stop
     // after a finish.
     private var overviewTabContent: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                splitsGroupSection
-                    .padding(.horizontal, Layout.screenMargin)
+        // No ScrollView here — the outer body owns the single
+        // ScrollView so the tab bar can pin via section header.
+        VStack(spacing: 16) {
+            splitsGroupSection
+                .padding(.horizontal, Layout.screenMargin)
 
-                let hasRecovery = RaceStats.recoveryDemand(for: race, maxHR: maxHeartRate) != nil
-                let hasProjection = RaceStats.raceDayProjectedTotal(
-                    for: race,
-                    division: profiles.first?.resolvedDivision ?? .mensOpen
-                ) != nil
-                if hasRecovery {
-                    RecoveryEstimateView(race: race, maxHR: maxHeartRate)
-                        .padding(.horizontal, Layout.screenMargin)
-                }
-                if hasProjection {
-                    RaceDayProjectionView(
-                        race: race,
-                        division: profiles.first?.resolvedDivision ?? .mensOpen
-                    )
+            let hasRecovery = RaceStats.recoveryDemand(for: race, maxHR: maxHeartRate) != nil
+            let hasProjection = RaceStats.raceDayProjectedTotal(
+                for: race,
+                division: profiles.first?.resolvedDivision ?? .mensOpen
+            ) != nil
+            if hasRecovery {
+                RecoveryEstimateView(race: race, maxHR: maxHeartRate)
                     .padding(.horizontal, Layout.screenMargin)
-                }
             }
-            .padding(.vertical, 16)
+            if hasProjection {
+                RaceDayProjectionView(
+                    race: race,
+                    division: profiles.first?.resolvedDivision ?? .mensOpen
+                )
+                .padding(.horizontal, Layout.screenMargin)
+            }
         }
+        .padding(.vertical, 16)
     }
 
     // RUNS tab — the 8 runs deep. Currently surfaces the
@@ -631,17 +658,15 @@ struct RaceDetailView: View {
     // per the §16 spec.
     @ViewBuilder
     private var runsTabContent: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                if CompromisedRunningView.hasData(in: race) {
-                    compromisedRunningSection
-                        .padding(.horizontal, Layout.screenMargin)
-                } else {
-                    emptyTabState(message: "Run analysis appears once 8 runs have HR or pace data.")
-                }
+        VStack(spacing: 16) {
+            if CompromisedRunningView.hasData(in: race) {
+                compromisedRunningSection
+                    .padding(.horizontal, Layout.screenMargin)
+            } else {
+                emptyTabState(message: "Run analysis appears once 8 runs have HR or pace data.")
             }
-            .padding(.vertical, 16)
         }
+        .padding(.vertical, 16)
     }
 
     // STATIONS tab — the 8 workout stations. v1 lists the
@@ -651,37 +676,35 @@ struct RaceDetailView: View {
     // §16 spec.
     @ViewBuilder
     private var stationsTabContent: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                let workoutSplits = race.splits.filter { $0.station.kind == .workout }
-                if !workoutSplits.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Stations").capsLabelStyle()
-                            Spacer()
-                        }
-                        .padding(.horizontal, 4)
+        VStack(spacing: 16) {
+            let workoutSplits = race.splits.filter { $0.station.kind == .workout }
+            if !workoutSplits.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Stations").capsLabelStyle()
+                        Spacer()
+                    }
+                    .padding(.horizontal, 4)
 
-                        VStack(spacing: 0) {
-                            ForEach(Array(workoutSplits.enumerated()), id: \.offset) { index, split in
-                                stationRow(split: split, index: index)
-                                if index < workoutSplits.count - 1 {
-                                    Divider().background(Color.divider)
-                                }
+                    VStack(spacing: 0) {
+                        ForEach(Array(workoutSplits.enumerated()), id: \.offset) { index, split in
+                            stationRow(split: split, index: index)
+                            if index < workoutSplits.count - 1 {
+                                Divider().background(Color.divider)
                             }
                         }
-                        .background(
-                            RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
-                                .fill(Color.surface)
-                        )
                     }
-                    .padding(.horizontal, Layout.screenMargin)
-                } else {
-                    emptyTabState(message: "Workout stations appear once you've completed a race with workout splits.")
+                    .background(
+                        RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                            .fill(Color.surface)
+                    )
                 }
+                .padding(.horizontal, Layout.screenMargin)
+            } else {
+                emptyTabState(message: "Workout stations appear once you've completed a race with workout splits.")
             }
-            .padding(.vertical, 16)
         }
+        .padding(.vertical, 16)
     }
 
     // Single tappable row in the Stations tab. Pushes into
@@ -717,26 +740,24 @@ struct RaceDetailView: View {
     // surfaced more prominently here in a future phase.
     @ViewBuilder
     private var hrTabContent: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                let hasHR = HeartRateChartView.hasAnyHeartRateData(in: race.splits)
-                let hasScatter = PaceHeartRateScatterView.hasEnoughData(for: race)
-                if hasHR {
-                    heartRateSection
-                        .padding(.horizontal, Layout.screenMargin)
-                    hrZonesSection
-                        .padding(.horizontal, Layout.screenMargin)
-                }
-                if hasScatter {
-                    paceHeartRateScatterSection
-                        .padding(.horizontal, Layout.screenMargin)
-                }
-                if !hasHR && !hasScatter {
-                    emptyTabState(message: "HR analysis appears once you race with the Watch streaming heart rate.")
-                }
+        VStack(spacing: 16) {
+            let hasHR = HeartRateChartView.hasAnyHeartRateData(in: race.splits)
+            let hasScatter = PaceHeartRateScatterView.hasEnoughData(for: race)
+            if hasHR {
+                heartRateSection
+                    .padding(.horizontal, Layout.screenMargin)
+                hrZonesSection
+                    .padding(.horizontal, Layout.screenMargin)
             }
-            .padding(.vertical, 16)
+            if hasScatter {
+                paceHeartRateScatterSection
+                    .padding(.horizontal, Layout.screenMargin)
+            }
+            if !hasHR && !hasScatter {
+                emptyTabState(message: "HR analysis appears once you race with the Watch streaming heart rate.")
+            }
         }
+        .padding(.vertical, 16)
     }
 
     // STORY tab — the narrative + insight strip. The athlete's
@@ -744,42 +765,40 @@ struct RaceDetailView: View {
     // headline; insight strip below is the bullet-list backup.
     @ViewBuilder
     private var storyTabContent: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                let insights = InsightGenerator.generate(
-                    for: race,
-                    allRaces: allFinishedRaces
-                )
-                let hasStory = RaceStoryView.hasContent(
-                    for: race,
+        VStack(spacing: 16) {
+            let insights = InsightGenerator.generate(
+                for: race,
+                allRaces: allFinishedRaces
+            )
+            let hasStory = RaceStoryView.hasContent(
+                for: race,
+                history: allFinishedRaces,
+                maxHR: maxHeartRate
+            )
+            if hasStory {
+                RaceStoryView(
+                    race: race,
                     history: allFinishedRaces,
                     maxHR: maxHeartRate
                 )
-                if hasStory {
-                    RaceStoryView(
-                        race: race,
-                        history: allFinishedRaces,
-                        maxHR: maxHeartRate
-                    )
-                    .padding(.horizontal, Layout.screenMargin)
-                }
-                if !insights.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Insights").capsLabelStyle()
-                            Spacer()
-                        }
-                        .padding(.horizontal, 4)
-                        RaceInsightStrip(insights: insights)
-                    }
-                    .padding(.horizontal, Layout.screenMargin)
-                }
-                if !hasStory && insights.isEmpty {
-                    emptyTabState(message: "Race story appears once enough HR or pace data is captured.")
-                }
+                .padding(.horizontal, Layout.screenMargin)
             }
-            .padding(.vertical, 16)
+            if !insights.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Insights").capsLabelStyle()
+                        Spacer()
+                    }
+                    .padding(.horizontal, 4)
+                    RaceInsightStrip(insights: insights)
+                }
+                .padding(.horizontal, Layout.screenMargin)
+            }
+            if !hasStory && insights.isEmpty {
+                emptyTabState(message: "Race story appears once enough HR or pace data is captured.")
+            }
         }
+        .padding(.vertical, 16)
     }
 
     // Generic empty-state for tabs that don't have data yet.

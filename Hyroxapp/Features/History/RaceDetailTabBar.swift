@@ -27,14 +27,24 @@ struct RaceDetailTabBar: View {
             .padding(.horizontal, Layout.screenMargin)
         }
         .background(
-            // Subtle bottom hairline divides the tab bar from
-            // the scrolling tab content below. Matches the
-            // navigation-style separator pattern.
-            VStack {
-                Spacer()
-                Rectangle()
-                    .fill(Color.divider)
-                    .frame(height: 0.5)
+            // Solid background so the bar reads cleanly when it
+            // sticks to the top of the scroll area. Without this,
+            // tab content would scroll visibly behind the tab
+            // labels — fine when the bar was a fixed sub-region,
+            // wrong when it pins as a sticky header.
+            //
+            // VStack with a hairline at the bottom mirrors the
+            // navigation-bar separator pattern — once the bar is
+            // pinned, the hairline visually attaches it to the
+            // navigation stack above it.
+            ZStack {
+                Color.background
+                VStack {
+                    Spacer()
+                    Rectangle()
+                        .fill(Color.divider)
+                        .frame(height: 0.5)
+                }
             }
         )
     }

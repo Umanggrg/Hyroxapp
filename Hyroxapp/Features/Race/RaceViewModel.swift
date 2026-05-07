@@ -705,6 +705,27 @@ final class RaceViewModel {
             #if canImport(WatchConnectivity)
             WatchCompanionService.shared.sendControl(.endWorkout(at: advancedAt))
             #endif
+
+            // Rehydrate per-station physiology from HealthKit after
+            // the Watch's `finishWorkout` flushes its buffered
+            // samples. THIS is why per-station HR / calories / std
+            // dev / SpO2 was sparse mid-race: HKLiveWorkoutBuilder
+            // buffers everything internally during a workout
+            // session and only writes to HKHealthStore on
+            // `finishWorkout`. Mid-race `attachSegmentStats(to:)`
+            // queries HK and finds nothing for most stations —
+            // only stations that happened to catch a passive HR
+            // sample (Watch's 5-15min ambient cadence, NOT the
+            // workout's 1Hz cadence) got populated.
+            //
+            // After a delay long enough for the Watch's
+            // finishWorkout to complete and propagate samples
+            // back to HK on the iPhone (8s lands in the middle of
+            // Apple's 5-10s typical end-to-end), re-run the
+            // per-segment query for every split. The lookup
+            // returns the full sample set this time, so every
+            // station gets HR, calories, std dev, and SpO2.
+            rehydrateSegmentStatsAfterFinish()
         }
 
         // Fire-and-forget: fetch segment-window stats from HealthKit
@@ -869,6 +890,61 @@ final class RaceViewModel {
                 atSplitIndex: index
             )
             self.persistActiveRace()
+        }
+        #endif
+    }
+
+    // Re-query HealthKit for per-segment physiology AFTER the race
+    // finishes — closes the "physiology missing on most stations"
+    // gap reported during dogfooding.
+    //
+    // Why this is needed:
+    //   • `HKLiveWorkoutBuilder` buffers HR / calorie / SpO2
+    //     samples internally during an active workout session and
+    //     ONLY writes them to `HKHealthStore` when `finishWorkout`
+    //     is called.
+    //   • `attachSegmentStats(to:)` runs at segment-end (mid-
+    //     race) and queries HK directly — but the samples for
+    //     that segment are still buffered on the Watch, so the
+    //     query returns nothing for most stations.
+    //   • The only stations that got physiology mid-race were
+    //     ones that happened to overlap the Watch's passive
+    //     ambient HR sampling (5-15 min cadence), which writes
+    //     to HK independently of the workout session.
+    //
+    // After race-end:
+    //   • The phone sends `.endWorkout` to the Watch.
+    //   • The Watch's session delegate calls
+    //     `builder.finishWorkout` which flushes every buffered
+    //     sample to HKHealthStore.
+    //   • iCloud Health propagates the samples back to the
+    //     iPhone in ~5-8 seconds (the propagation delay between
+    //     Watch HK writes and iPhone HK reads).
+    //
+    // This method waits 8 seconds (median of that propagation
+    // window — long enough that finishWorkout has completed and
+    // samples have reached the iPhone, short enough that the user
+    // can see physiology on the summary the moment they arrive).
+    // Then it re-runs `attachSegmentStats(to:)` for every split.
+    //
+    // Idempotent: `attachSegmentStats` overwrites whatever values
+    // exist on the split, so a station that DID get HR mid-race
+    // simply gets refreshed with the same data; one that didn't
+    // gets populated for the first time.
+    private func rehydrateSegmentStatsAfterFinish() {
+        #if canImport(HealthKit)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(8))
+            guard let self else { return }
+
+            // Re-query each split independently. attachSegmentStats
+            // is already designed for parallel HK queries per
+            // split; calling it sequentially here is fine because
+            // the queries within each call run concurrently and
+            // there are at most 16 splits.
+            for index in self.engine.splits.indices {
+                self.attachSegmentStats(to: index)
+            }
         }
         #endif
     }
