@@ -168,7 +168,7 @@ final class WatchWorkoutManager: NSObject {
         print("[WatchWorkout] handle control=\(control)")
         switch control {
         case .startWorkout(let date):
-            start(at: date)
+            start(at: date, activityType: .functionalStrengthTraining, locationType: .indoor)
         case .endWorkout(let date):
             end(at: date, finalize: true)
         case .pauseWorkout:
@@ -177,6 +177,18 @@ final class WatchWorkoutManager: NSObject {
             resume()
         case .discardWorkout:
             end(at: Date(), finalize: false)
+        case .startFreeRunWorkout(let date, let locationTypeRaw):
+            // Free Run uses `.running` activity. Indoor →
+            // pedometer-only via the live builder; outdoor →
+            // pedometer + GPS (watchOS attaches GPS samples
+            // automatically when the configuration's
+            // locationType is .outdoor). HR collection is
+            // identical to the race path.
+            let location: HKWorkoutSessionLocationType =
+                (locationTypeRaw == "outdoor") ? .outdoor : .indoor
+            start(at: date, activityType: .running, locationType: location)
+        case .endFreeRunWorkout(let date):
+            end(at: date, finalize: true)
         }
     }
 
@@ -187,7 +199,11 @@ final class WatchWorkoutManager: NSObject {
     // the workout to iOS's running-workouts list. The builder collects
     // samples (HR, active energy) automatically so they're ready to
     // be persisted on `finishWorkout`.
-    private func start(at startDate: Date) {
+    private func start(
+        at startDate: Date,
+        activityType: HKWorkoutActivityType,
+        locationType: HKWorkoutSessionLocationType
+    ) {
         guard !isWorkoutActive else {
             // Defensive: HKWorkoutSession.startActivity raises if
             // called on an already-active session. Bail silently
@@ -198,13 +214,17 @@ final class WatchWorkoutManager: NSObject {
             return
         }
 
-        // HYROX is mixed strength + conditioning; .functionalStrengthTraining
-        // is the closest activity type. Indoor — HYROX is an indoor
-        // race format (per CLAUDE.md §1 non-goals) and the location
-        // type affects calorie estimation.
+        // Activity + location type are now passed in by the
+        // caller so the same machinery handles both HYROX races
+        // (.functionalStrengthTraining + .indoor) and Free Runs
+        // (.running + .indoor / .outdoor). The OS uses the
+        // activity type to drive calorie estimation models and
+        // the location type to decide whether to collect GPS
+        // samples — getting them right gives the saved
+        // HKWorkout the right shape in Apple Health.
         let configuration = HKWorkoutConfiguration()
-        configuration.activityType = .functionalStrengthTraining
-        configuration.locationType = .indoor
+        configuration.activityType = activityType
+        configuration.locationType = locationType
 
         do {
             let session = try HKWorkoutSession(

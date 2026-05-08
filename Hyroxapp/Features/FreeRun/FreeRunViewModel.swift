@@ -319,9 +319,6 @@ final class FreeRunViewModel {
     private func startDistanceSource(for locationType: FreeRunLocationType) {
         let manager = FreeRunWorkoutManager.shared
 
-        // Wire the callbacks BEFORE starting so we don't miss the
-        // first samples — the builder can publish data within ms
-        // of starting.
         manager.onDistanceUpdate = { [weak self] date, metres in
             guard let self else { return }
             self.engine?.recordDistance(at: date, metres: metres)
@@ -332,22 +329,55 @@ final class FreeRunViewModel {
             self.currentHeartRateBPM = bpm
         }
 
-        // Auth + start. requestAuthorizationIfNeeded is async but
-        // returns immediately on already-granted state. Starting
-        // doesn't wait for auth — if the user denies, the builder
-        // simply emits no samples and the UI degrades gracefully.
         Task { @MainActor in
             await manager.requestAuthorizationIfNeeded()
             manager.start(locationType: locationType)
         }
+
+        #if canImport(WatchConnectivity)
+        // Tell the paired Watch to start its OWN HKWorkoutSession
+        // for `.running`. This is what makes HR work end-to-end:
+        //   • Watch's HKLiveWorkoutBuilder collects HR samples
+        //     from the wrist sensor and streams them to the
+        //     iPhone via WCSession (the existing onHeartRate
+        //     callback the race path already uses).
+        //   • Watch writes HR + distance + active calories to
+        //     HKHealthStore in real time during the session, so
+        //     the iPhone's `currentHeartRate()` poll finds fresh
+        //     samples and the post-finish rehydrate has per-split
+        //     windows to query.
+        //   • Watch also writes a real HKWorkout on finish, so
+        //     the run earns Activity-ring credit.
+        //
+        // Without this, FreeRun on iPhone would only have
+        // pedometer-driven distance and zero HR (HK never gets
+        // populated since no workout session is running).
+        WatchCompanionService.shared.sendControl(
+            .startFreeRunWorkout(
+                at: Date(),
+                locationTypeRaw: locationType.rawValue
+            )
+        )
+        #endif
     }
 
     private func pauseDistanceSource() {
         FreeRunWorkoutManager.shared.pause()
+        #if canImport(WatchConnectivity)
+        // Mirror pause on the Watch — session collection halts
+        // so HR / distance / calories don't accumulate during
+        // the pause window. Same `pauseWorkout` control the race
+        // path uses; the Watch's pause/resume operate on whatever
+        // active session exists.
+        WatchCompanionService.shared.sendControl(.pauseWorkout)
+        #endif
     }
 
     private func resumeDistanceSource() {
         FreeRunWorkoutManager.shared.resume()
+        #if canImport(WatchConnectivity)
+        WatchCompanionService.shared.sendControl(.resumeWorkout)
+        #endif
     }
 
     private func stopDistanceSource() {
@@ -358,10 +388,20 @@ final class FreeRunViewModel {
         // path is the only caller that wants the discard
         // semantic.
         FreeRunWorkoutManager.shared.end(finalize: true)
-        // Clear callback references so the manager can be reused
-        // on the next run without leaking the prior view model.
         FreeRunWorkoutManager.shared.onDistanceUpdate = nil
         FreeRunWorkoutManager.shared.onHeartRateUpdate = nil
+
+        #if canImport(WatchConnectivity)
+        // Mirror end on the Watch — finalize the wrist's HK
+        // session so HKLiveWorkoutBuilder.finishWorkout flushes
+        // every buffered HR + distance sample to HKHealthStore.
+        // The post-finish rehydrate (8s delayed) then queries
+        // each split's window and finds real samples instead of
+        // the empty windows we saw before this fix.
+        WatchCompanionService.shared.sendControl(
+            .endFreeRunWorkout(at: Date())
+        )
+        #endif
     }
 
     // MARK: - HR observation
@@ -385,6 +425,17 @@ final class FreeRunViewModel {
 
     private func stopHeartRateObservation() {
         currentHeartRateBPM = nil
+    }
+
+    // Public ingest for Watch-streamed HR samples. The view
+    // (`FreeRunView`) registers the WCSession HR callback and
+    // forwards each update through this method so the property
+    // stays `private(set)` from the rest of the world. Same
+    // contract `RaceViewModel.ingestHeartRate(_:)` provides for
+    // race mode — keeps internal mutation centralized while
+    // letting the view's WCSession bridge feed the value.
+    func ingestHeartRateBPM(_ bpm: Double) {
+        currentHeartRateBPM = bpm
     }
 
     // MARK: - Post-finish HK rehydrate

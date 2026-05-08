@@ -59,16 +59,8 @@ struct FreeRunView: View {
             }
 
             #if canImport(WatchConnectivity)
-            // Wire the Watch → iPhone action callback. The wrist's
-            // pause/resume/end buttons send WatchAction.pauseFreeRun
-            // / .resumeFreeRun / .endFreeRun via WCSession; this
-            // routes them to the view model. Race-mode actions
-            // (.advance, .pause, etc.) are ignored here — they're
-            // handled by RaceView when a race is active.
-            //
-            // Mutually exclusive registration: a free run and a
-            // HYROX race can't be active at the same time, so
-            // overwriting the callback is safe.
+            // Wire the Watch → iPhone action callback (wrist
+            // pause/resume/end → view model).
             WatchCompanionService.shared.onAction = { action in
                 switch action {
                 case .pauseFreeRun: viewModel.pause()
@@ -81,14 +73,35 @@ struct FreeRunView: View {
                 default: break
                 }
             }
+
+            // Wire the Watch → iPhone HR streaming callback. The
+            // Watch's HKLiveWorkoutBuilder publishes HR samples
+            // via WCSession at ~1Hz during the run; FreeRunView
+            // forwards them straight into `currentHeartRateBPM`
+            // on the view model so the live HR chip ticks at the
+            // wrist's native cadence rather than waiting for the
+            // 5s polling fallback. Same dual-source pattern Race
+            // Mode uses — Watch streaming is primary, HK polling
+            // (in FreeRunWorkoutManager) is the fallback when
+            // the wrist isn't streaming.
+            WatchCompanionService.shared.onHeartRate = { update in
+                // Stale-sample filter — same threshold as race
+                // ingest. Late-delivered queued samples that
+                // outlive their relevance get dropped.
+                let age = Date().timeIntervalSince(update.sampledAt)
+                guard age < 90 else { return }
+                guard update.bpm >= 30, update.bpm <= 230 else { return }
+                viewModel.ingestHeartRateBPM(update.bpm)
+            }
             #endif
         }
         .onDisappear {
             #if canImport(WatchConnectivity)
-            // Clear the action handler so a stale closure doesn't
-            // reference a torn-down view's state. RaceView re-
-            // registers its own handler when its onAppear fires.
+            // Clear handlers so torn-down closures don't
+            // reference stale state. RaceView re-registers its
+            // own handlers on its onAppear.
             WatchCompanionService.shared.onAction = nil
+            WatchCompanionService.shared.onHeartRate = nil
             #endif
         }
         .alert(

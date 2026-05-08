@@ -110,7 +110,15 @@ struct WatchFreeRunView: View {
 
     @ViewBuilder
     private var hrChip: some View {
-        if let hr = snapshot.currentHeartRateBPM {
+        // HR source priority — same dual-source approach the
+        // race screen uses:
+        //   1. Local Watch builder (zero-latency, ~1Hz from
+        //      HKLiveWorkoutBuilder.didCollectDataOf)
+        //   2. Snapshot HR from iPhone (1-3s roundtrip via
+        //      WCSession application-context push)
+        // Local always wins when present.
+        if let hr = WatchWorkoutManager.shared.currentHeartRateBPM
+            ?? snapshot.currentHeartRateBPM {
             HStack(spacing: 4) {
                 Image(systemName: "heart.fill")
                     .font(WatchMetrics.font(size: 9, weight: .heavy))

@@ -62,11 +62,34 @@ enum WatchControl: Sendable, Equatable {
     // complete. Mirrors `RaceViewModel.abandon()`.
     case discardWorkout
 
+    // Free Run started. Watch creates an `HKWorkoutSession` of
+    // type `.running` with the supplied indoor/outdoor location
+    // type — different config from `.startWorkout` which uses
+    // `.functionalStrengthTraining`. The Watch's HR + distance
+    // collection writes samples to HK in real time during the
+    // run, which is what makes the iPhone's HR poll find anything.
+    //
+    // The locationTypeRaw is the FreeRunLocationType raw value
+    // ("indoor" / "outdoor"); decoded on the Watch side via the
+    // same enum. Outdoor sessions also get a route builder
+    // attached so the GPS polyline saves to Apple Health
+    // alongside the HKWorkout.
+    case startFreeRunWorkout(at: Date, locationTypeRaw: String)
+
+    // Free Run finished — Watch ends its session and finalizes
+    // the HKWorkout. Symmetric to `endWorkout` but kept distinct
+    // so the Watch dispatcher knows it's the free-run session
+    // it's tearing down (today the Watch tracks at most one
+    // session at a time, so the disambiguation is defensive
+    // rather than strictly necessary).
+    case endFreeRunWorkout(at: Date)
+
     // MARK: - Dictionary encoding
 
     private enum Key {
         static let kind = "control"
         static let date = "date"
+        static let locationTypeRaw = "locationTypeRaw"
     }
 
     // Stable raw values — changing these later without a versioning
@@ -74,22 +97,27 @@ enum WatchControl: Sendable, Equatable {
     // newer counterparts.
     private var rawKind: String {
         switch self {
-        case .startWorkout:    return "startWorkout"
-        case .endWorkout:      return "endWorkout"
-        case .pauseWorkout:    return "pauseWorkout"
-        case .resumeWorkout:   return "resumeWorkout"
-        case .discardWorkout:  return "discardWorkout"
+        case .startWorkout:        return "startWorkout"
+        case .endWorkout:          return "endWorkout"
+        case .pauseWorkout:        return "pauseWorkout"
+        case .resumeWorkout:       return "resumeWorkout"
+        case .discardWorkout:      return "discardWorkout"
+        case .startFreeRunWorkout: return "startFreeRunWorkout"
+        case .endFreeRunWorkout:   return "endFreeRunWorkout"
         }
     }
 
     func toDictionary() -> [String: Any] {
         var dict: [String: Any] = [Key.kind: rawKind]
         switch self {
-        case .startWorkout(let date), .endWorkout(let date):
+        case .startWorkout(let date), .endWorkout(let date), .endFreeRunWorkout(let date):
             // Encoded as TimeInterval (seconds since epoch) — the
             // standard plist-friendly date encoding for WCSession
             // payloads.
             dict[Key.date] = date.timeIntervalSince1970
+        case .startFreeRunWorkout(let date, let locationTypeRaw):
+            dict[Key.date] = date.timeIntervalSince1970
+            dict[Key.locationTypeRaw] = locationTypeRaw
         case .pauseWorkout, .resumeWorkout, .discardWorkout:
             break
         }
@@ -108,6 +136,16 @@ enum WatchControl: Sendable, Equatable {
         case "pauseWorkout":   self = .pauseWorkout
         case "resumeWorkout":  self = .resumeWorkout
         case "discardWorkout": self = .discardWorkout
+        case "startFreeRunWorkout":
+            guard let ts = dictionary[Key.date] as? TimeInterval,
+                  let locRaw = dictionary[Key.locationTypeRaw] as? String else { return nil }
+            self = .startFreeRunWorkout(
+                at: Date(timeIntervalSince1970: ts),
+                locationTypeRaw: locRaw
+            )
+        case "endFreeRunWorkout":
+            guard let ts = dictionary[Key.date] as? TimeInterval else { return nil }
+            self = .endFreeRunWorkout(at: Date(timeIntervalSince1970: ts))
         default: return nil
         }
     }
