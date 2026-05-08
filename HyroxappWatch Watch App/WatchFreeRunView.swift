@@ -2,24 +2,35 @@ import SwiftUI
 
 // Watch-side live screen for an in-progress Free Run.
 //
-// Reads `FreeRunStateSnapshot` pushed from the iPhone every time the
-// run state advances (start / pause / resume / end / split fired /
-// distance update). Local TimelineView keeps the elapsed-time HUD
-// ticking smoothly between snapshot pushes.
+// Visually distinct from the race surface in three ways:
+//   1. Distance is the hero — for a run, the question the athlete
+//      glances down to answer is "how far have I gone," not "how
+//      long has it been." Race mode hero is elapsed time because
+//      the race is judged by total finish time; for a free run
+//      that ranking flips.
+//   2. Live recording dot pulses in the header — a Strava
+//      convention that signals "we're actively capturing."
+//   3. The accent gradient leans on a calmer running blue rather
+//      than the race-mode coral, so a glance immediately reads as
+//      "you're in a Run, not a Race."
 //
-// Renders:
-//   • Hero elapsed time (computed locally from snapshot.startedAt).
-//   • Distance in the user's chosen unit.
-//   • Average pace.
-//   • HR chip (when sample present).
-//   • Pause/Resume + End controls — send WatchAction.pauseFreeRun /
-//     .resumeFreeRun / .endFreeRun back to iPhone.
-//
-// Mutually exclusive with WatchRaceView's race surface — the parent
-// (WatchRaceView's body) dispatches to whichever snapshot is active.
+// Reads `FreeRunStateSnapshot` pushed from the iPhone every time
+// the run state advances. Local TimelineView keeps the elapsed-
+// time HUD ticking smoothly between snapshot pushes.
 struct WatchFreeRunView: View {
 
     let snapshot: FreeRunStateSnapshot
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    // Drives the recording-dot pulse. Toggles on appear; the
+    // animation modifier handles the actual breathing scale.
+    @State private var dotPulsing = false
+
+    // Free-Run-specific accent — calmer blue tone reads as
+    // "running, not racing." Coral stays exclusive to race
+    // surfaces so the two modes don't visually overlap.
+    private let runAccent = Color(hex: 0x5BC0EB)
 
     var body: some View {
         ZStack {
@@ -29,22 +40,23 @@ struct WatchFreeRunView: View {
                 content(now: context.date)
             }
         }
+        .onAppear {
+            dotPulsing = true
+        }
     }
 
     // MARK: - Content
 
     @ViewBuilder
     private func content(now: Date) -> some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 4) {
             header
 
             Spacer(minLength: 2)
 
-            elapsedTime(now: now)
+            distanceHero
 
-            distanceLabel
-
-            paceLabel(now: now)
+            elapsedAndPaceRow(now: now)
 
             hrChip
 
@@ -57,66 +69,105 @@ struct WatchFreeRunView: View {
         .padding(.bottom, 4)
     }
 
+    // Header: live recording dot + "FREE RUN" + indoor/outdoor.
+    // The pulsing dot is the at-a-glance "we're recording" cue
+    // every running app from Strava onward uses.
     private var header: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "figure.run")
-                .font(WatchMetrics.font(size: 11, weight: .heavy))
+        HStack(spacing: 5) {
+            recordingDot
             Text("FREE RUN")
                 .font(WatchMetrics.font(size: 10, weight: .heavy))
-                .tracking(0.6)
+                .tracking(0.7)
+                .foregroundStyle(runAccent)
             Spacer()
-            // Indoor/outdoor mini-pill
             Image(systemName: locationIconName)
                 .font(WatchMetrics.font(size: 10, weight: .heavy))
                 .foregroundStyle(Color.textTertiary)
         }
-        .foregroundStyle(Color.accent)
     }
 
-    private func elapsedTime(now: Date) -> some View {
-        let elapsed = computeElapsed(now: now)
-        return Text(RaceStats.format(elapsed))
-            .font(WatchMetrics.font(size: 38, weight: .heavy, design: .rounded))
-            .monospacedDigit()
-            .foregroundStyle(Color.textPrimary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.6)
+    // Pulsing red dot — running-app convention for "actively
+    // recording." Frozen when paused. Reduce-motion-friendly:
+    // collapses to a static dim dot when the accessibility
+    // setting is on.
+    private var recordingDot: some View {
+        Circle()
+            .fill(Color.accent)
+            .frame(width: 8, height: 8)
+            .opacity(snapshot.phase == .paused ? 0.35 : (dotPulsing ? 1.0 : 0.4))
+            .animation(
+                reduceMotion || snapshot.phase == .paused
+                    ? .none
+                    : .easeInOut(duration: 1.0).repeatForever(autoreverses: true),
+                value: dotPulsing
+            )
     }
 
-    private var distanceLabel: some View {
+    // DISTANCE HERO — the headline metric for a run. Big,
+    // monospaced, with a trailing unit suffix at a smaller weight.
+    // Different from race mode where elapsed time is the hero;
+    // for a run the question is "how far," not "how long."
+    private var distanceHero: some View {
         let units = snapshot.distanceMetres / metresPerUnit
-        return HStack(alignment: .firstTextBaseline, spacing: 3) {
+        return HStack(alignment: .firstTextBaseline, spacing: 4) {
             Text(String(format: "%.2f", units))
-                .font(WatchMetrics.font(size: 18, weight: .heavy, design: .rounded))
+                .font(WatchMetrics.font(size: 44, weight: .heavy, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(Color.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
             Text(unitShortLabel)
-                .font(WatchMetrics.font(size: 11, weight: .semibold))
-                .foregroundStyle(Color.textSecondary)
+                .font(WatchMetrics.font(size: 14, weight: .heavy, design: .rounded))
+                .foregroundStyle(runAccent)
         }
     }
 
-    private func paceLabel(now: Date) -> some View {
+    // Side-by-side time + pace row. Both are secondary to
+    // distance but still glance-readable. Pace is the more
+    // actionable of the two for a runner ("am I going at the
+    // right effort?").
+    private func elapsedAndPaceRow(now: Date) -> some View {
         let elapsed = computeElapsed(now: now)
         let pace: TimeInterval? = {
             guard snapshot.distanceMetres > 0, elapsed > 0 else { return nil }
             return elapsed / (snapshot.distanceMetres / metresPerUnit)
         }()
-        return Text(pace.map { "\(formatPace($0)) /\(unitShortLabel)" } ?? "—")
-            .font(WatchMetrics.font(size: 12, weight: .heavy))
-            .monospacedDigit()
+
+        return HStack(spacing: 6) {
+            // Time
+            HStack(spacing: 3) {
+                Image(systemName: "clock")
+                    .font(WatchMetrics.font(size: 9, weight: .heavy))
+                Text(RaceStats.format(elapsed))
+                    .font(WatchMetrics.font(size: 13, weight: .heavy))
+                    .monospacedDigit()
+            }
             .foregroundStyle(Color.textSecondary)
+
+            Text("·")
+                .font(WatchMetrics.font(size: 11, weight: .heavy))
+                .foregroundStyle(Color.textTertiary)
+
+            // Pace
+            HStack(spacing: 3) {
+                Image(systemName: "stopwatch")
+                    .font(WatchMetrics.font(size: 9, weight: .heavy))
+                Text(pace.map { formatPace($0) } ?? "—")
+                    .font(WatchMetrics.font(size: 13, weight: .heavy))
+                    .monospacedDigit()
+                Text("/\(unitShortLabel)")
+                    .font(WatchMetrics.font(size: 9, weight: .semibold))
+                    .foregroundStyle(Color.textTertiary)
+            }
+            .foregroundStyle(Color.textSecondary)
+        }
     }
 
     @ViewBuilder
     private var hrChip: some View {
-        // HR source priority — same dual-source approach the
-        // race screen uses:
-        //   1. Local Watch builder (zero-latency, ~1Hz from
-        //      HKLiveWorkoutBuilder.didCollectDataOf)
-        //   2. Snapshot HR from iPhone (1-3s roundtrip via
-        //      WCSession application-context push)
-        // Local always wins when present.
+        // HR source priority — local Watch builder first
+        // (zero-latency, ~1Hz from HKLiveWorkoutBuilder), snapshot
+        // HR fallback (1-3s WCSession roundtrip).
         if let hr = WatchWorkoutManager.shared.currentHeartRateBPM
             ?? snapshot.currentHeartRateBPM {
             HStack(spacing: 4) {
@@ -126,8 +177,16 @@ struct WatchFreeRunView: View {
                     .font(WatchMetrics.font(size: 11, weight: .heavy))
                     .monospacedDigit()
                     .contentTransition(.numericText())
+                Text("bpm")
+                    .font(WatchMetrics.font(size: 8, weight: .semibold))
+                    .foregroundStyle(Color.textTertiary)
             }
             .foregroundStyle(Color.accent)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                Capsule().fill(Color.surface)
+            )
         }
     }
 
@@ -157,6 +216,10 @@ struct WatchFreeRunView: View {
         .buttonStyle(.plain)
     }
 
+    // End button uses the run-accent blue rather than coral —
+    // visually consistent with the rest of the free-run surface
+    // and reinforces "you're stopping a run, not finishing a
+    // race." Coral is reserved for race-mode primary actions.
     private var endButton: some View {
         Button {
             Haptics.warning()
@@ -169,7 +232,13 @@ struct WatchFreeRunView: View {
                 .frame(height: WatchMetrics.dim(34))
                 .background(
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.accent)
+                        .fill(
+                            LinearGradient(
+                                colors: [runAccent, runAccent.opacity(0.85)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
                 )
         }
         .buttonStyle(.plain)

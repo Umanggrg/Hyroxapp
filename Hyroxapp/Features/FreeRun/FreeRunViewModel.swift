@@ -103,12 +103,17 @@ final class FreeRunViewModel {
         activeRun = run
         saveContextSilently()
 
-        // Phase 2 hook — start the distance source. Indoor →
-        // CMPedometer; outdoor → CLLocationManager + CMPedometer
-        // + HKWorkoutSession on iPhone. Watch parity (Phase 3)
-        // dispatches a `.startFreeRun` control over WCSession
-        // and the Watch starts its own HKWorkoutSession with
-        // .running activity + the appropriate location type.
+        // Push the initial "we're now running" snapshot to the
+        // Watch IMMEDIATELY. Without this, the wrist stays on
+        // its idle Ready screen until the first distance update
+        // lands and triggers persistActiveRun (which pushes a
+        // snapshot as a side effect). Pedometer warmup can take
+        // 5-10 seconds, so the wrist felt broken — the user
+        // would tap Start, wait, see nothing change. Publishing
+        // here flips the wrist into the Free Run UI within ~1s
+        // of the iPhone start.
+        publishWatchSnapshot()
+
         startDistanceSource(for: locationType)
         startHeartRateObservation()
     }

@@ -103,11 +103,55 @@ struct FreeRunSummaryView: View {
                 .foregroundStyle(Color.accent)
             }
         }
-        .onAppear(perform: prepareShareImage)
-        // Re-bake when the HR rehydrate fills in per-split
-        // averages — the chart bars get more detail once
-        // the post-finish HK rehydrate completes.
-        .onChange(of: run.heartRateAvgBPM) { _, _ in
+        .onAppear {
+            prepareShareImage()
+            scheduleRehydrateRebake()
+        }
+        // Re-bake when ANY of the run's relevant data changes —
+        // the post-finish HK rehydrate updates run.heartRateAvgBPM,
+        // run.heartRateMaxBPM, run.activeCaloriesKcal, AND each
+        // split's per-split HR averages. Keying the change
+        // detector on a composite hash means the re-bake fires
+        // for any of those, not just the run-level aggregate.
+        .onChange(of: rehydrateChangeKey) { _, _ in
+            prepareShareImage()
+        }
+    }
+
+    // Composite signal that flips whenever any rehydratable
+    // run field updates. Each Hashable component is the kind
+    // of value the rehydrate writes to — when any combination
+    // changes, SwiftUI fires .onChange and we re-bake the
+    // share image with fresh data.
+    //
+    // Critically: includes the count of splits with HR data,
+    // so the rehydrate's per-split HR patches trigger a re-bake
+    // even though `run.heartRateAvgBPM` (the run-level aggregate)
+    // would have also changed. Belt-and-suspenders for cases
+    // where the run-level aggregate happens to land at the same
+    // value as a prior bake (rare but possible).
+    private var rehydrateChangeKey: Int {
+        var hasher = Hasher()
+        hasher.combine(run.heartRateAvgBPM)
+        hasher.combine(run.heartRateMaxBPM)
+        hasher.combine(run.activeCaloriesKcal)
+        hasher.combine(run.splits.count)
+        hasher.combine(run.splits.compactMap { $0.heartRateAvgBPM }.count)
+        return hasher.finalize()
+    }
+
+    // Schedule an explicit re-bake ~9 seconds after appearing —
+    // the FreeRunViewModel's post-finish rehydrate runs on an
+    // 8-second delay (waiting for the Watch's finishWorkout to
+    // flush samples to HK). The onChange path above SHOULD
+    // catch it via observed property updates, but SwiftData's
+    // change-tracking on nested Codable arrays (run.splits) is
+    // sometimes lossy across the actor hops. The scheduled
+    // re-bake guarantees the card reflects rehydrated data
+    // even if the observation chain dropped a beat.
+    private func scheduleRehydrateRebake() {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(9))
             prepareShareImage()
         }
     }
