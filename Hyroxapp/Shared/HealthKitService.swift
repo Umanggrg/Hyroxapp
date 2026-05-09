@@ -205,6 +205,97 @@ final class HealthKitService {
         return sqrt(variance)
     }
 
+    // MARK: - Time in HR zones (sample-level)
+
+    // Bucket time-in-zone over an arbitrary window by querying
+    // individual HR samples and weighting each sample's
+    // contribution by the gap to the next sample. Solves the
+    // "zero splits, zero zone data" problem the Free Run share
+    // card hits for runs that haven't crossed a split boundary
+    // yet — works regardless of how the upstream model chose to
+    // bucket time.
+    //
+    // Algorithm:
+    //   • Pull every HR sample in [start, end] in chronological
+    //     order.
+    //   • For each sample, the time it represents = gap to the
+    //     next sample, capped at 10 seconds (so a long gap from
+    //     a dropped Watch connection doesn't mis-attribute lots
+    //     of time to a single zone).
+    //   • Classify each sample's bpm into one of Z1-Z5 against
+    //     `maxBPM`, accumulate the weighted time into that
+    //     bucket.
+    //
+    // Returns an empty dictionary when:
+    //   • HealthKit unavailable / read auth denied (call returns
+    //     no samples).
+    //   • Window has no HR samples (no Watch on wrist, or HK
+    //     hasn't received them yet).
+    //   • Window is zero-length / inverted.
+    func timeInZones(
+        from start: Date,
+        to end: Date,
+        maxBPM: Int
+    ) async -> [HRZone: TimeInterval] {
+        guard isAvailable else { return [:] }
+        guard let hrType = HKObjectType.quantityType(forIdentifier: .heartRate) else {
+            return [:]
+        }
+        guard end > start else { return [:] }
+
+        let predicate = HKQuery.predicateForSamples(
+            withStart: start,
+            end: end,
+            options: .strictStartDate
+        )
+        let sort = NSSortDescriptor(
+            key: HKSampleSortIdentifierEndDate,
+            ascending: true
+        )
+        let bpmUnit = HKUnit.count().unitDivided(by: .minute())
+
+        // Pull every HR sample chronologically. Limit-none so
+        // we get the full series even on long runs.
+        let samples: [(Date, Double)] = await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(
+                sampleType: hrType,
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: [sort]
+            ) { _, samples, _ in
+                let pairs = (samples as? [HKQuantitySample] ?? []).map {
+                    ($0.endDate, $0.quantity.doubleValue(for: bpmUnit))
+                }
+                continuation.resume(returning: pairs)
+            }
+            store.execute(query)
+        }
+
+        guard !samples.isEmpty else { return [:] }
+
+        var totals: [HRZone: TimeInterval] = [:]
+        // Each sample contributes the time until the NEXT
+        // sample, capped at 10s to defend against long gaps
+        // (Watch dropped, briefly off-wrist, etc.). The final
+        // sample weighs the gap from itself to `end`, also
+        // capped — so a final-sample-then-stop case attributes
+        // a few seconds to its zone instead of zero.
+        let maxGap: TimeInterval = 10
+        for index in samples.indices {
+            let (sampleDate, bpm) = samples[index]
+            let nextDate: Date = (index + 1 < samples.count)
+                ? samples[index + 1].0
+                : end
+            let rawGap = nextDate.timeIntervalSince(sampleDate)
+            let weight = max(0, min(rawGap, maxGap))
+            guard weight > 0 else { continue }
+
+            let zone = HRZone.zone(for: bpm, maxBPM: maxBPM)
+            totals[zone, default: 0] += weight
+        }
+        return totals
+    }
+
     // MARK: - SpO2 (segment window)
 
     // Lowest blood-oxygen saturation reading within a window —

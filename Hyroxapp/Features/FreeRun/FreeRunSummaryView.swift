@@ -156,14 +156,45 @@ struct FreeRunSummaryView: View {
         }
     }
 
-    // Bake the share image off the main actor's hot path. ImageRenderer
-    // requires MainActor but the work is fast (~50ms for a 360×640
-    // canvas at 3×) so we run it directly on appear and on rehydrate.
+    // Bake the share image. Queries HK for sample-level
+    // time-in-zone bucketing FIRST, then renders the card with
+    // those numbers — the bar chart now reflects actual time
+    // spent in each zone regardless of how short the run was
+    // or whether any split boundaries were captured.
+    //
+    // Why this needs the HK query: per-split HR aggregation
+    // (the original implementation) only works when splits
+    // exist. A 0.5-mile easy run with mile-based splits has
+    // ZERO completed split boundaries, so the chart was always
+    // empty. Querying HK directly for the run's window gives
+    // us every HR sample in real time and lets us bucket each
+    // sample's contribution by the gap to the next sample.
+    //
+    // Falls through to render with `[:]` zoneSeconds when HK
+    // returns no data — the card stays renderable, the chart
+    // shows flat zero bars (still readable, just signals "no
+    // HR captured").
     private func prepareShareImage() {
         Task { @MainActor in
+            let buckets: [HRZone: TimeInterval]
+            if let endedAt = run.endedAt {
+                buckets = await HealthKitService.shared.timeInZones(
+                    from: run.startedAt,
+                    to: endedAt,
+                    maxBPM: maxHeartRate
+                )
+            } else {
+                // Run is still in progress (the user is viewing
+                // a stale summary while another run runs?). Use
+                // an empty bucket — defensive only; the summary
+                // is normally only rendered for finished runs.
+                buckets = [:]
+            }
+
             guard let image = FreeRunShareRenderer.render(
                 run: run,
-                maxHeartRate: maxHeartRate
+                maxHeartRate: maxHeartRate,
+                zoneSeconds: buckets
             ) else { return }
             shareImage = FreeRunShareImage(
                 image: image,

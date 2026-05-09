@@ -25,10 +25,15 @@ enum FreeRunShareRenderer {
     // image carries an alpha channel; transparency is preserved
     // through pngData() encoding because PNG natively supports
     // alpha.
-    static func render(run: FreeRun, maxHeartRate: Int) -> UIImage? {
+    static func render(
+        run: FreeRun,
+        maxHeartRate: Int,
+        zoneSeconds: [HRZone: TimeInterval] = [:]
+    ) -> UIImage? {
         let card = FreeRunShareCardView(
             run: run,
-            maxHeartRate: maxHeartRate
+            maxHeartRate: maxHeartRate,
+            zoneSeconds: zoneSeconds
         )
         .environment(\.colorScheme, .dark)
 

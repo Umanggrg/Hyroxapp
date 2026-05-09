@@ -32,6 +32,15 @@ struct FreeRunShareCardView: View {
     // value); same behavior as the in-app HR zones view.
     let maxHeartRate: Int
 
+    // Pre-computed time-in-zone bucketing. The summary view
+    // queries HK directly via `HealthKitService.timeInZones(...)`
+    // and passes the result here — that path works for any run
+    // length, including runs too short to have crossed a split
+    // boundary. Pass an empty dictionary for the "no HR data
+    // yet" state and the chart renders flat zero bars (which
+    // still hold the layout).
+    let zoneSeconds: [HRZone: TimeInterval]
+
     // Canvas dimensions match RaceShareCardView's story format —
     // 360×640pt, exports as 1080×1920 at 3× via ImageRenderer.
     static let canvasSize = CGSize(width: 360, height: 640)
@@ -75,7 +84,15 @@ struct FreeRunShareCardView: View {
     // with zero seconds gets a tiny stub (4pt) instead of disappearing
     // so the layout stays five-bars-wide regardless of the data.
     private var hrZonesChart: some View {
-        let durations = zoneDurations(for: run)
+        // Use the pre-computed `zoneSeconds` (sample-level
+        // bucketing from HK) when present; fall back to the
+        // legacy split-derived bucketing for backward compat
+        // with any caller that didn't pass it. The HK path
+        // works for any run length; the split path needs at
+        // least one captured split boundary.
+        let durations: [HRZone: TimeInterval] = zoneSeconds.isEmpty
+            ? zoneDurationsFromSplits(for: run)
+            : zoneSeconds
         let maxDuration = durations.values.max() ?? 1
 
         return VStack(spacing: 14) {
@@ -272,7 +289,12 @@ struct FreeRunShareCardView: View {
     // captures. When per-sample HR series lands for free runs
     // (future enhancement), this method swaps to the same
     // sample-based aggregation races use.
-    private func zoneDurations(for run: FreeRun) -> [HRZone: TimeInterval] {
+    // Legacy split-derived bucketing — kept as a fallback when
+    // the HK sample-level path returns empty (e.g. iPhone-only
+    // run with no Watch on wrist). Only useful for runs that
+    // crossed at least one split boundary; short runs with no
+    // splits return an empty dictionary here too.
+    private func zoneDurationsFromSplits(for run: FreeRun) -> [HRZone: TimeInterval] {
         var bucket: [HRZone: TimeInterval] = [:]
         for split in run.splits {
             guard let avg = split.heartRateAvgBPM else { continue }
