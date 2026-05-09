@@ -128,26 +128,31 @@ struct FreeRunShareCardView: View {
         let height = max(maxBarHeight * normalized, 8)
         let color = zone.color
 
+        // Solid + glowing rather than transparent + glowing.
+        // The original tune was for a dark-canvas preview but
+        // the export overlays onto IG story photos / videos
+        // where backgrounds are arbitrary (bright sky, busy
+        // street, etc.), so a 0.55-opacity gradient washes out.
+        // Now: nearly-opaque saturated fill with a slightly
+        // brighter top half, hard 2pt stroke, glow kept but
+        // toned down so the solid mass reads first.
         return RoundedRectangle(cornerRadius: 6)
             .fill(
                 LinearGradient(
                     colors: [
-                        color.opacity(0.55),
-                        color.opacity(0.20)
+                        color.opacity(0.95),
+                        color.opacity(0.78)
                     ],
                     startPoint: .top,
                     endPoint: .bottom
                 )
             )
-            // Outer neon halo — multiple layered shadows give
-            // the soft-glow effect the reference image shows.
-            // Three distinct radii so the glow falls off gradually.
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .stroke(color, lineWidth: 1.2)
+                    .stroke(color, lineWidth: 2)
             )
-            .shadow(color: color.opacity(0.55), radius: 12, y: 0)
-            .shadow(color: color.opacity(0.35), radius: 22, y: 0)
+            .shadow(color: color.opacity(0.55), radius: 10, y: 0)
+            .shadow(color: color.opacity(0.30), radius: 18, y: 0)
             .frame(width: 36, height: height)
     }
 
@@ -156,10 +161,17 @@ struct FreeRunShareCardView: View {
             Text("Z\(zone.rawValue)")
                 .font(.system(size: 14, weight: .heavy, design: .rounded))
                 .foregroundStyle(zone.color)
+                // Text shadow keeps the colored zone label
+                // readable against bright backgrounds (sky,
+                // light buildings) on IG stories. Subtle
+                // black drop, not a big halo, so the design
+                // doesn't fight the content.
+                .shadow(color: .black.opacity(0.55), radius: 3, y: 1)
             Text(formatZoneDuration(seconds))
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(Color.textSecondary)
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .foregroundStyle(Color.white)
                 .monospacedDigit()
+                .shadow(color: .black.opacity(0.65), radius: 3, y: 1)
         }
         .frame(width: 36)
     }
@@ -207,25 +219,35 @@ struct FreeRunShareCardView: View {
         value: String,
         unit: String?
     ) -> some View {
+        // Drop shadows on every text element keep the stats
+        // legible against any IG-story backdrop — bright sky,
+        // dark photo, busy crowd shot. Black at moderate
+        // opacity gives a "sticker pasted on" feel without
+        // looking heavy-handed. Same shadow shape Strava and
+        // Nike Run Club use for their overlay numbers.
         VStack(alignment: .center, spacing: 6) {
             Image(systemName: icon)
                 .font(.system(size: 18, weight: .heavy))
                 .foregroundStyle(Color.accent)
+                .shadow(color: .black.opacity(0.55), radius: 3, y: 1)
 
             Text(label)
                 .font(.system(size: 11, weight: .heavy, design: .rounded))
                 .tracking(0.6)
                 .foregroundStyle(Color.accent)
+                .shadow(color: .black.opacity(0.55), radius: 3, y: 1)
 
             HStack(alignment: .firstTextBaseline, spacing: 2) {
                 Text(value)
                     .font(.system(size: 32, weight: .heavy, design: .rounded))
                     .monospacedDigit()
-                    .foregroundStyle(Color.textPrimary)
+                    .foregroundStyle(Color.white)
+                    .shadow(color: .black.opacity(0.7), radius: 5, y: 2)
                 if let unit {
                     Text(unit)
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Color.textSecondary)
+                        .font(.system(size: 13, weight: .heavy, design: .rounded))
+                        .foregroundStyle(Color.white.opacity(0.85))
+                        .shadow(color: .black.opacity(0.6), radius: 3, y: 1)
                 }
             }
             .lineLimit(1)
@@ -243,17 +265,17 @@ struct FreeRunShareCardView: View {
     // separate logo asset baked into the bundle.
     private var logoFooter: some View {
         HStack(spacing: 8) {
-            // Brand glyph — coral chevron stack reads as the "T"
-            // mark in the reference image.
             Image(systemName: "play.fill")
                 .font(.system(size: 18, weight: .black))
                 .foregroundStyle(Color.accent)
                 .rotationEffect(.degrees(-90))
+                .shadow(color: .black.opacity(0.55), radius: 3, y: 1)
 
             Text("TRAKRR")
                 .font(.system(size: 22, weight: .heavy, design: .rounded))
                 .tracking(2.2)
-                .foregroundStyle(Color.textPrimary)
+                .foregroundStyle(Color.white)
+                .shadow(color: .black.opacity(0.6), radius: 4, y: 1)
         }
     }
 
