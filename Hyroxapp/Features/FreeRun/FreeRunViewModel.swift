@@ -452,45 +452,96 @@ final class FreeRunViewModel {
     // builder's samples haven't been written to the store yet.
     private func rehydrateFromHealthKit() {
         #if canImport(HealthKit)
-        Task { @MainActor [weak self] in
+        // Capture the run + context references BEFORE scheduling
+        // the delayed Task. The view's End-button flow calls
+        // `viewModel.end()` (which schedules this rehydrate) and
+        // then immediately calls `viewModel.finishSession()`
+        // (which sets `self.activeRun = nil` and `self.engine =
+        // nil` to free the live state). If the Task captures
+        // `self.activeRun` lazily, by the time the 8-second
+        // sleep ends, it's already nil and the guard returns
+        // silently — so the rehydrate never actually ran.
+        //
+        // Capturing the run reference here keeps it alive for
+        // the duration of the Task regardless of teardown.
+        // SwiftData @Model classes are reference types so writes
+        // to `capturedRun` persist correctly.
+        guard let capturedRun = activeRun else { return }
+        let capturedSplits = engine?.splits ?? []
+        let capturedContext = modelContext
+
+        Task { @MainActor in
             // 8s buffer matches the race rehydrate path —
             // `finishWorkout` typically completes + propagates
-            // samples to HKHealthStore within 5-8s.
+            // samples to HKHealthStore within 5-8s. Bumped one
+            // pass with a retry below if HK still has nothing
+            // (Watch flushes can be slower in real-world use).
             try? await Task.sleep(for: .seconds(8))
-            guard let self, let engine = self.engine else { return }
 
-            // Per-split window HR avg + max via HKStatisticsQuery.
-            for index in engine.splits.indices {
-                let split = engine.splits[index]
+            // Per-split window HR avg + max. Splits live on the
+            // captured run's `.splits` array (set by the
+            // engine's last `persistActiveRun` before teardown).
+            // We update the persisted FreeRun's splits in-place.
+            var newSplits = capturedRun.splits
+            for index in newSplits.indices {
+                let split = newSplits[index]
                 let stats = await HealthKitService.shared.heartRateStats(
                     from: split.startedAt,
                     to: split.endedAt
                 )
                 if stats.avg != nil || stats.max != nil {
-                    engine.setSplitHRStats(
-                        atIndex: index,
-                        avg: stats.avg,
-                        max: stats.max
+                    newSplits[index] = FreeRunSplit(
+                        index: split.index,
+                        startedAt: split.startedAt,
+                        endedAt: split.endedAt,
+                        cumulativeDistanceMetres: split.cumulativeDistanceMetres,
+                        segmentDistanceMetres: split.segmentDistanceMetres,
+                        heartRateAvgBPM: stats.avg,
+                        heartRateMaxBPM: stats.max
                     )
                 }
             }
+            capturedRun.splits = newSplits
 
             // Race-level HR aggregate covering the whole run.
-            // Used on the summary's hero block.
-            if let run = self.activeRun, let endedAt = run.endedAt {
-                let stats = await HealthKitService.shared.heartRateStats(
-                    from: run.startedAt,
+            // Used on the summary hero + share card.
+            if let endedAt = capturedRun.endedAt {
+                var stats = await HealthKitService.shared.heartRateStats(
+                    from: capturedRun.startedAt,
                     to: endedAt
                 )
-                run.heartRateAvgBPM = stats.avg
-                run.heartRateMaxBPM = stats.max
+
+                // Retry once after another 5 seconds if HK
+                // returned nothing — the Watch's finishWorkout
+                // can lag past our 8s buffer in real-world use,
+                // especially on a low-battery wrist or a slow
+                // BT connection. One extra pass at 13s total
+                // catches most of the late-flush cases.
+                if stats.avg == nil {
+                    try? await Task.sleep(for: .seconds(5))
+                    stats = await HealthKitService.shared.heartRateStats(
+                        from: capturedRun.startedAt,
+                        to: endedAt
+                    )
+                }
+
+                capturedRun.heartRateAvgBPM = stats.avg
+                capturedRun.heartRateMaxBPM = stats.max
                 let kcal = await HealthKitService.shared.activeCalories(
-                    from: run.startedAt,
+                    from: capturedRun.startedAt,
                     to: endedAt
                 )
-                run.activeCaloriesKcal = kcal
+                capturedRun.activeCaloriesKcal = kcal
             }
-            self.persistActiveRun()
+
+            // Save through the captured context — same path
+            // persistActiveRun would use, just with the local
+            // reference instead of `self.modelContext` which
+            // may have already cleared.
+            // Ignore — same write-on-best-effort contract as
+            // the live persist path.
+            _ = capturedContext
+            try? capturedContext?.save()
         }
         #endif
     }
