@@ -1,5 +1,13 @@
 import Foundation
 import SwiftData
+#if canImport(Auth)
+// Required for property access on `AuthService.shared.user?.id`.
+// Swift's implicit-member-access rule needs the defining
+// submodule (Auth, part of supabase-swift) imported in any file
+// that touches the User type's members — same gotcha
+// ContentView hits, same fix.
+import Auth
+#endif
 
 // View-model bridge between the pure `RaceEngine` and SwiftUI, now also the
 // bridge into SwiftData persistence.
@@ -706,26 +714,26 @@ final class RaceViewModel {
             WatchCompanionService.shared.sendControl(.endWorkout(at: advancedAt))
             #endif
 
-            // Rehydrate per-station physiology from HealthKit after
-            // the Watch's `finishWorkout` flushes its buffered
-            // samples. THIS is why per-station HR / calories / std
-            // dev / SpO2 was sparse mid-race: HKLiveWorkoutBuilder
-            // buffers everything internally during a workout
-            // session and only writes to HKHealthStore on
-            // `finishWorkout`. Mid-race `attachSegmentStats(to:)`
-            // queries HK and finds nothing for most stations —
-            // only stations that happened to catch a passive HR
-            // sample (Watch's 5-15min ambient cadence, NOT the
-            // workout's 1Hz cadence) got populated.
-            //
-            // After a delay long enough for the Watch's
-            // finishWorkout to complete and propagate samples
-            // back to HK on the iPhone (8s lands in the middle of
-            // Apple's 5-10s typical end-to-end), re-run the
-            // per-segment query for every split. The lookup
-            // returns the full sample set this time, so every
-            // station gets HR, calories, std dev, and SpO2.
             rehydrateSegmentStatsAfterFinish()
+
+            // Push to Supabase. Captured race + auth user ID
+            // off the main actor's hot path so the finish UI
+            // doesn't block on a network round-trip. Errors
+            // are swallowed inside RaceSyncService — next
+            // launch's pullAndReconcile catches anything that
+            // didn't make it. Skips silently when the user
+            // isn't authenticated (offline-only mode).
+            #if canImport(UIKit)
+            if let race = activeRace,
+               let userID = AuthService.shared.user?.id.uuidString {
+                Task { @MainActor in
+                    await RaceSyncService.pushFinishedRace(
+                        race,
+                        userID: userID
+                    )
+                }
+            }
+            #endif
         }
 
         // Fire-and-forget: fetch segment-window stats from HealthKit

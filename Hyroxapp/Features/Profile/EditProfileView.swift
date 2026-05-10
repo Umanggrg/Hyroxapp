@@ -230,6 +230,24 @@ struct EditProfileView: View {
         profile.avatarData = avatarData
         profile.updatedAt = Date()
         try? modelContext.save()
+
+        // Write-through to Supabase. Captured profile reference
+        // survives the dismiss + Task suspension (it's a SwiftData
+        // @Model class — reference type, persisted on the
+        // capturedRun pattern we used for race rehydrate). Errors
+        // are swallowed; the next bootstrap or save retries via
+        // the syncOnSignIn last-write-wins path. UI doesn't block
+        // on this — `dismiss` runs synchronously below.
+        let snapshot = profile
+        if let userID = profile.remoteUserID {
+            Task { @MainActor in
+                try? await ProfileSyncService.pushLocalProfile(
+                    snapshot,
+                    userID: userID
+                )
+            }
+        }
+
         dismiss()
     }
 

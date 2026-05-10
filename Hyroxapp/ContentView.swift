@@ -208,6 +208,42 @@ struct ContentView: View {
             profile.remoteUserID = remoteUser.id.uuidString
             try? modelContext.save()
         }
+
+        // Profile sync — last-write-wins reconciliation between
+        // local UserProfile and the remote `profiles` row in
+        // Supabase. First-ever launch: pushes local up. Returning
+        // launch: pulls remote down if it's fresher, pushes local
+        // up if it's not. Errors are swallowed inside the service
+        // (sync is best-effort; the user can still use the app
+        // offline). The Task hops off the bootstrap call's
+        // synchronous path so launch isn't blocked on a network
+        // round-trip.
+        //
+        // Race sync follows immediately after — same pattern,
+        // many rows. pullAndReconcile fetches every remote race
+        // for this user, merges by id with local races, pushes
+        // any local-only races up. The race sync runs after
+        // profile sync so the user identity is settled before
+        // we start fetching their data.
+        if let remoteUser = AuthService.shared.user {
+            let userID = remoteUser.id.uuidString
+            let context = modelContext
+            Task { @MainActor in
+                await ProfileSyncService.syncOnSignIn(
+                    userID: userID,
+                    localProfile: profile,
+                    modelContext: context
+                )
+                await RaceSyncService.pullAndReconcile(
+                    userID: userID,
+                    modelContext: context
+                )
+                await FreeRunSyncService.pullAndReconcile(
+                    userID: userID,
+                    modelContext: context
+                )
+            }
+        }
         #endif
 
         // Auto-onboard existing users (pre-wizard release) so they

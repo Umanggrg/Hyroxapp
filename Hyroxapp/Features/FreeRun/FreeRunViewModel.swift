@@ -10,6 +10,14 @@ import WatchConnectivity
 import ActivityKit
 #endif
 
+#if canImport(Auth)
+// Required for `AuthService.shared.user?.id` property access —
+// the User type is defined in supabase-swift's Auth submodule
+// and Swift's implicit-member-access rule needs the defining
+// module imported in any file that touches the type's members.
+import Auth
+#endif
+
 // View model for the Free Run flow. Owns the FreeRunEngine, the
 // active SwiftData FreeRun row, and the lifecycle bridge to whichever
 // distance source is feeding metres into the engine.
@@ -542,6 +550,23 @@ final class FreeRunViewModel {
             // the live persist path.
             _ = capturedContext
             try? capturedContext?.save()
+
+            // Push to Supabase. Lives at the END of the rehydrate
+            // task so the row we ship has the just-populated HR
+            // averages + calories baked in. Pushing earlier
+            // (before rehydrate) would upload a row with nil HR,
+            // which the next launch's pullAndReconcile would
+            // overwrite from local — wasted round-trip. Errors
+            // are swallowed inside the service; offline failures
+            // catch up via the next pull-and-reconcile.
+            #if canImport(WatchConnectivity)
+            if let userID = AuthService.shared.user?.id.uuidString {
+                await FreeRunSyncService.pushFinishedRun(
+                    capturedRun,
+                    userID: userID
+                )
+            }
+            #endif
         }
         #endif
     }
