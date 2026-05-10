@@ -28,15 +28,33 @@ struct HyroxappApp: App {
     // doesn't exist on macOS-native — the iOS target lists macOS in its
     // supported platforms, so without the guard this line would fail to
     // compile on a macOS build.
+    // Auth state lives at the App level so the gate flips between
+    // SignInView (signed out) and ContentView (signed in) without
+    // any view in the tree having to reach into the AuthService
+    // singleton themselves. AuthService is `@Observable` so this
+    // re-renders on `user` changes automatically.
+    #if canImport(UIKit)
+    @State private var authService = AuthService.shared
+    #endif
+
     init() {
         #if canImport(WatchConnectivity)
         WatchCompanionService.shared.activate()
+        #endif
+
+        #if canImport(UIKit)
+        // Restore any existing Supabase session on launch. Returning
+        // users skip the sign-in screen because Supabase persists
+        // session tokens to UserDefaults under the hood. If no
+        // session is cached, AuthService.user stays nil and the
+        // gate below renders SignInView.
+        AuthService.shared.restoreSession()
         #endif
     }
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            authGatedRoot
                 // Deep-link receiver. The Live Activity's
                 // `.widgetURL(URL(string: "trakr://race"))` lands
                 // here when a user taps the lock-screen card or
@@ -62,6 +80,31 @@ struct HyroxappApp: App {
         // Adding a new @Model type? Include it here or queries for it
         // will crash with "entity not found."
         .modelContainer(for: [Race.self, UserProfile.self, WorkoutTemplate.self, RaceEvent.self, Challenge.self, FreeRun.self])
+    }
+
+    // Auth gate — renders SignInView when no Supabase session is
+    // active, ContentView when one is. The `@ViewBuilder` lets us
+    // return different concrete view types from the two branches
+    // without an `AnyView` wrapper. SwiftUI handles the crossfade
+    // animation automatically when `authService.user` flips.
+    //
+    // The macOS path skips the gate (returns ContentView directly)
+    // because Sign in with Apple uses iOS-only frameworks
+    // (AuthenticationServices is iOS+macOS but our SignInView
+    // currently UIKit-gates). Future cleanup: extract a cross-
+    // platform sign-in surface; for now the app is iPhone-first
+    // and macOS doesn't need an auth gate.
+    @ViewBuilder
+    private var authGatedRoot: some View {
+        #if canImport(UIKit)
+        if authService.user != nil {
+            ContentView()
+        } else {
+            SignInView()
+        }
+        #else
+        ContentView()
+        #endif
     }
 }
 

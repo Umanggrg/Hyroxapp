@@ -18,3 +18,4 @@ Package.resolved
 
 # Secrets
 .env
+Hyroxapp/Shared/Secrets.swift

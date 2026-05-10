@@ -20,6 +20,19 @@ final class UserProfile {
     // Stable identity, for pairing with a future remote account row.
     var id: UUID
 
+    // Supabase user UUID, populated after the athlete signs in with
+    // Apple. Optional + nil-default keeps SwiftData migration
+    // additive-safe — existing rows from before auth shipped decode
+    // cleanly. The `auth.users` table in Supabase is keyed by this
+    // UUID; future cloud-sync code uses it to attribute a profile /
+    // race / run to the right account.
+    //
+    // Stored as String (not UUID) because Supabase's user IDs are
+    // returned as String from the auth response and there's no
+    // reason to round-trip them through a UUID parse. SwiftData
+    // handles String fields without ceremony.
+    var remoteUserID: String?
+
     var displayName: String
     var handle: String
     var location: String

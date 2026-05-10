@@ -1,5 +1,13 @@
 import SwiftUI
 import SwiftData
+#if canImport(Auth)
+// Required so we can access `user.id` directly from
+// `AuthService.shared.user`. The User type lives in the `Auth`
+// submodule of supabase-swift; Swift's implicit-member-access
+// rule needs the defining module explicitly imported even
+// though `import Supabase` brings the type into scope.
+import Auth
+#endif
 
 // App root. A `TabView` gives us Race (for running a race), History (for
 // reviewing past races), and Profile (identity + aggregate stats).
@@ -186,6 +194,21 @@ struct ContentView: View {
         }
 
         guard let profile = profiles.first else { return }
+
+        // Stamp the Supabase user ID onto the local profile so any
+        // future sync code knows which remote account this profile
+        // belongs to. Lives here in bootstrap (called on every
+        // ContentView appear) rather than buried in AuthService so
+        // the local-state mutation happens on the SwiftData context
+        // we already have. Idempotent — only writes when the value
+        // would actually change.
+        #if canImport(UIKit)
+        if let remoteUser = AuthService.shared.user,
+           profile.remoteUserID != remoteUser.id.uuidString {
+            profile.remoteUserID = remoteUser.id.uuidString
+            try? modelContext.save()
+        }
+        #endif
 
         // Auto-onboard existing users (pre-wizard release) so they
         // don't get a wizard prompt out of nowhere. Anyone who's

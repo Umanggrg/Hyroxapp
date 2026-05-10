@@ -10,6 +10,7 @@
 		5F2595FC2FA288E900516723 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5F2595FB2FA288E900516723 /* WidgetKit.framework */; };
 		5F2595FE2FA288E900516723 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5F2595FD2FA288E900516723 /* SwiftUI.framework */; };
 		5F25960F2FA288EA00516723 /* HyroxappWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5F2595F92FA288E900516723 /* HyroxappWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		5FF7B2E22FB04DAB000FF2B2 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 5FF7B2E12FB04DAB000FF2B2 /* Supabase */; };
 		E100000000000001AAAAAAA1 /* HyroxappWatch Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = D8BC4D412F9B13B2004472F3 /* HyroxappWatch Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -100,6 +101,8 @@
 			membershipExceptions = (
 				Features/Race/RaceEngine.swift,
 				Models/Division.swift,
+				Models/FreeRun.swift,
+				Models/FreeRunSplit.swift,
 				Models/HRZone.swift,
 				Models/Split.swift,
 				Models/Station.swift,
@@ -107,13 +110,11 @@
 				Shared/Haptics.swift,
 				Shared/RaceStats.swift,
 				Shared/Theme.swift,
+				Shared/WatchSync/FreeRunStateSnapshot.swift,
 				Shared/WatchSync/RaceStateSnapshot.swift,
 				Shared/WatchSync/WatchAction.swift,
 				Shared/WatchSync/WatchControl.swift,
 				Shared/WatchSync/WatchHeartRateUpdate.swift,
-				Shared/WatchSync/FreeRunStateSnapshot.swift,
-				Models/FreeRun.swift,
-				Models/FreeRunSplit.swift,
 			);
 			target = D8BC4D402F9B13B2004472F3 /* HyroxappWatch Watch App */;
 		};
@@ -168,6 +169,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5FF7B2E22FB04DAB000FF2B2 /* Supabase in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -275,6 +277,7 @@
 			);
 			name = Hyroxapp;
 			packageProductDependencies = (
+				5FF7B2E12FB04DAB000FF2B2 /* Supabase */,
 			);
 			productName = Hyroxapp;
 			productReference = 5FDF83C52F9A9B160099C6D1 /* Hyroxapp.app */;
@@ -386,6 +389,9 @@
 			);
 			mainGroup = 5FDF83BC2F9A9B160099C6D1;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				5FF7B15D2FB04BDB000FF2B2 /* XCRemoteSwiftPackageReference "supabase-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 5FDF83C62F9A9B160099C6D1 /* Products */;
 			projectDirPath = "";
@@ -506,7 +512,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 17;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_TEAM = 3VFDXQ78W5;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = HyroxappWidget/Info.plist;
@@ -538,7 +544,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 17;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_TEAM = 3VFDXQ78W5;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = HyroxappWidget/Info.plist;
@@ -686,7 +692,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Hyroxapp/Hyroxapp.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 17;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_TEAM = 3VFDXQ78W5;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_PREVIEWS = YES;
@@ -721,7 +727,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Hyroxapp/Hyroxapp.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 17;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_TEAM = 3VFDXQ78W5;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_PREVIEWS = YES;
@@ -754,7 +760,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 17;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_TEAM = 3VFDXQ78W5;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -780,7 +786,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 17;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_TEAM = 3VFDXQ78W5;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -805,7 +811,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 17;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_TEAM = 3VFDXQ78W5;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -830,7 +836,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 17;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_TEAM = 3VFDXQ78W5;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -858,7 +864,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "HyroxappWatch Watch App/HyroxappWatch.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 17;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_TEAM = 3VFDXQ78W5;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -894,7 +900,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "HyroxappWatch Watch App/HyroxappWatch.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 17;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_TEAM = 3VFDXQ78W5;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -982,6 +988,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		5FF7B15D2FB04BDB000FF2B2 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.5.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		5FF7B2E12FB04DAB000FF2B2 /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5FF7B15D2FB04BDB000FF2B2 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 5FDF83BD2F9A9B160099C6D1 /* Project object */;
 }
