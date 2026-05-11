@@ -34,6 +34,12 @@ struct RaceCardView: View {
     // settles before the spring fires.
     @State private var badgesRevealed = false
 
+    // Presents `PublicProfileSheet` when the partner's name is
+    // tapped on a duo race card. Only fires when
+    // `race.partnerUserID` is non-nil — the gesture is hidden
+    // otherwise.
+    @State private var isShowingPartnerSheet = false
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isPB: Bool {
@@ -82,8 +88,19 @@ struct RaceCardView: View {
             // route map. Without a photo, this branch is skipped and
             // the card renders compact, identical to before.
             #if canImport(UIKit)
+            // Display preference order:
+            //   1. Local bytes (photoData) — zero-latency, ALWAYS
+            //      preferred when present.
+            //   2. Remote URL (photoURL) — synced from another
+            //      device. Loads via AsyncImage; URLSession's
+            //      shared cache amortizes re-fetches.
+            //   3. No hero — card renders compact, identical to
+            //      pre-photo layouts.
             if let data = race.photoData, let image = UIImage(data: data) {
                 photoHero(image: image)
+            } else if let urlString = race.photoURL,
+                      let url = URL(string: urlString) {
+                photoHeroRemote(url: url)
             }
             #endif
 
@@ -156,6 +173,11 @@ struct RaceCardView: View {
         // card's rounded shape; without this the image overflows the
         // background's rounded rectangle on the top edge.
         .clipShape(RoundedRectangle(cornerRadius: Layout.cardCornerRadius))
+        .sheet(isPresented: $isShowingPartnerSheet) {
+            if let partnerUserID = race.partnerUserID {
+                PublicProfileSheet(userID: partnerUserID)
+            }
+        }
         .onAppear {
             // Spring-in the badge row one runloop tick after the
             // card lands. Cards in a long History feed reveal as
@@ -179,23 +201,55 @@ struct RaceCardView: View {
             .frame(maxWidth: .infinity)
             .frame(height: 180)
             .clipped()
-            // Subtle gradient fade at the bottom so a continuation
-            // into the card body doesn't read as a hard edge — this
-            // gradient is what makes the image feel like part of the
-            // card rather than a stamped-on rectangle.
-            .overlay(alignment: .bottom) {
-                LinearGradient(
-                    colors: [
-                        Color.surface.opacity(0),
-                        Color.surface.opacity(0.5)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 40)
+            .modifier(PhotoHeroFadeModifier())
+    }
+
+    // Remote-URL variant. Same chrome (180pt fixed height,
+    // bottom gradient fade) as the local-bytes path so the
+    // card looks identical regardless of which source rendered
+    // the hero. While loading or on failure, shows a muted
+    // placeholder card-surface band — visually less abrupt
+    // than collapsing the layout to no-photo height.
+    private func photoHeroRemote(url: URL) -> some View {
+        AsyncImage(url: url) { phase in
+            switch phase {
+            case .success(let image):
+                image
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            case .empty, .failure:
+                Color.surfaceElevated
+            @unknown default:
+                Color.surfaceElevated
             }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 180)
+        .clipped()
+        .modifier(PhotoHeroFadeModifier())
     }
     #endif
+
+    // Shared bottom-gradient fade applied to both the local-
+    // bytes and remote-URL hero variants. Subtle taper from
+    // transparent → 50% surface so the image feels like part
+    // of the card rather than a stamped-on rectangle.
+    private struct PhotoHeroFadeModifier: ViewModifier {
+        func body(content: Content) -> some View {
+            content
+                .overlay(alignment: .bottom) {
+                    LinearGradient(
+                        colors: [
+                            Color.surface.opacity(0),
+                            Color.surface.opacity(0.5)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 40)
+                }
+        }
+    }
 
     // MARK: - Sections
 
@@ -273,16 +327,47 @@ struct RaceCardView: View {
         if let leftAt = race.partnerDisconnectedAt,
            let elapsed = partnerLeftElapsed(at: leftAt) {
             HStack(spacing: 4) {
-                Text("with \(partner)")
-                    .foregroundStyle(Color.textSecondary)
+                partnerWithLabel(partner: partner)
                 Text("· left at \(RaceStats.format(elapsed))")
                     .foregroundStyle(Color.warning)
                     .monospacedDigit()
             }
             .font(.caption.weight(.semibold))
         } else {
-            Text("with \(partner)")
+            partnerWithLabel(partner: partner)
                 .font(.caption.weight(.semibold))
+        }
+    }
+
+    // "with Sarah" rendering — splits into "with " (plain) + the
+    // partner name. When `race.partnerUserID` is non-nil
+    // (cloud-tier duo), the name becomes a tap target that opens
+    // `PublicProfileSheet` for that user. Solo races and Tier 1
+    // Multipeer duo races (no Supabase auth concept) render as
+    // plain text — same visual style, no tap affordance.
+    //
+    // Why a Button-inside-NavigationLink works: SwiftUI prefers
+    // the innermost gesture handler. The card-wrapping
+    // NavigationLink picks up taps outside this Button; this
+    // Button captures taps on the name itself and presents the
+    // sheet.
+    @ViewBuilder
+    private func partnerWithLabel(partner: String) -> some View {
+        if let partnerUserID = race.partnerUserID, !partnerUserID.isEmpty {
+            HStack(spacing: 0) {
+                Text("with ")
+                    .foregroundStyle(Color.textSecondary)
+                Button {
+                    isShowingPartnerSheet = true
+                } label: {
+                    Text(partner)
+                        .foregroundStyle(Color.accent)
+                        .underline(true, color: Color.accent.opacity(0.4))
+                }
+                .buttonStyle(.plain)
+            }
+        } else {
+            Text("with \(partner)")
                 .foregroundStyle(Color.textSecondary)
         }
     }

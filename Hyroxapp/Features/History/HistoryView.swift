@@ -206,9 +206,13 @@ struct HistoryView: View {
 
     // True when any finished race has a photo attached. Drives
     // toolbar visibility — keeps the gallery icon hidden until
-    // the gallery would actually have something to show.
+    // the gallery would actually have something to show. A race
+    // counts as "has a photo" if EITHER the local bytes are
+    // present OR the cloud URL is set, since cross-device sync
+    // can leave a row with only the URL until the bytes are
+    // fetched lazily on render.
     private var hasAnyPhoto: Bool {
-        races.contains { $0.photoData != nil }
+        races.contains { $0.photoData != nil || $0.photoURL != nil }
     }
 
     // Render a history row for a unified `HistoryItem` —
@@ -477,7 +481,7 @@ enum HistoryFilter: Int, CaseIterable, Identifiable, Hashable {
             // length matches we compare element-by-element.
             return race.sequenceRaw != Station.raceSequence.map(\.rawValue)
         case .withPhoto:
-            return race.photoData != nil
+            return race.photoData != nil || race.photoURL != nil
         case .soloOnly:
             return race.mode == .solo
         case .duoOnly:

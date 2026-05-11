@@ -95,14 +95,28 @@ struct RaceView: View {
     // torn down when the user reverts to Solo or finishes a duo race.
     @State private var duoCoordinator: DuoCoordinator?
 
+    // Cloud-backed (Tier 2) counterpart to `duoCoordinator`. The
+    // user picks the transport mode after tapping the Duo chip:
+    // Local Duo → `duoCoordinator`, Cross-city Duo →
+    // `cloudDuoCoordinator`. Only one is ever non-nil at a time.
+    // Both conform to `DuoTransport`, so the in-race
+    // `duoController` works identically regardless of which is
+    // populated.
+    @State private var cloudDuoCoordinator: CloudDuoCoordinator?
+
     // In-race controller. Created when pairing reaches .ready and
     // the local user starts the race (host) OR receives the first
     // running snapshot (guest). Owns the bridge between the
-    // RaceViewModel + DuoCoordinator while a duo race is active.
+    // RaceViewModel + transport coordinator while a duo race is
+    // active.
     @State private var duoController: DuoRaceController?
 
-    // Drives the DuoPairingView sheet presented from RaceStartView.
+    // Drives the DuoPairingView sheet (Local Duo) presented from
+    // RaceStartView.
     @State private var isPairingPresented = false
+
+    // Drives the CloudDuoPairingView sheet (Cross-city Duo).
+    @State private var isCloudPairingPresented = false
 
     // Drives the "Start Run" overlay shown when the athlete enters
     // a run station with manual run start enabled. Lifetime: set
@@ -143,8 +157,10 @@ struct RaceView: View {
                         viewModel: viewModel,
                         selectedMode: $selectedMode,
                         duoCoordinator: $duoCoordinator,
+                        cloudDuoCoordinator: $cloudDuoCoordinator,
                         duoController: $duoController,
-                        isPairingPresented: $isPairingPresented
+                        isPairingPresented: $isPairingPresented,
+                        isCloudPairingPresented: $isCloudPairingPresented
                     )
                 } else if viewModel.isFinished {
                     // Same — RaceSummaryView controls its own bleed
@@ -354,6 +370,16 @@ struct RaceView: View {
             handleDuoSessionStateChange(newState)
         }
         #endif
+        // Cross-city Duo (Tier 2) parallel listener. Same partner-
+        // disconnect handling as the Multipeer path — stamps
+        // `partnerDisconnectedAt` on the active race when the cloud
+        // session reports a drop. Different state-type, identical
+        // intent, so it gets its own onChange and helper.
+        #if canImport(Supabase)
+        .onChange(of: cloudDuoCoordinator?.session.state) { _, newState in
+            handleCloudDuoSessionStateChange(newState)
+        }
+        #endif
         // Manual run start trigger. When the active station flips
         // to a run AND the athlete has the setting on, raise the
         // overlay so they can pre-position before timing begins.
@@ -430,10 +456,17 @@ struct RaceView: View {
                 if !newValue {
                     // User dismissed (deliberate or post-finish).
                     // Tear down the duo connection so a fresh
-                    // race can start cleanly.
+                    // race can start cleanly. Both transports get
+                    // canceled here — only one will actually have
+                    // an active session, but cancel is idempotent
+                    // on a nil ref so the symmetry is fine.
                     duoController = nil
                     duoCoordinator?.cancel()
                     duoCoordinator = nil
+                    #if canImport(Supabase)
+                    cloudDuoCoordinator?.cancel()
+                    cloudDuoCoordinator = nil
+                    #endif
                     selectedMode = .solo
                 }
             }
@@ -454,6 +487,24 @@ struct RaceView: View {
     // inferencer (inline `case` + multi-line `guard` in a
     // closure-passed-to-onChange tripped it earlier).
     private func handleDuoSessionStateChange(_ newState: DuoSession.State?) {
+        guard case .disconnected = newState else { return }
+        guard let race = viewModel.activeRace,
+              race.endedAt == nil,
+              race.partnerDisconnectedAt == nil
+        else { return }
+        race.partnerDisconnectedAt = Date()
+        try? race.modelContext?.save()
+    }
+    #endif
+
+    // Cross-city Duo (Tier 2) counterpart to
+    // `handleDuoSessionStateChange`. Same logic against
+    // CloudDuoSession.State's `.disconnected` case. Kept as a
+    // separate function because the two state enums are
+    // independent types — a generic helper would need protocol
+    // gymnastics that doesn't pay off for two cases.
+    #if canImport(Supabase)
+    private func handleCloudDuoSessionStateChange(_ newState: CloudDuoSession.State?) {
         guard case .disconnected = newState else { return }
         guard let race = viewModel.activeRace,
               race.endedAt == nil,

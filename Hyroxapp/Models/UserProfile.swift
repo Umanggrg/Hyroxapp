@@ -33,6 +33,25 @@ final class UserProfile {
     // handles String fields without ceremony.
     var remoteUserID: String?
 
+    // Public URL of the avatar in Supabase Storage. Set after a
+    // successful upload to the `avatars` bucket; nil for athletes
+    // who haven't uploaded one. Mutually compatible with the
+    // existing `avatarData` byte buffer:
+    //   • avatarData (bytes) — local-only display path. Picked
+    //     immediately on import; stays as a cache so the header
+    //     view doesn't need to wait on the network for a freshly
+    //     uploaded photo.
+    //   • avatarURL (URL) — cloud authoritative copy. Synced via
+    //     the profiles table, fetched via AsyncImage on devices
+    //     that don't have the local bytes (e.g. signed in on a
+    //     new phone).
+    //
+    // Display order: prefer avatarData when present (zero-latency
+    // render), fall back to AsyncImage(URL: avatarURL) when not.
+    // Pull-from-remote sets avatarURL but leaves avatarData nil;
+    // the next render fetches the bytes.
+    var avatarURL: String?
+
     var displayName: String
     var handle: String
     var location: String

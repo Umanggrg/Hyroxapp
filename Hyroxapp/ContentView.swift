@@ -53,14 +53,35 @@ struct ContentView: View {
     // binding programmatically — tap "View History" on a long-
     // press → app launches → tab flips to .history without the
     // user touching anything.
-    @State private var selectedTab: Tab = .race
+    //
+    // Default is `.feed` per CLAUDE.md §14 — the app opens to
+    // social, Strava-style, to drive daily opens even on rest
+    // days. Empty-state copy on FeedView covers the
+    // brand-new-user case (no follows yet → "Feed is quiet").
+    @State private var selectedTab: Tab = .feed
+
+    // Scene-phase observer drives the foreground social
+    // notification check. Each transition into `.active`
+    // (cold launch, returning from background) fires a
+    // single check against Supabase for new follows /
+    // reactions / comments since the last cursor — see
+    // `SocialNotificationService.checkAndFire`.
+    @Environment(\.scenePhase) private var scenePhase
 
     enum Tab: Hashable {
-        case race, history, profile
+        case feed, race, history, profile
     }
 
     var body: some View {
         TabView(selection: $selectedTab) {
+            // Tab 1 — Feed. The front door. Chronological list
+            // of recent races from athletes you follow.
+            FeedView()
+                .tag(Tab.feed)
+                .tabItem {
+                    Label("Feed", systemImage: "house")
+                }
+
             RaceView()
                 .tag(Tab.race)
                 .tabItem {
@@ -94,6 +115,17 @@ struct ContentView: View {
         .toolbarBackground(.visible, for: .tabBar)
         .toolbarBackground(Color.background, for: .tabBar)
         .onAppear(perform: bootstrap)
+        // Foreground social notifications. Fires on every
+        // active-phase transition — cold launch is covered
+        // because scenePhase starts at .background and
+        // transitions to .active during launch. Bails
+        // internally on missing auth / missing permission so
+        // the call site stays a one-liner.
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                Task { await SocialNotificationService.checkAndFire() }
+            }
+        }
         // Receive Quick Action taps from the AppDelegate. Routing
         // is centralized here so individual tabs don't have to
         // reach into UIApplication state — they just observe the

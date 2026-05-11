@@ -107,6 +107,15 @@ final class FreeRun {
     // the SQLite row to keep query performance up.
     @Attribute(.externalStorage) var photoData: Data?
 
+    // Public URL of the run photo in Supabase Storage's
+    // `free-run-photos` bucket. Mirrors `Race.photoURL` —
+    // local bytes win when present, URL is the cloud
+    // authoritative copy used as AsyncImage fallback on a
+    // fresh device. Migration-safe nil default. Photo picker
+    // UI for FreeRun ships in a follow-up; this field exists
+    // so the sync schema is round-trip ready.
+    var photoURL: String?
+
     // Privacy gate — mirrors `Race.isPrivate`. When the social
     // feed lights up in v2, private free runs stay out of any
     // cross-athlete surfaces. Local History + Profile aggregates

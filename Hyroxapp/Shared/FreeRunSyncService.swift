@@ -55,7 +55,12 @@ enum FreeRunSyncService {
             activeCaloriesKcal: run.activeCaloriesKcal,
             name: run.name,
             notes: run.notes,
-            isPrivate: run.isPrivate
+            isPrivate: run.isPrivate,
+            // Photo URL pre-wired for the FreeRun photo picker
+            // shipping in a follow-up. Stays nil for now since
+            // there's no UI yet — the schema is round-trip
+            // ready so adding the picker is purely a UI change.
+            photoUrl: run.photoURL
         )
 
         do {
@@ -131,6 +136,7 @@ enum FreeRunSyncService {
                     isPrivate: remote.isPrivate,
                     createdAt: remote.createdAt ?? Date()
                 )
+                inserted.photoURL = remote.photoUrl
                 modelContext.insert(inserted)
             }
         }
@@ -164,6 +170,7 @@ enum FreeRunSyncService {
         local.name = remote.name
         local.notes = remote.notes
         local.isPrivate = remote.isPrivate
+        local.photoURL = remote.photoUrl
     }
 }
 

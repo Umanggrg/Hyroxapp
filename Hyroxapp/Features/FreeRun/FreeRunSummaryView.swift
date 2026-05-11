@@ -50,6 +50,7 @@ struct FreeRunSummaryView: View {
             ScrollView {
                 VStack(spacing: 20) {
                     heroCard
+                    FreeRunPhotoSection(run: run)
                     if hasHRData {
                         hrCard
                     }

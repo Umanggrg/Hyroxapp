@@ -97,6 +97,25 @@ final class Race {
     // cleanly without a photo, same as `notes` / `name`.
     @Attribute(.externalStorage) var photoData: Data?
 
+    // Public URL of the race photo in Supabase Storage's
+    // `race-photos` bucket. Set after a successful upload from
+    // `RacePhotoSection`'s photo picker; nil for races without a
+    // photo or for pre-cloud-sync rows. Pairs with `photoData`
+    // the same way `UserProfile.avatarURL` pairs with
+    // `avatarData`:
+    //   • photoData (bytes) — local-only fast path. Always
+    //     preferred when present (zero-latency render, no
+    //     network).
+    //   • photoURL (URL)   — cloud authoritative copy. Used as
+    //     `AsyncImage(url:)` fallback on devices that synced
+    //     this race down but don't have the bytes locally
+    //     (e.g. signed in on a new phone).
+    //
+    // Migration-safe nil default — pre-existing rows decode
+    // cleanly. Sync layer (RaceSyncService) round-trips it via
+    // RemoteRace's `photo_url` column.
+    var photoURL: String?
+
     // Roxzone-mode persistence. When non-nil, the race is
     // currently in Roxzone state — the previous segment closed
     // at this timestamp and the athlete is in transition to the
@@ -129,6 +148,22 @@ final class Race {
     // decode cleanly with nil. Same SwiftData pattern as
     // `notes` / `name` / `pausedAt`.
     var partner: String?
+
+    // Supabase user UUID of the partner — populated from the
+    // duo_races row at race finish (host writes guest's UUID,
+    // guest writes host's). Distinct from `partner` (display
+    // name): two athletes can share a display name but each
+    // has a unique UUID, so this is what the UI uses to deep-
+    // link to the right public profile.
+    //
+    // Nil for solo races and for Tier 1 (Multipeer) duo races,
+    // which don't have a Supabase auth concept. RaceCardView
+    // only renders the partner name as tappable when this
+    // field is present.
+    //
+    // Migration-safe additive optional — Solo rows / pre-cloud
+    // duo rows decode as nil.
+    var partnerUserID: String?
 
     // Set when the duo session dropped during an active race —
     // the moment the link broke (Bluetooth out of range, partner

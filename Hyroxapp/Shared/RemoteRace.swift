@@ -17,9 +17,10 @@ import Foundation
 //     paused_at, partner, is_private, tags_raw, created_at,
 //     updated_at
 // What's deferred:
-//   • photoData → needs Supabase Storage (binary blobs are too
-//     large for inline JSONB; we'll add an avatar-style URL
-//     reference once Storage is wired)
+//   • photoData bytes → Supabase Storage holds the JPEG (the
+//     `race-photos` bucket); only the public URL travels in
+//     this row via `photo_url`. The bytes themselves stay
+//     local-only as a render cache.
 //   • currentSegmentStartedAt, roxzoneStartedAt,
 //     pendingRoxzoneSeconds → in-progress state, only
 //     finished races sync
@@ -37,8 +38,10 @@ struct RemoteRace: Codable, Sendable {
     let name: String
     let pausedAt: Date?
     let partner: String?
+    let partnerUserId: String?
     let isPrivate: Bool
     let tagsRaw: String
+    let photoUrl: String?
     let updatedAt: Date?
 
     private enum CodingKeys: String, CodingKey {
@@ -55,8 +58,10 @@ struct RemoteRace: Codable, Sendable {
         case name
         case pausedAt = "paused_at"
         case partner
+        case partnerUserId = "partner_user_id"
         case isPrivate = "is_private"
         case tagsRaw = "tags_raw"
+        case photoUrl = "photo_url"
         case updatedAt = "updated_at"
     }
 }
@@ -77,8 +82,10 @@ struct RemoteRaceWrite: Codable, Sendable {
     let name: String
     let pausedAt: Date?
     let partner: String?
+    let partnerUserId: String?
     let isPrivate: Bool
     let tagsRaw: String
+    let photoUrl: String?
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -93,7 +100,9 @@ struct RemoteRaceWrite: Codable, Sendable {
         case name
         case pausedAt = "paused_at"
         case partner
+        case partnerUserId = "partner_user_id"
         case isPrivate = "is_private"
         case tagsRaw = "tags_raw"
+        case photoUrl = "photo_url"
     }
 }

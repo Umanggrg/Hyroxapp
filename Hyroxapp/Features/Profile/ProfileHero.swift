@@ -36,6 +36,23 @@ struct ProfileHero: View {
     let avgDisplay: String
     let streakDays: Int
 
+    // Followers + Following counts. Optional — nil means "still
+    // loading from FollowService" and the line is hidden. Once
+    // either resolves to a real Int, the line slides in. Cached
+    // in @State at the caller (ProfileView) so leaving + returning
+    // to the tab shows the last-known values immediately.
+    var followerCount: Int? = nil
+    var followingCount: Int? = nil
+
+    // Optional tap callbacks. When non-nil, the corresponding
+    // count becomes a tappable button (typically pushing a
+    // FollowersListView). When nil, the count renders as plain
+    // text — same visual, no affordance. Lets callers decide
+    // whether to expose navigation; previews + share-card
+    // contexts don't.
+    var onTapFollowers: (() -> Void)? = nil
+    var onTapFollowing: (() -> Void)? = nil
+
     // Active mode — drives shadow intensity on the avatar so the
     // drop shadow stays subtle on warm off-white but reads with
     // depth on near-black.
@@ -55,6 +72,8 @@ struct ProfileHero: View {
                 nameAndHandle
 
                 divisionPill
+
+                followStatsLine
 
                 statsRow
                     .padding(.top, 6)
@@ -177,6 +196,75 @@ struct ProfileHero: View {
                         .stroke(Color.accent.opacity(0.35), lineWidth: 1)
                 )
         )
+    }
+
+    // Followers / Following inline line — Strava convention:
+    // small text below the identity that anchors the social
+    // graph without competing with performance stats. Hidden
+    // until at least one count resolves so we don't flash "0
+    // followers · 0 following" during the network round-trip on
+    // every Profile entry. Single-digit pluralization handled
+    // inline; localized plurals are a future polish pass.
+    @ViewBuilder
+    private var followStatsLine: some View {
+        if followerCount != nil || followingCount != nil {
+            HStack(spacing: 6) {
+                if let followers = followerCount {
+                    followCountButton(
+                        value: followers,
+                        label: followers == 1 ? "follower" : "followers",
+                        action: onTapFollowers
+                    )
+                }
+
+                if followerCount != nil && followingCount != nil {
+                    Text("·")
+                        .font(.caption)
+                        .foregroundStyle(Color.textTertiary)
+                }
+
+                if let following = followingCount {
+                    followCountButton(
+                        value: following,
+                        label: "following",
+                        action: onTapFollowing
+                    )
+                }
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    // Renders one "12 followers" segment. When the action
+    // closure is non-nil, wraps in a Button so the segment
+    // becomes tappable; otherwise renders the inline text
+    // pair. Same visual shape either way — Strava-style
+    // inline count + noun.
+    @ViewBuilder
+    private func followCountButton(
+        value: Int,
+        label: String,
+        action: (() -> Void)?
+    ) -> some View {
+        let content = HStack(spacing: 4) {
+            Text("\(value)")
+                .font(.caption.weight(.heavy))
+                .foregroundStyle(Color.textPrimary)
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(Color.textSecondary)
+        }
+
+        if let action {
+            Button(action: action) { content }
+                .buttonStyle(.plain)
+                // Hit area extends slightly past the visible
+                // text so the small caption-sized target is
+                // less finicky to tap on a sweaty hand.
+                .contentShape(Rectangle())
+        } else {
+            content
+        }
     }
 
     // 4-tile stat row with REAL hierarchy: PB is the hero (32pt

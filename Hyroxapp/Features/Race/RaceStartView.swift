@@ -1,5 +1,8 @@
 import SwiftUI
 import SwiftData
+#if canImport(Auth)
+import Auth
+#endif
 
 // Pre-race screen: HYROX header, Solo/Duo toggle (Duo greyed out with
 // "Coming soon" per CLAUDE.md §4.5 until Supabase Realtime sync lands in
@@ -19,8 +22,10 @@ struct RaceStartView: View {
     // the user taps Start and RaceStartView is no longer rendered.
     @Binding var selectedMode: RaceMode
     @Binding var duoCoordinator: DuoCoordinator?
+    @Binding var cloudDuoCoordinator: CloudDuoCoordinator?
     @Binding var duoController: DuoRaceController?
     @Binding var isPairingPresented: Bool
+    @Binding var isCloudPairingPresented: Bool
 
     // Read the user's countdown setting so the start button knows
     // whether to fire the 3-2-1 ritual or kick off the engine
@@ -277,6 +282,27 @@ struct RaceStartView: View {
                         // Only the host's controller mutates a
                         // local engine; the guest renders read-only
                         // from received snapshots.
+                        viewModel: role == .host ? viewModel : nil
+                    )
+                }
+            }
+            #endif
+        }
+        // Cross-city Duo pairing sheet. Same `onReady` callback
+        // shape as the Multipeer path — once the partner is
+        // paired and the user taps Start, we promote to .duo
+        // mode and spin up the in-race controller. The controller
+        // accepts `any DuoTransport`, so the same DuoRaceController
+        // class drives both cloud and Multipeer sessions.
+        .sheet(isPresented: $isCloudPairingPresented) {
+            #if canImport(Supabase)
+            if let coordinator = cloudDuoCoordinator {
+                CloudDuoPairingView(coordinator: coordinator) {
+                    selectedMode = .duo
+                    let role = coordinator.role ?? .host
+                    duoController = DuoRaceController(
+                        role: role,
+                        coordinator: coordinator,
                         viewModel: role == .host ? viewModel : nil
                     )
                 }
@@ -657,6 +683,10 @@ struct RaceStartView: View {
             if selectedMode == .duo {
                 duoCoordinator?.cancel()
                 duoCoordinator = nil
+                #if canImport(Supabase)
+                cloudDuoCoordinator?.cancel()
+                cloudDuoCoordinator = nil
+                #endif
                 // Tear down the controller too so it doesn't
                 // try to broadcast / receive after we've left
                 // duo mode. The fullScreenCover bound to its
@@ -666,33 +696,87 @@ struct RaceStartView: View {
             selectedMode = .solo
 
         case .duo:
-            #if canImport(MultipeerConnectivity)
-            if duoCoordinator == nil {
-                let profile = profiles.first
-                let displayName = profile?.displayName.trimmingCharacters(in: .whitespaces) ?? "Athlete"
-                let division = profile?.resolvedDivision ?? .mensOpen
-                let maxHR = profile?.maxHeartRate ?? 190
-                duoCoordinator = DuoCoordinator(
-                    localDisplayName: displayName.isEmpty ? "Athlete" : displayName,
-                    localDivision: division,
-                    localMaxHeartRate: maxHR
-                )
-            }
-            isPairingPresented = true
-            #endif
+            // Cloud-only Duo. The Multipeer-based Tier 1 path
+            // (`presentLocalDuoPairing` + `DuoPairingView`) stays
+            // in the codebase but is unreachable from UI — never
+            // worked reliably on hardware, so the product flow is
+            // cloud-first. If a future "co-located, no internet"
+            // use case shows up, the Tier 1 code is ready to be
+            // re-surfaced behind a settings flag without rebuild.
+            presentCloudDuoPairing()
         }
     }
 
+    // Local Duo path — same as the previous behavior. Creates a
+    // Multipeer DuoCoordinator if one doesn't exist, then opens
+    // the pairing sheet.
+    private func presentLocalDuoPairing() {
+        #if canImport(MultipeerConnectivity)
+        if duoCoordinator == nil {
+            let profile = profiles.first
+            let displayName = profile?.displayName.trimmingCharacters(in: .whitespaces) ?? "Athlete"
+            let division = profile?.resolvedDivision ?? .mensOpen
+            let maxHR = profile?.maxHeartRate ?? 190
+            duoCoordinator = DuoCoordinator(
+                localDisplayName: displayName.isEmpty ? "Athlete" : displayName,
+                localDivision: division,
+                localMaxHeartRate: maxHR
+            )
+        }
+        isPairingPresented = true
+        #endif
+    }
+
+    // Cross-city Duo path — creates a CloudDuoCoordinator using
+    // the local user's identity + Supabase auth UUID, then opens
+    // the cloud pairing sheet. Bails silently if the user isn't
+    // signed in, since cloud duo requires an authenticated
+    // session for the duo_races RLS to allow inserts.
+    private func presentCloudDuoPairing() {
+        #if canImport(Supabase) && canImport(Auth)
+        guard let userID = AuthService.shared.user?.id.uuidString else {
+            // Without an auth session we can't create the
+            // duo_races row (host_user_id RLS check would fail).
+            // Surface via the existing Solo flow as a no-op
+            // graceful fallback. A future polish pass adds an
+            // explicit "Sign in to use Cross-city Duo" banner.
+            return
+        }
+
+        if cloudDuoCoordinator == nil {
+            let profile = profiles.first
+            let displayName = profile?.displayName.trimmingCharacters(in: .whitespaces) ?? "Athlete"
+            let division = profile?.resolvedDivision ?? .mensOpen
+            let maxHR = profile?.maxHeartRate ?? 190
+            cloudDuoCoordinator = CloudDuoCoordinator(
+                localDisplayName: displayName.isEmpty ? "Athlete" : displayName,
+                localDivision: division,
+                localMaxHeartRate: maxHR,
+                localUserID: userID
+            )
+        }
+        isCloudPairingPresented = true
+        #endif
+    }
+
     // Convenience for the chip subtitle. Returns the partner's
-    // display name once the coordinator is in .ready state.
+    // display name once either coordinator is in .ready state.
+    // Prefers Multipeer's name when both are paired (shouldn't
+    // happen — only one transport is active at a time — but the
+    // ordering keeps behavior deterministic).
     private var pairedPartnerName: String? {
         #if canImport(MultipeerConnectivity)
-        guard let coordinator = duoCoordinator,
-              case .ready(let name, _) = coordinator.state
-        else { return nil }
-        return name
-        #else
-        return nil
+        if let coordinator = duoCoordinator,
+           case .ready(let name, _) = coordinator.state {
+            return name
+        }
         #endif
+        #if canImport(Supabase)
+        if let coordinator = cloudDuoCoordinator,
+           case .ready(let name, _) = coordinator.state {
+            return name
+        }
+        #endif
+        return nil
     }
 }

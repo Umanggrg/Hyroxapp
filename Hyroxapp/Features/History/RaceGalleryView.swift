@@ -38,9 +38,12 @@ struct RaceGalleryView: View {
 
     // Filter once at view derivation. Computed property re-runs on
     // store changes so newly-photographed races show up live
-    // without a manual reload.
+    // without a manual reload. "Has a photo" \= local bytes OR
+    // synced cloud URL — keeps remote-only races from a fresh
+    // device install in the gallery instead of hiding them until
+    // the bytes get pulled.
     private var photoRaces: [Race] {
-        races.filter { $0.photoData != nil }
+        races.filter { $0.photoData != nil || $0.photoURL != nil }
     }
 
     var body: some View {
@@ -129,6 +132,16 @@ struct RaceGalleryView: View {
     // date stays the dominant secondary cue.
     private func tile(for race: Race) -> some View {
         let image = race.photoData.flatMap(UIImage.init(data:))
+        // Remote URL fallback — used only when local bytes
+        // aren't available. Most tiles will have bytes (this
+        // device is where the photo was picked); the AsyncImage
+        // path mainly fires on a fresh device install where the
+        // race row synced down before the bytes did.
+        let remoteURL: URL? = {
+            guard image == nil,
+                  let s = race.photoURL else { return nil }
+            return URL(string: s)
+        }()
 
         return ZStack(alignment: .bottomLeading) {
             // GeometryReader gives us a perfect square at whatever
@@ -140,6 +153,17 @@ struct RaceGalleryView: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
+            } else if let remoteURL {
+                AsyncImage(url: remoteURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    case .empty, .failure:
+                        Color.surfaceElevated
+                    @unknown default:
+                        Color.surfaceElevated
+                    }
+                }
             }
 
             // Bottom gradient — black fade from 0% at the top of

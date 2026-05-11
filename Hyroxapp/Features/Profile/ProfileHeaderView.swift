@@ -26,6 +26,21 @@ struct ProfileHeaderView: View {
         .frame(maxWidth: .infinity)
     }
 
+    // Display order:
+    //   1. Local bytes (`avatarData`) — zero-latency, ALWAYS preferred
+    //      when present. Set by EditProfileView's photo picker; persists
+    //      across launches in SwiftData.
+    //   2. Remote URL (`avatarURL`) — synced from Supabase profiles
+    //      row. Used when this device has the URL but not the bytes
+    //      (e.g. signed in on a new phone after avatar was uploaded
+    //      from another device).
+    //   3. SF Symbol fallback — neither bytes nor URL available.
+    //
+    // AsyncImage handles the URL fetch + cache via URLSession's
+    // shared cache. We don't write the fetched bytes back to
+    // `avatarData` on purpose — that'd create a cross-device
+    // sync loop (each pull would mark the local row dirty).
+    // The cache layer keeps re-fetches cheap.
     private var avatar: some View {
         Group {
             #if canImport(UIKit)
@@ -33,6 +48,20 @@ struct ProfileHeaderView: View {
                 Image(uiImage: uiImage)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
+            } else if let urlString = profile.avatarURL,
+                      let url = URL(string: urlString) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    case .empty, .failure:
+                        defaultAvatarSymbol
+                    @unknown default:
+                        defaultAvatarSymbol
+                    }
+                }
             } else {
                 defaultAvatarSymbol
             }

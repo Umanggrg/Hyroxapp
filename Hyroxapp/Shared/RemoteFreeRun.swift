@@ -13,8 +13,12 @@ import Foundation
 //   • All identity + lifecycle fields, distance, splits, HR
 //     aggregates, calories, name, notes, privacy.
 // What's deferred:
-//   • photoData — needs Supabase Storage. Same plan as races
-//     (binary blob → upload, store URL on the row).
+//   • photoData bytes → Supabase Storage holds the JPEG (the
+//     `free-run-photos` bucket); only the public URL travels in
+//     this row via `photo_url`. The bytes themselves stay
+//     local-only as a render cache. The picker UI for FreeRun
+//     ships in a follow-up; field is wired now so the schema
+//     is ready.
 struct RemoteFreeRun: Codable, Sendable {
     let id: String
     let userId: String
@@ -31,6 +35,7 @@ struct RemoteFreeRun: Codable, Sendable {
     let name: String
     let notes: String
     let isPrivate: Bool
+    let photoUrl: String?
     let createdAt: Date?
     let updatedAt: Date?
 
@@ -50,6 +55,7 @@ struct RemoteFreeRun: Codable, Sendable {
         case name
         case notes
         case isPrivate = "is_private"
+        case photoUrl = "photo_url"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -74,6 +80,7 @@ struct RemoteFreeRunWrite: Codable, Sendable {
     let name: String
     let notes: String
     let isPrivate: Bool
+    let photoUrl: String?
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -91,5 +98,6 @@ struct RemoteFreeRunWrite: Codable, Sendable {
         case name
         case notes
         case isPrivate = "is_private"
+        case photoUrl = "photo_url"
     }
 }

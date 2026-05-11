@@ -24,12 +24,13 @@ import SwiftUI
 // Duo flow, torn down when they back out or finish the race.
 @MainActor
 @Observable
-final class DuoCoordinator {
+final class DuoCoordinator: DuoTransport {
 
-    enum Role: String, Sendable {
-        case host
-        case guest
-    }
+    // Backward-compatible alias for the top-level `DuoRole`.
+    // Existing call sites that say `DuoCoordinator.Role`
+    // continue to compile; new code in transport-agnostic
+    // surfaces uses `DuoRole` directly.
+    typealias Role = DuoRole
 
     enum CoordState: Equatable {
         case idle
@@ -69,6 +70,38 @@ final class DuoCoordinator {
     // handled inside this coordinator directly; only the race
     // messages bubble up.
     var onRaceMessage: (@MainActor @Sendable (DuoMessage) -> Void)?
+
+    // MARK: - DuoTransport conformance shims
+
+    // Bridging property — exposes the Multipeer session's
+    // partner name through the transport-agnostic surface so
+    // `DuoRaceController` doesn't need to know there's an
+    // `MCSession` underneath.
+    var partnerName: String? { session.partnerName }
+
+    // Multipeer has no Supabase auth concept — peers are
+    // identified by MCPeerID display names only. The
+    // protocol-required UUID stays nil here so the partner-
+    // tap UX on Race cards renders as plain text instead of
+    // a navigation link for Multipeer-saved races.
+    var partnerUserID: String? { nil }
+
+    // True once the hello handshake has completed. Mirrors the
+    // `.ready` case of CoordState into a simple bool the
+    // controller can read without pattern-matching on transport
+    // state.
+    var isReady: Bool {
+        if case .ready = state { return true }
+        return false
+    }
+
+    // Forwarding send. `DuoRaceController.startHeartRatePollingIfGuest`
+    // wants to send `localHeartRate` directly without going
+    // through one of the request* shortcuts; this exposes the
+    // raw `DuoMessage` channel via the protocol.
+    func send(_ message: DuoMessage) {
+        session.send(message)
+    }
 
     init(localDisplayName: String, localDivision: Division, localMaxHeartRate: Int = 190) {
         self.localDisplayName = localDisplayName

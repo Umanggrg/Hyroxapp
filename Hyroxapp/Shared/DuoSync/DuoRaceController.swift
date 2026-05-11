@@ -35,8 +35,16 @@ import SwiftData
 @Observable
 final class DuoRaceController {
 
-    let role: DuoCoordinator.Role
-    private let coordinator: DuoCoordinator
+    let role: DuoRole
+
+    // Transport-agnostic — accepts either `DuoCoordinator`
+    // (Multipeer / Tier 1) or `CloudDuoCoordinator` (Supabase
+    // Realtime / Tier 2). Both conform to `DuoTransport`,
+    // which exposes the surface this class needs (request*
+    // methods, broadcastState, partnerName, etc.). The runtime
+    // behavior is identical regardless of which backend
+    // forwards messages.
+    private let coordinator: any DuoTransport
 
     // Host-only: the local view model whose engine state we own
     // and broadcast. Held weakly so we don't extend its lifetime
@@ -76,19 +84,19 @@ final class DuoRaceController {
     private static let heartRatePollInterval: TimeInterval = 5
 
     // Surfaced to the UI so banners can render "Connected to X" and
-    // gracefully degrade on disconnect.
-    var partnerName: String? { coordinator.session.partnerName }
+    // gracefully degrade on disconnect. Reads through the transport
+    // protocol so both Multipeer + Cloud paths behave identically.
+    var partnerName: String? { coordinator.partnerName }
 
     var isConnected: Bool {
-        if case .ready = coordinator.state { return true }
-        return false
+        coordinator.isReady
     }
 
     // MARK: - Init
 
     init(
-        role: DuoCoordinator.Role,
-        coordinator: DuoCoordinator,
+        role: DuoRole,
+        coordinator: any DuoTransport,
         viewModel: RaceViewModel? = nil
     ) {
         self.role = role
@@ -212,10 +220,18 @@ final class DuoRaceController {
         // here through the model's own context to persist the
         // partner field.
         if snapshot.phase == .finished,
-           let partner = coordinator.session.partnerName,
+           let partner = coordinator.partnerName,
            let race = vm.activeRace,
            race.partner == nil {
             race.partner = partner
+            // Stamp the partner's Supabase UUID alongside the
+            // display name. Multipeer transport returns nil
+            // here (no auth concept); Cloud returns the
+            // partner's user_id from the duo_races row.
+            // Either way, this gates the tappable-name UX on
+            // RaceCardView — name only when nil, deep-link to
+            // public profile when present.
+            race.partnerUserID = coordinator.partnerUserID
             try? race.modelContext?.save()
         }
     }
@@ -251,7 +267,7 @@ final class DuoRaceController {
             while !Task.isCancelled {
                 if let bpm = await HealthKitService.shared.currentHeartRate() {
                     self.localHeartRateBPM = bpm
-                    self.coordinator.session.send(.localHeartRate(bpm: bpm))
+                    self.coordinator.send(.localHeartRate(bpm: bpm))
                 }
                 try? await Task.sleep(for: .seconds(Self.heartRatePollInterval))
             }
@@ -267,7 +283,7 @@ final class DuoRaceController {
         heartRatePollTask?.cancel()
         heartRatePollTask = nil
         if role == .guest, localHeartRateBPM != nil {
-            coordinator.session.send(.localHeartRate(bpm: nil))
+            coordinator.send(.localHeartRate(bpm: nil))
         }
         localHeartRateBPM = nil
     }

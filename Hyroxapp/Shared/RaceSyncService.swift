@@ -64,8 +64,14 @@ enum RaceSyncService {
             name: race.name,
             pausedAt: race.pausedAt,
             partner: race.partner,
+            partnerUserId: race.partnerUserID,
             isPrivate: race.isPrivate,
-            tagsRaw: race.tagsRaw
+            tagsRaw: race.tagsRaw,
+            // Photo URL points at `race-photos/{userID}/{raceID}.jpg`,
+            // set by `PhotoStorageService.uploadRacePhoto` after the
+            // user picks a photo in `RacePhotoSection`. Local
+            // `photoData` bytes stay on-device as a render cache.
+            photoUrl: race.photoURL
         )
 
         do {
@@ -159,6 +165,8 @@ enum RaceSyncService {
                 )
                 inserted.isPrivate = remote.isPrivate
                 inserted.tagsRaw = remote.tagsRaw
+                inserted.photoURL = remote.photoUrl
+                inserted.partnerUserID = remote.partnerUserId
                 modelContext.insert(inserted)
             }
         }
@@ -193,8 +201,10 @@ enum RaceSyncService {
         local.name = remote.name
         local.pausedAt = remote.pausedAt
         local.partner = remote.partner
+        local.partnerUserID = remote.partnerUserId
         local.isPrivate = remote.isPrivate
         local.tagsRaw = remote.tagsRaw
+        local.photoURL = remote.photoUrl
     }
 }
 

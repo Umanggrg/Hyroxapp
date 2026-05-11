@@ -108,11 +108,13 @@ enum ProfileSyncService {
             bio: profile.bio,
             division: profile.resolvedDivision.rawValue,
             maxHeartRate: profile.maxHeartRate,
-            // Avatar sync deferred — we'd upload the JPEG bytes
-            // to Supabase Storage and stash the URL. Day 3+
-            // work; for now the URL stays nil and the rest of
-            // the profile syncs cleanly without it.
-            avatarUrl: nil
+            // Avatar URL points at the public object in the
+            // `avatars` Supabase Storage bucket, set by
+            // `PhotoStorageService.uploadAvatar` after a
+            // successful upload. Local-only `avatarData` bytes
+            // stay on-device as a zero-latency cache; the URL
+            // is what travels across devices.
+            avatarUrl: profile.avatarURL
         )
 
         try await client
@@ -164,10 +166,14 @@ enum ProfileSyncService {
             local.resolvedDivision = division
         }
         local.maxHeartRate = remote.maxHeartRate
-        // avatarUrl deferred — once Supabase Storage is wired,
-        // we'd download the JPEG and stash on local.avatarData,
-        // OR keep avatarData empty and load by URL at render
-        // time. Day 3+.
+        // Pull avatar URL from remote. We deliberately do NOT
+        // download the JPEG bytes here — `ProfileHeaderView`
+        // (and any other avatar surface) falls back to
+        // `AsyncImage(url:)` when `avatarData` is nil, which
+        // streams the bytes lazily on render. Saves us a
+        // synchronous network hit during sync, and the bytes
+        // are cached by URLSession after the first paint.
+        local.avatarURL = remote.avatarUrl
 
         // Bump local `updatedAt` so future reconciles see this
         // pull-from-remote as the new local baseline. Without

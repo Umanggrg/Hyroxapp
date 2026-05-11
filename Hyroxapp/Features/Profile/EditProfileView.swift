@@ -32,6 +32,12 @@ struct EditProfileView: View {
 
     @State private var photoItem: PhotosPickerItem?
 
+    // Set when the user taps "Remove Photo." Distinct from "avatarData
+    // is nil" — a fresh-device session has avatarData == nil too but
+    // avatarURL points at a real image. Only the explicit Remove tap
+    // means "wipe this user's avatar everywhere."
+    @State private var avatarExplicitlyRemoved: Bool = false
+
     init(profile: UserProfile) {
         self.profile = profile
         _displayName = State(initialValue: profile.displayName)
@@ -79,20 +85,30 @@ struct EditProfileView: View {
             }
             .listRowBackground(Color.surface)
 
+            // "Has an avatar" \= bytes locally OR URL synced from cloud
+            // (and not yet explicitly removed in this edit session).
+            // The label and the destructive Remove row both key off
+            // this combined check so the editor reflects reality on
+            // both fresh-device (URL only) and edited-locally (bytes
+            // present) states.
+            let hasAvatar = avatarData != nil
+                || (profile.avatarURL != nil && !avatarExplicitlyRemoved)
+
             PhotosPicker(
                 selection: $photoItem,
                 matching: .images,
                 photoLibrary: .shared()
             ) {
-                Label(avatarData == nil ? "Add Photo" : "Change Photo",
+                Label(hasAvatar ? "Change Photo" : "Add Photo",
                       systemImage: "camera")
             }
             .listRowBackground(Color.surface)
 
-            if avatarData != nil {
+            if hasAvatar {
                 Button(role: .destructive) {
                     avatarData = nil
                     photoItem = nil
+                    avatarExplicitlyRemoved = true
                 } label: {
                     Label("Remove Photo", systemImage: "trash")
                 }
@@ -179,6 +195,34 @@ struct EditProfileView: View {
                     Image(uiImage: uiImage)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
+                } else if let urlString = profile.avatarURL,
+                          let url = URL(string: urlString),
+                          !avatarExplicitlyRemoved {
+                    // Fresh-device case — remote avatar exists on
+                    // the profile row but bytes haven't been
+                    // downloaded yet. Show it via AsyncImage so
+                    // the user sees their actual avatar in the
+                    // editor instead of the SF Symbol fallback
+                    // (which would falsely suggest "no photo
+                    // set"). Suppressed once the user taps
+                    // "Remove Photo" so the preview reflects
+                    // intent before they hit Save.
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                        case .empty, .failure:
+                            Image(systemName: "person.crop.circle.fill")
+                                .resizable()
+                                .foregroundStyle(Color.textTertiary, Color.surfaceElevated)
+                        @unknown default:
+                            Image(systemName: "person.crop.circle.fill")
+                                .resizable()
+                                .foregroundStyle(Color.textTertiary, Color.surfaceElevated)
+                        }
+                    }
                 } else {
                     Image(systemName: "person.crop.circle.fill")
                         .resizable()
@@ -227,7 +271,30 @@ struct EditProfileView: View {
         profile.handle = Self.normalizedHandle(handle)
         profile.location = location.trimmingCharacters(in: .whitespaces)
         profile.bio = bio.trimmingCharacters(in: .whitespaces)
+
+        // Detect whether the avatar changed in this edit session.
+        // Three transitions are possible:
+        //   • bytes added or replaced       → upload to Supabase
+        //                                     Storage, stamp returned
+        //                                     URL on profile
+        //   • avatarExplicitlyRemoved=true  → clear URL; stale object
+        //                                     stays in the bucket for
+        //                                     v1 (sweep later)
+        //   • unchanged                     → leave URL alone
+        //
+        // The "explicit remove" flag is the source of truth for the
+        // URL-clearing decision (NOT `avatarData == nil`), because a
+        // fresh-device session naturally has avatarData == nil while
+        // the URL still points at a real image. We only clear the
+        // URL when the user actually tapped "Remove Photo" in this
+        // session.
+        let bytesForUpload = avatarData
+        let bytesChanged = avatarData != profile.avatarData
         profile.avatarData = avatarData
+        if avatarExplicitlyRemoved {
+            profile.avatarURL = nil
+        }
+
         profile.updatedAt = Date()
         try? modelContext.save()
 
@@ -240,7 +307,28 @@ struct EditProfileView: View {
         // on this — `dismiss` runs synchronously below.
         let snapshot = profile
         if let userID = profile.remoteUserID {
+            // Order matters: upload bytes FIRST so the profile row
+            // we push contains the freshly minted avatar URL. If we
+            // pushed the row first then uploaded, the row would
+            // momentarily reference an older URL (or nil), and a
+            // paired device pulling between the two writes would
+            // miss the update.
             Task { @MainActor in
+                if bytesChanged, let bytes = bytesForUpload {
+                    if let url = try? await PhotoStorageService.uploadAvatar(
+                        data: bytes,
+                        userID: userID
+                    ) {
+                        snapshot.avatarURL = url
+                        try? modelContext.save()
+                    }
+                    // If upload fails the URL stays at its previous
+                    // value (or nil for a first-time uploader). The
+                    // local bytes still display correctly via the
+                    // avatarData fast path; only cloud propagation
+                    // is impacted, and the next edit retries.
+                }
+
                 try? await ProfileSyncService.pushLocalProfile(
                     snapshot,
                     userID: userID
@@ -307,6 +395,9 @@ struct EditProfileView: View {
                 return
             }
             avatarData = compressedAvatarJPEG(from: data, maxDimension: 512)
+            // Picking a new photo clears any prior "remove" intent —
+            // the user changed their mind.
+            avatarExplicitlyRemoved = false
         }
     }
 

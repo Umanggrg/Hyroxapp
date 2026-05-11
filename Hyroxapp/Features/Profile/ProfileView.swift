@@ -1,5 +1,8 @@
 import SwiftUI
 import SwiftData
+#if canImport(Auth)
+import Auth
+#endif
 
 // Navigation destinations for the Profile depth-behind-nav
 // pushed views. Hashable enum so SwiftUI's
@@ -81,6 +84,29 @@ struct ProfileView: View {
     @State private var isEditing = false
     @State private var isShowingSettings = false
 
+    // Drives the public profile search sheet — Tier 3 social
+    // discovery surface. Lookup hits the Supabase
+    // `public_profiles` view; no RLS for v1, just authenticated
+    // SELECT. The sheet is fully self-contained (no parent
+    // bindings); state lives here.
+    @State private var isShowingPublicProfileSearch = false
+
+    // Live follower / following counts for the ProfileHero
+    // stats line. Both nil on first appear; populated by a
+    // single FollowService.counts(for:) call once the local
+    // userID is known. Re-fetched on Profile re-appear so the
+    // numbers update after the user follows someone via the
+    // PublicProfileSearchSheet without needing app restart.
+    @State private var followerCount: Int?
+    @State private var followingCount: Int?
+
+    // Drives the FollowersListView push. Tapping the
+    // followers / following count on ProfileHero sets this
+    // to the appropriate `.followers` / `.following` value;
+    // `.navigationDestination(item:)` on the NavigationStack
+    // pushes the list. Cleared when the user pops back.
+    @State private var pushedFollowList: FollowersListView.Kind?
+
     // Drives the challenge setup sheet from the Next Up section.
     // Triggered by the empty-state CTA or the "Replace Challenge"
     // context menu on an existing active challenge.
@@ -139,7 +165,21 @@ struct ProfileView: View {
                                 raceCount: races.count,
                                 pbDisplay: heroPBDisplay,
                                 avgDisplay: heroAvgDisplay,
-                                streakDays: heroStreakDays
+                                streakDays: heroStreakDays,
+                                followerCount: followerCount,
+                                followingCount: followingCount,
+                                // Tap closures only fire when the
+                                // user is signed in — without a
+                                // userID we can't render a list.
+                                // Closures are nil pre-auth so
+                                // ProfileHero renders the counts
+                                // as plain text.
+                                onTapFollowers: localUserID == nil
+                                    ? nil
+                                    : { pushedFollowList = .followers },
+                                onTapFollowing: localUserID == nil
+                                    ? nil
+                                    : { pushedFollowList = .following }
                             )
                             .applyScrollAppearTransition()
                         }
@@ -201,6 +241,17 @@ struct ProfileView: View {
             .navigationDestination(for: YearlyRecap.self) { recap in
                 YearlyRecapView(recap: recap)
             }
+            // Followers / Following push from the ProfileHero
+            // count line. `item:` (Identifiable variant) drives
+            // the back-stack: setting `pushedFollowList` pushes
+            // the list; the user popping back resets it. The
+            // single destination handles both kinds via the
+            // `kind` parameter.
+            .navigationDestination(item: $pushedFollowList) { kind in
+                if let userID = localUserID {
+                    FollowersListView(userID: userID, kind: kind)
+                }
+            }
             // Profile cleanup — Performance + Trends sections push
             // their secondary cards behind navigation taps so the
             // Profile overview stays focused on the headline
@@ -244,6 +295,20 @@ struct ProfileView: View {
                     .disabled(profiles.first == nil)
                     .accessibilityLabel("Settings")
                 }
+                // Find athlete — Tier 3 social discovery. Sits
+                // next to Settings rather than on the trailing
+                // edge so the trailing edge stays for owner
+                // actions (Edit, Share). The magnifying glass is
+                // the universal "search" affordance and reads
+                // unambiguously here.
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        isShowingPublicProfileSearch = true
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .accessibilityLabel("Find Athlete")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Edit") { isEditing = true }
                         .disabled(profiles.first == nil)
@@ -274,6 +339,7 @@ struct ProfileView: View {
             .onAppear {
                 bootstrapIfNeeded()
                 prepareProfileShareImage()
+                refreshFollowCounts()
             }
             // Re-bake the card when the race count changes — that's
             // the most common reason the card content shifts. We
@@ -295,6 +361,9 @@ struct ProfileView: View {
                 if let profile = profiles.first {
                     SettingsView(profile: profile)
                 }
+            }
+            .sheet(isPresented: $isShowingPublicProfileSearch) {
+                PublicProfileSearchSheet()
             }
             // RaceEventEditSheet — single sheet handles both
             // create and edit paths via the EventEditMode case.
@@ -1250,6 +1319,52 @@ struct ProfileView: View {
         let profile = UserProfile.makeDefault()
         modelContext.insert(profile)
         try? modelContext.save()
+    }
+
+    // Resolved local user UUID, or nil if the user isn't signed
+    // in. Used by ProfileHero's tap-closure gating and by the
+    // followers/following list destination. Computed (not @State)
+    // so it stays in sync with the AuthService source of truth
+    // on every render without us manually syncing.
+    private var localUserID: String? {
+        #if canImport(Auth)
+        return AuthService.shared.user?.id.uuidString
+        #else
+        return nil
+        #endif
+    }
+
+    // Pull the local user's follower + following counts from
+    // Supabase and stash them on @State so ProfileHero can
+    // render real numbers instead of the v1 "—" placeholders.
+    //
+    // Bails silently when:
+    //   • user isn't signed in (no userID to look up)
+    //   • Supabase / network failure (FollowService.counts
+    //     returns (0, 0) on error — we keep the prior @State
+    //     so a transient failure doesn't replace good data
+    //     with zeros)
+    private func refreshFollowCounts() {
+        #if canImport(Auth)
+        guard let userID = AuthService.shared.user?.id.uuidString else {
+            return
+        }
+        Task { @MainActor in
+            let counts = await FollowService.counts(for: userID)
+            // Only commit when at least one count is non-zero,
+            // OR we previously had no value at all. This guards
+            // against a transient network failure (which returns
+            // 0, 0) overwriting real counts. First load still
+            // resolves cleanly because both prior values are nil.
+            if counts.followers == 0
+                && counts.following == 0
+                && (followerCount ?? 0) + (followingCount ?? 0) > 0 {
+                return
+            }
+            followerCount = counts.followers
+            followingCount = counts.following
+        }
+        #endif
     }
 
     // Render the profile share card to a UIImage and stash in
