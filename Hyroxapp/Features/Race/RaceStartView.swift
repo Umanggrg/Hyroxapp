@@ -440,12 +440,15 @@ struct RaceStartView: View {
             }
             .frame(maxWidth: .infinity)
             .frame(height: Layout.raceButtonHeight)
+            // sheet-tier radius for full-bleed pressables >56pt
+            // per the v1 two-tier radius hierarchy (cards = 16pt,
+            // sheets / large pills / big buttons = 22pt).
             .background(
-                RoundedRectangle(cornerRadius: 16)
+                RoundedRectangle(cornerRadius: Layout.sheetCornerRadius)
                     .fill(Color.surface)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 16)
+                RoundedRectangle(cornerRadius: Layout.sheetCornerRadius)
                     .strokeBorder(Color.accent.opacity(0.35), lineWidth: 1)
             )
 
@@ -482,7 +485,10 @@ struct RaceStartView: View {
             .frame(height: Layout.raceButtonHeight)
             .background(
                 ZStack {
-                    RoundedRectangle(cornerRadius: 16)
+                    // 22pt radius — full-bleed pressable, sits in
+                    // the sheet/large-pill tier per the v1 two-tier
+                    // radius hierarchy.
+                    RoundedRectangle(cornerRadius: Layout.sheetCornerRadius)
                         .fill(
                             LinearGradient(
                                 colors: [
@@ -496,7 +502,7 @@ struct RaceStartView: View {
                     // Inner highlight for a touch of dimensional
                     // shine — reads as polish at the seam where
                     // the gradient meets the corner radius.
-                    RoundedRectangle(cornerRadius: 16)
+                    RoundedRectangle(cornerRadius: Layout.sheetCornerRadius)
                         .stroke(Color.white.opacity(0.18), lineWidth: 1)
                         .blendMode(.overlay)
                 }
@@ -593,11 +599,14 @@ struct RaceStartView: View {
             }
             .padding(.horizontal, Layout.cardPadding)
             .frame(height: 56)
+            // Target row sits at the threshold between card and
+            // sheet tier. Going with card-tier (16) — the row
+            // reads as a list item, not a hero pressable.
             .background(
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
                     .fill(Color.surface.opacity(0.7))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 14)
+                        RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
                             .stroke(Color.divider, lineWidth: 1)
                     )
             )
@@ -646,12 +655,16 @@ struct RaceStartView: View {
             }
             .frame(maxWidth: .infinity)
             .frame(height: 74)
+            // 74pt chip → sheet tier (22pt) per the v1 two-tier
+            // radius hierarchy. Reads more "pressable pill" than
+            // "card row" at this height, which is what 22pt
+            // signals visually.
             .background(
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(cornerRadius: Layout.sheetCornerRadius)
                     .fill(isSelected ? Color.accent.opacity(0.10) : Color.surface.opacity(0.7))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(cornerRadius: Layout.sheetCornerRadius)
                     .strokeBorder(
                         isSelected ? Color.accent.opacity(0.55) : Color.divider,
                         lineWidth: 1

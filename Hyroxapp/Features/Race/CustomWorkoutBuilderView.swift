@@ -423,9 +423,13 @@ struct CustomWorkoutBuilderView: View {
             .foregroundStyle(isReady ? Color.onAccent : Color.textPrimary)
             .frame(maxWidth: .infinity)
             .frame(height: Layout.raceButtonHeight)
+            // 80pt-tall primary CTA → sheet tier (22pt) per the
+            // v1 two-tier radius hierarchy. Matches the Start
+            // Race button on RaceStartView so both CTAs share
+            // the same pressable language.
             .background(
                 ZStack {
-                    RoundedRectangle(cornerRadius: 16)
+                    RoundedRectangle(cornerRadius: Layout.sheetCornerRadius)
                         .fill(
                             isReady
                                 ? LinearGradient(
@@ -439,7 +443,7 @@ struct CustomWorkoutBuilderView: View {
                                     endPoint: .bottom
                                 )
                         )
-                    RoundedRectangle(cornerRadius: 16)
+                    RoundedRectangle(cornerRadius: Layout.sheetCornerRadius)
                         .stroke(Color.white.opacity(0.18), lineWidth: 1)
                         .blendMode(.overlay)
                 }

@@ -43,11 +43,13 @@ struct HistoryHero: View {
             cell(value: lastRaceDisplay, label: "LAST RACE")
         }
         .padding(.vertical, 14)
+        // Token-aligned to `Layout.cardCornerRadius` (16 post-v1).
+        // Was a hardcoded 14pt that pre-dated the token roll-up.
         .background(
-            RoundedRectangle(cornerRadius: 14)
+            RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
                 .fill(Color.surface.opacity(0.7))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 14)
+                    RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
                         .stroke(Color.divider, lineWidth: 1)
                 )
         )

@@ -92,11 +92,12 @@ struct RacePredictorChip: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Token-aligned to `Layout.cardCornerRadius` (16 post-v1).
         .background(
-            RoundedRectangle(cornerRadius: 14)
+            RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
                 .fill(Color.surface.opacity(0.7))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 14)
+                    RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
                         .stroke(Color.accent.opacity(0.25), lineWidth: 1)
                 )
         )

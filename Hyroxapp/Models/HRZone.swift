@@ -129,7 +129,15 @@ enum HRZone: Int, CaseIterable, Sendable {
         case .z2: return Color.success           // 0x32D74B (green)
         case .z3: return Color(hex: 0xFFD60A)   // yellow
         case .z4: return Color.warning           // 0xFF9F0A (orange)
-        case .z5: return Color.accent            // 0xFF3B30 (red)
+        // Z5 = redline. Pre-v1 this mapped to `Color.accent` which
+        // was iOS-system-red `#FF3B30`. After the v1 design-system
+        // coral shift (accent → `#FF4530`), the brand color no
+        // longer carries "danger" semantics — that meaning lives
+        // on the new `redline` token (which is the previous
+        // accent hex). Mapping Z5 to `Color.redline` keeps the
+        // visual identity intact (same red the chip rendered as
+        // before) while severing the brand/danger conflation.
+        case .z5: return Color.redline           // 0xFF3B30 (red)
         }
     }
 

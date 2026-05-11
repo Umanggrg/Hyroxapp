@@ -3614,7 +3614,14 @@ enum RaceStats {
         var colorHex: UInt {
             switch self {
             case .hold:    return 0x32D74B  // success green
-            case .slow:    return 0xFF3B30  // accent red
+            // SLOW means "HR is above sustainable, ease back" — this
+            // is the redline / danger semantic. Maps to the same
+            // hex that `Color.redline` exposes after the v1 design-
+            // system shift. (Pre-v1 the comment read "accent red"
+            // because `Color.accent` used to be this hex; the
+            // accent has since moved to `#FF4530` and `#FF3B30` is
+            // exclusively the redline state color.)
+            case .slow:    return 0xFF3B30  // redline red
             case .push:    return 0x5B9BD5  // calm blue (matches Z1)
             case .workout: return 0xF5F5F7  // textPrimary off-white
             case .none:    return 0x000000  // unused

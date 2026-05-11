@@ -28,22 +28,64 @@ extension Color {
     static let surface         = Color(lightHex: 0xFFFFFF, darkHex: 0x141416)
     static let surfaceElevated = Color(lightHex: 0xF2EEE6, darkHex: 0x1C1C1F)
 
-    // Text
-    static let textPrimary   = Color(lightHex: 0x161513, darkHex: 0xF5F5F7)
-    static let textSecondary = Color(lightHex: 0x6B6964, darkHex: 0x8E8E93)
-    static let textTertiary  = Color(lightHex: 0xA8A6A0, darkHex: 0x636366)
+    // Text — light-mode values pulled darker per the v1 wireframe
+    // audit. The previous tones (`#161513` / `#6B6964` / `#A8A6A0`)
+    // read as slightly muted on the warm off-white background; the
+    // updated stops (`#0E0E10` / `#4A4A4F` / `#8A8682`) match the
+    // contrast ramp the design system locks in.
+    static let textPrimary   = Color(lightHex: 0x0E0E10, darkHex: 0xF5F5F7)
+    static let textSecondary = Color(lightHex: 0x4A4A4F, darkHex: 0x8E8E93)
+    static let textTertiary  = Color(lightHex: 0x8A8682, darkHex: 0x636366)
 
     // Accent & semantic
     //
-    // Coral accent stays constant across modes — it's the brand signal.
-    // The success/warning greens and ambers shift slightly: the dark
+    // **v1 design-system shift:** the coral moved 8° hotter from the
+    // iOS-system-red `#FF3B30` to `#FF4530`. Same hex is "destructive"
+    // (stop / cancel / delete) for half our users — keeping it as the
+    // brand accent meant the focusing tool kept reading as a warning.
+    // The new hex burns the same emotional warmth but disambiguates
+    // from system red. Audit budget: coral covers <12% of any surface.
+    //
+    // The system-red `#FF3B30` now lives as the `redline` state color
+    // below — exactly where "danger" semantics belong (the Watch
+    // takeover overlay for over-redline HR).
+    //
+    // success/warning + new state tokens shift slightly: the dark
     // variants are tuned for OLED black, the light variants are nudged
     // darker so they stay legible on warm off-white. Same hue, different
     // value step.
-    static let accent    = Color(hex: 0xFF3B30)
-    static let accentDim = Color(hex: 0xFF3B30, opacity: 0.6)
+    static let accent    = Color(hex: 0xFF4530)
+    static let accentDim = Color(hex: 0xFF4530, opacity: 0.6)
     static let success   = Color(lightHex: 0x1FA82A, darkHex: 0x32D74B)
     static let warning   = Color(lightHex: 0xC4720A, darkHex: 0xFF9F0A)
+
+    // MARK: Race-state palette (v1 wireframe additions)
+    //
+    // Five colors keyed to the in-race coaching cue overlay states
+    // (HOLD / SLOW / REDLINE / RECOVER / PUSH). These are TOOLS, not
+    // brand decoration — they fire when the app needs to tell the
+    // athlete to do something. Distinct from `accent`, which is for
+    // brand moments, and from `success`/`warning`, which are general
+    // semantic states.
+    //
+    //   • onPace   — green, matches HOLD overlay + pace-ahead chips.
+    //                Colder than `success` so it doesn't pull
+    //                emotional weight away from coral on celebratory
+    //                surfaces (PBs, race finish).
+    //   • slow     — amber, matches SLOW overlay + pace-behind chips.
+    //   • redline  — true system-red, the over-threshold danger
+    //                signal. THIS is iOS's `#FF3B30`. Use it sparingly;
+    //                redline is supposed to feel scarce.
+    //   • recover  — blue, matches RECOVER overlay. Cool tone so it
+    //                reads as "rest" rather than "act."
+    //   • push     — lime, matches PUSH overlay. Acidic enough to
+    //                feel like a call to action against the calm
+    //                in-race UI.
+    static let onPace  = Color(hex: 0x2BC758)
+    static let slow    = Color(hex: 0xFFB020)
+    static let redline = Color(hex: 0xFF3B30)
+    static let recover = Color(hex: 0x3A82F7)
+    static let push    = Color(hex: 0xBFFF3E)
 
     // FIXED off-white for labels that sit ON the coral accent
     // (primary CTAs, hold-to-finish, gradient buttons). Brand
@@ -55,8 +97,10 @@ extension Color {
     // gradient — NOT `Color.textPrimary`.
     static let onAccent = Color(hex: 0xFFFFFF)
 
-    // Hairlines & separators
-    static let divider = Color(lightHex: 0xE5E1D8, darkHex: 0x2C2C2E)
+    // Hairlines & separators — light-mode value pulled in line with
+    // the v1 audit (`#E4DFD4` ≈ `#E5E1D8`, but matches the design
+    // system's documented hairline exactly).
+    static let divider = Color(lightHex: 0xE4DFD4, darkHex: 0x2C2C2E)
 
     // MARK: Brand decoration tokens
     //
@@ -202,20 +246,70 @@ extension Font {
 // can't be instantiated. Keeps these constants grouped without polluting the
 // global scope.
 enum Layout {
-    // Default outer horizontal padding for screens.
+    // Default outer horizontal padding for screens. 24pt is the Apple
+    // Fitness / Strava convention — keep.
     static let screenMargin: CGFloat = 24
 
-    // Padding inside cards.
-    static let cardPadding: CGFloat = 16
+    // Padding inside cards. Bumped 16 → 20 per the v1 audit — the
+    // tighter padding read as "settings page" rather than "athlete
+    // profile" on dense surfaces. Every card automatically picks
+    // this up via `Layout.cardPadding`.
+    static let cardPadding: CGFloat = 20
 
-    // Standard corner radius for cards.
-    static let cardCornerRadius: CGFloat = 12
+    // Standard corner radius for cards. Bumped 12 → 16 per the
+    // v1 audit — 12pt is mid-2010s iOS; 16pt locks us to the
+    // current Apple platform aesthetic.
+    static let cardCornerRadius: CGFloat = 16
 
-    // Minimum tap-target height for in-race buttons (sweaty, shaky hands).
+    // Sheet / pill / full-bleed surface radius. Used for modal
+    // sheets and any pressable element taller than ~56pt (the
+    // duo pair-code pill, the primary CTA gradient buttons,
+    // bottom sheets). Distinct from cards so the system reads
+    // as a two-tier radius hierarchy.
+    static let sheetCornerRadius: CGFloat = 22
+
+    // Minimum tap-target height for in-race buttons (sweaty, shaky
+    // hands). Wireframe audit raised the floor to 64pt; we already
+    // ship at 80pt which exceeds that. Leaving at 80 — 64pt is the
+    // hard minimum, 80pt is the preferred for the cathedral.
     static let raceButtonHeight: CGFloat = 80
 
-    // Minimum tap-target height outside of a race.
+    // Hard floor for in-race controls when 80pt would crowd a
+    // multi-button layout (e.g. pause + cancel side-by-side).
+    // Anything in-race must be ≥ this value.
+    static let raceButtonMinHeight: CGFloat = 64
+
+    // Minimum tap-target height outside of a race. Apple HIG.
     static let standardButtonHeight: CGFloat = 44
+}
+
+// MARK: - Spacing
+//
+// Stack rhythm scale locked to 8 / 12 / 20 / 32 per the v1 audit.
+// Anything off-scale (6, 10, 14, 24, 28) is a bug — pick the closest
+// canonical value. Exposed as a `Spacing` namespace so views can
+// write `Spacing.md` instead of magic numbers and so retuning the
+// whole rhythm is a one-file change.
+//
+// Today the codebase has lots of `padding(16)` / `spacing: 14` /
+// etc. — we're not retro-fitting every call site in this turn (too
+// invasive), but new code uses these tokens.
+enum Spacing {
+    /// 8pt — tight stack rhythm, used between paired labels and
+    /// caption/value pairs inside a single cell.
+    static let xs: CGFloat = 8
+
+    /// 12pt — comfortable rhythm between elements within a card.
+    static let sm: CGFloat = 12
+
+    /// 20pt — between sections within a screen. Matches the new
+    /// `cardPadding`, so a section break visually equals one card
+    /// width of breathing room.
+    static let md: CGFloat = 20
+
+    /// 32pt — between major screen regions (hero → stats →
+    /// trends). Largest stop on the scale.
+    static let lg: CGFloat = 32
 }
 
 // MARK: - Motion
@@ -223,6 +317,10 @@ enum Layout {
 enum Motion {
     // Default spring for state transitions — subtle, not bouncy.
     // Respects Reduce Motion automatically when applied via `.animation`.
+    //
+    // **v1 motion role 1 of 3:** state-change. ~90% of motion in
+    // the app. Card mounts, sheet presents, tab swaps. If you're
+    // animating routine UI, this is the spring.
     static let standardSpring: Animation = .spring(response: 0.4, dampingFraction: 0.8)
 
     // Snappier spring for primary CTAs and tab transitions — faster
@@ -235,10 +333,25 @@ enum Motion {
     // emotional. Reach for this when the moment deserves it.
     static let heroSpring: Animation = .spring(response: 0.55, dampingFraction: 0.7)
 
-    // Soft ease for ambient changes — breathing glows, idle
-    // pulse on the race-day countdown, low-frequency loops. Pair
-    // with `.repeatForever(autoreverses: true)`.
-    static let ambient: Animation = .easeInOut(duration: 2.4)
+    // **v1 motion role 2 of 3:** alert takeover. Used by the
+    // five Watch coaching overlays (HOLD / SLOW / REDLINE /
+    // RECOVER / PUSH) and any decisive full-screen moment that
+    // demands attention. Hard, no bounce, paired with haptic.
+    // 200ms is short enough to feel immediate, long enough to
+    // register on the eye. The scale-from-0.9 entrance prevents
+    // the snap from being jarring without softening it.
+    static let alertTakeover: Animation = .easeOut(duration: 0.2)
+
+    // **v1 motion role 3 of 3:** ambient. Background life —
+    // live HR dot pulsing, active streak flame breathing,
+    // race-day countdown glow. Pair with
+    // `.repeatForever(autoreverses: true)`. Wireframe locks
+    // this at 1.4s; we shortened from 2.4s so the ambient
+    // feels more like a pulse and less like a slow tide.
+    // Disabled under Reduce Motion via the per-call-site
+    // `@Environment(\.accessibilityReduceMotion)` check; the
+    // animation token doesn't gate itself.
+    static let ambient: Animation = .easeInOut(duration: 1.4)
 }
 
 // MARK: - Depth (layered shadows for surface hierarchy)

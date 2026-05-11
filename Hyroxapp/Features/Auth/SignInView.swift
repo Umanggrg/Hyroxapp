@@ -79,7 +79,12 @@ struct SignInView: View {
         )
         .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
         .frame(height: 56)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        // Token-aligned to `Layout.cardCornerRadius` (16
+        // post-v1). 56pt button sits at the card/sheet
+        // boundary; card-tier is the right call since the
+        // Sign-In-with-Apple button reads as a list-style row
+        // here, not a hero pressable.
+        .clipShape(RoundedRectangle(cornerRadius: Layout.cardCornerRadius))
         .padding(.horizontal, 8)
     }
 

@@ -318,8 +318,10 @@ struct FreeRunView: View {
             .foregroundStyle(Color.textPrimary)
             .frame(maxWidth: .infinity)
             .frame(height: 60)
+            // 60pt-tall pressable → sheet tier (22pt) per the
+            // v1 two-tier radius hierarchy.
             .background(
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(cornerRadius: Layout.sheetCornerRadius)
                     .fill(Color.surface)
             )
         }
@@ -340,8 +342,10 @@ struct FreeRunView: View {
             .foregroundStyle(Color.onAccent)
             .frame(maxWidth: .infinity)
             .frame(height: 60)
+            // Same — 60pt full-bleed pressable in the sheet
+            // tier.
             .background(
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(cornerRadius: Layout.sheetCornerRadius)
                     .fill(
                         LinearGradient(
                             colors: [Color.accent, Color.accent.opacity(0.85)],

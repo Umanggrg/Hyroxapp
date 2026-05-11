@@ -69,10 +69,18 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     enum Tab: Hashable {
-        case feed, race, history, profile
+        case feed, history, race, profile, watch
     }
 
     var body: some View {
+        // 5-tab structure per the v1 wireframe IA. Race sits at the
+        // visual center (position 3) so it reads as the headline
+        // action the rest of the app supports. Watch lives at the
+        // trailing edge as the always-available pairing / streaming
+        // surface — keeps Watch concerns out of Settings (where they
+        // got buried) and gives the companion a real top-level home.
+        //
+        // Tab order: Feed | History | Race | Profile | Watch
         TabView(selection: $selectedTab) {
             // Tab 1 — Feed. The front door. Chronological list
             // of recent races from athletes you follow.
@@ -82,22 +90,44 @@ struct ContentView: View {
                     Label("Feed", systemImage: "house")
                 }
 
-            RaceView()
-                .tag(Tab.race)
-                .tabItem {
-                    Label("Race", systemImage: "flag.checkered")
-                }
-
+            // Tab 2 — History. Your own past races + free runs.
             HistoryView()
                 .tag(Tab.history)
                 .tabItem {
                     Label("History", systemImage: "list.bullet.rectangle")
                 }
 
+            // Tab 3 — Race. The center tab, the cathedral.
+            // Wireframe variant treats this as a coral-tinted
+            // center-action button; we render it as a regular tab
+            // with the system tint for v1, with the visual emphasis
+            // coming from the icon weight + tint that
+            // `.tint(Color.accent)` applies app-wide. Custom
+            // center-FAB tab bar lands in a Phase 7 polish pass.
+            RaceView()
+                .tag(Tab.race)
+                .tabItem {
+                    Label("Race", systemImage: "flag.checkered")
+                }
+
+            // Tab 4 — Profile. Identity + your own stats / trends.
             ProfileView()
                 .tag(Tab.profile)
                 .tabItem {
                     Label("Profile", systemImage: "person.crop.circle")
+                }
+
+            // Tab 5 — Watch. New surface per the v1 IA. Pairing
+            // status, live HR streaming health, voice cue + Live
+            // Activity toggles, and a doorway to the per-feature
+            // Settings rows that relate specifically to the
+            // watchOS companion. Wraps WatchTabView (a thin
+            // settings-style screen for v1; richer "Watch
+            // dashboard" in v2).
+            WatchTabView()
+                .tag(Tab.watch)
+                .tabItem {
+                    Label("Watch", systemImage: "applewatch")
                 }
         }
         .tint(Color.accent)

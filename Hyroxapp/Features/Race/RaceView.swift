@@ -1702,7 +1702,11 @@ struct RaceView: View {
                             endPoint: .bottomTrailing
                         )
                     )
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    // 80pt in-race CTA → sheet tier (22pt) per
+                    // the v1 two-tier radius hierarchy. Matches
+                    // the Start Race button and Custom Workout
+                    // builder CTA.
+                    .clipShape(RoundedRectangle(cornerRadius: Layout.sheetCornerRadius))
                     // Glow scales with mode — full strength on OLED
                     // black, dialed back on warm off-white to keep
                     // the button from looking like it's leaking

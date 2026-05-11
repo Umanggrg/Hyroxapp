@@ -216,11 +216,13 @@ struct RaceComparisonView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 24)
         .padding(.horizontal, Layout.cardPadding)
+        // Token-aligned to `Layout.cardCornerRadius` so future
+        // radius tuning sweeps this surface too.
         .background(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
                 .fill(Color.surface)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 16)
+                    RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
                         .stroke(winnerColor.opacity(0.25), lineWidth: 1)
                 )
         )

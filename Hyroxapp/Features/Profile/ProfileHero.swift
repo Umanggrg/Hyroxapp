@@ -112,18 +112,38 @@ struct ProfileHero: View {
     }
 
     private var avatar: some View {
+        // Display order:
+        //   1. Local bytes (`avatarData`) — zero-latency, ALWAYS
+        //      preferred when present.
+        //   2. Remote URL (`avatarURL`) — synced from Supabase.
+        //      Used when this device has the URL but not the
+        //      bytes (signed in on a new phone after avatar was
+        //      uploaded from another device). Pre-v1 this case
+        //      fell through to the initial-letter placeholder
+        //      which was a real fresh-device bug.
+        //   3. Initial-letter coral disc — final fallback when
+        //      neither bytes nor URL exist.
         Group {
             if let data = profile.avatarData, let uiImage = UIImage(data: data) {
                 Image(uiImage: uiImage)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-            } else {
-                ZStack {
-                    Circle().fill(Color.accent.opacity(0.18))
-                    Text(initial)
-                        .font(.system(size: 44, weight: .heavy, design: .rounded))
-                        .foregroundStyle(Color.accent)
+            } else if let urlString = profile.avatarURL,
+                      let url = URL(string: urlString) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    case .empty, .failure:
+                        initialPlaceholder
+                    @unknown default:
+                        initialPlaceholder
+                    }
                 }
+            } else {
+                initialPlaceholder
             }
         }
         .frame(width: 112, height: 112)
@@ -150,6 +170,18 @@ struct ProfileHero: View {
             x: 0,
             y: 0
         )
+    }
+
+    // The pre-bytes / pre-URL fallback — coral disc with the
+    // first character of the display name. Extracted so all
+    // three branches of the avatar resolver can share it.
+    private var initialPlaceholder: some View {
+        ZStack {
+            Circle().fill(Color.accent.opacity(0.18))
+            Text(initial)
+                .font(.system(size: 44, weight: .heavy, design: .rounded))
+                .foregroundStyle(Color.accent)
+        }
     }
 
     private var initial: String {
@@ -300,11 +332,15 @@ struct ProfileHero: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 14)
+        // Stats-row card — token-aligned to
+        // `Layout.cardCornerRadius` for consistency. Value was
+        // already correct (16); the rename is for grep-ability
+        // and so a future radius retune sweeps this surface too.
         .background(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
                 .fill(Color.surface.opacity(0.85))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 16)
+                    RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
                         .stroke(Color.divider.opacity(0.6), lineWidth: 1)
                 )
         )

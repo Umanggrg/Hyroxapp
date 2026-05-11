@@ -73,6 +73,7 @@ struct FeedView: View {
 
                 ScrollView {
                     LazyVStack(spacing: 18) {
+                        filterChipRow
                         if isLoading {
                             loadingIndicator
                         } else if races.isEmpty {
@@ -172,6 +173,65 @@ struct FeedView: View {
     // distinct).
     private struct RaceIDWrapper: Identifiable {
         let id: String
+    }
+
+    // MARK: - Filter chip row
+    //
+    // Per the v1 wireframe IA: three filter chips at the top of
+    // the feed — Following (functional), Division (deferred),
+    // Nearby (deferred). Following is the only mode wired today;
+    // the other two render with a small `SOON` badge so the
+    // design intent is visible without pretending they work. Two
+    // future expansions wire Division (requires `athlete_division`
+    // exposed on the `public_races` view + a per-division query)
+    // and Nearby (requires location permission + a geo-indexed
+    // query). Both are Phase 3 follow-ups.
+    private var filterChipRow: some View {
+        HStack(spacing: 8) {
+            chip(label: "Following", isActive: true, isAvailable: true)
+            chip(label: "Division",  isActive: false, isAvailable: false)
+            chip(label: "Nearby",    isActive: false, isAvailable: false)
+            Spacer()
+        }
+        .padding(.top, 4)
+    }
+
+    @ViewBuilder
+    private func chip(label: String, isActive: Bool, isAvailable: Bool) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.caption.weight(.heavy))
+                .foregroundStyle(
+                    isActive
+                        ? Color.accent
+                        : (isAvailable ? Color.textSecondary : Color.textTertiary)
+                )
+            if !isAvailable {
+                Text("SOON")
+                    .font(.system(size: 9, weight: .heavy))
+                    .tracking(0.4)
+                    .foregroundStyle(Color.textTertiary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(
+                        Capsule().fill(Color.surfaceElevated)
+                    )
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            Capsule()
+                .fill(isActive ? Color.accent.opacity(0.12) : Color.clear)
+                .overlay(
+                    Capsule()
+                        .stroke(
+                            isActive ? Color.accent : Color.divider,
+                            lineWidth: 1
+                        )
+                )
+        )
+        .opacity(isAvailable ? 1.0 : 0.7)
     }
 
     // String isn't Identifiable, so the sheet binding needs a

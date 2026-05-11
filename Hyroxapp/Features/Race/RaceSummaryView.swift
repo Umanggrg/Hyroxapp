@@ -91,11 +91,35 @@ struct RaceSummaryView: View {
             HeroBackdrop(.intense)
 
             VStack(spacing: 0) {
+                // v1 pinned-hero treatment — `finishHero` lifted
+                // out of the ScrollView so the total time stays
+                // anchored as the user scrolls through insights,
+                // splits, photo, notes, etc. Wireframe §16 calls
+                // for this pinned moment so the headline number
+                // (total time + vs PB + vs target) doesn't slip
+                // out of view while the athlete is reading the
+                // breakdown.
+                //
+                // Animation is purely state-driven via
+                // `.onAppear`'s `heroCountUpComplete` toggle —
+                // pulling the hero out of the scroll doesn't
+                // affect the entrance scaleEffect / opacity
+                // springs.
+                finishHero
+                    .padding(.top, 24)
+                    .padding(.bottom, 8)
+
                 ScrollView {
                     VStack(spacing: 16) {
-                        Spacer().frame(height: 24)
-
-                        finishHero
+                        // Small top breather inside the scroll
+                        // region so the first content item
+                        // (calories / engine / HR lines)
+                        // doesn't crash into the pinned hero
+                        // above. Was `Spacer(height: 24)` +
+                        // `finishHero` pre-pinning; replaced
+                        // with a smaller fixed spacer since
+                        // the hero now lives outside.
+                        Spacer().frame(height: 8)
 
                         // Total active calories from HealthKit across all
                         // splits. Hidden when no segment had calorie data.

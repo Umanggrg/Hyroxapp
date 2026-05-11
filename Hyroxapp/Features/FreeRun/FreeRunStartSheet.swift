@@ -195,8 +195,10 @@ struct FreeRunStartSheet: View {
             .foregroundStyle(Color.onAccent)
             .frame(maxWidth: .infinity)
             .frame(height: 60)
+            // 60pt full-bleed CTA → sheet tier (22pt) per the v1
+            // two-tier radius hierarchy.
             .background(
-                RoundedRectangle(cornerRadius: 16)
+                RoundedRectangle(cornerRadius: Layout.sheetCornerRadius)
                     .fill(
                         LinearGradient(
                             colors: [Color.accent, Color.accent.opacity(0.85)],
