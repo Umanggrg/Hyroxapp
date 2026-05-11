@@ -146,7 +146,7 @@ struct CompromisedRunningView: View {
         HStack(spacing: 0) {
             ForEach(data, id: \.runIndex) { item in
                 VStack(spacing: 3) {
-                    Image(systemName: stationIcon(item.precedingStation))
+                    Image(systemName: item.precedingStation?.glyph ?? "minus")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Color.textSecondary)
                     Text(stationAbbreviation(item.precedingStation))
@@ -167,20 +167,10 @@ struct CompromisedRunningView: View {
     // SF Symbol per station kind. Bodyweight stations (ergs, burpees)
     // and the runs themselves get distinct glyphs so the row reads
     // at a glance.
-    private func stationIcon(_ station: Station?) -> String {
-        guard let station else { return "minus" }
-        switch station {
-        case .skiErg:           return "figure.skiing.crosscountry"
-        case .sledPush:         return "arrow.up.right.circle"
-        case .sledPull:         return "arrow.down.left.circle"
-        case .burpeeBroadJumps: return "figure.jumprope"
-        case .rowing:           return "figure.rower"
-        case .farmersCarry:     return "scalemass"
-        case .sandbagLunges:    return "figure.cooldown"
-        case .wallBalls:        return "circle.fill"
-        default:                return "questionmark.circle"
-        }
-    }
+    // `stationIcon` was hoisted onto the Station model as
+    // `Station.glyph` so every consumer reads from one source.
+    // Local helper kept removed; call sites read
+    // `station?.glyph ?? "minus"`.
 
     // Two-letter abbreviation for the station, used under the
     // glyph. Keeps the row tight at 8-column width.

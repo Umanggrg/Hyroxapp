@@ -749,9 +749,15 @@ struct RaceView: View {
                     predicted: predicted,
                     target: target
                 )
+                // Projected-finish line uses the v1 race-state
+                // tokens so it visually matches the pace chip
+                // above. On track to beat target → `Color.onPace`;
+                // projecting to miss → `Color.slow`. Distinct from
+                // the generic `success`/`warning` greens/oranges
+                // by being explicitly in-race tool colors.
                 let predictedColor: Color = {
                     guard let predictedDelta else { return .textTertiary }
-                    return predictedDelta <= 0 ? .success : .warning
+                    return predictedDelta <= 0 ? .onPace : .slow
                 }()
 
                 Text("projected \(RaceStats.format(predicted))")
@@ -894,6 +900,10 @@ struct RaceView: View {
         // ahead/behind on every tick when the athlete is right on
         // the line.
         if absDelta < 15 {
+            // Dead-zone state intentionally muted — celebrate
+            // ahead, flag behind, but don't reward "exactly on
+            // target" with a brand-color win. textSecondary
+            // keeps the chip present but emotionally flat here.
             return PaceChipState(
                 label: "on pace",
                 color: Color.textSecondary,
@@ -901,15 +911,25 @@ struct RaceView: View {
             )
         } else if delta < 0 {
             // Negative = actual elapsed is less than expected = ahead.
+            // Tinted with the v1 race-state token `Color.onPace`
+            // (`#2BC758`) — a colder green than `Color.success`
+            // so it reads as a coaching signal ("you're ahead")
+            // rather than a celebration. Distinct from coral
+            // brand moments.
             return PaceChipState(
                 label: "\(RaceStats.format(absDelta)) ahead",
-                color: Color.success,
+                color: Color.onPace,
                 icon: "arrow.up.right"
             )
         } else {
+            // Behind target → v1 race-state `Color.slow`
+            // (`#FFB020`) instead of the generic `Color.warning`.
+            // Same amber family, but `slow` is the dedicated
+            // in-race "ease back" tool color — matches the
+            // wireframe's SLOW coaching cue overlay tint.
             return PaceChipState(
                 label: "\(RaceStats.format(absDelta)) behind",
-                color: Color.warning,
+                color: Color.slow,
                 icon: "arrow.down.right"
             )
         }

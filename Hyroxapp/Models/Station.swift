@@ -40,6 +40,49 @@ enum Station: Int, CaseIterable, Identifiable, Codable, Hashable, Sendable {
         }
     }
 
+    // SF Symbol glyph for this station. Used across feed cards,
+    // history rows, race screens, and the public race detail
+    // sheet to read the station kind at a glance.
+    //
+    // **Future:** the v1 design system aspires to a custom
+    // hand-drawn 64×64 monoline glyph set (see CLAUDE.md
+    // wireframe spec). Treat this property as the slot a
+    // future custom Asset Catalog drop-in would replace —
+    // every call site reads from `station.glyph`, so swapping
+    // to a custom set is a one-property change here, no
+    // call-site updates needed.
+    //
+    // Each pick chosen to read clearly at 16-32pt typical sizes:
+    //   • Runs use `figure.run` so the eight runs visually
+    //     unify into a single "running" rhythm against the
+    //     varied workout glyphs.
+    //   • Sled push/pull use directional arrows because no SF
+    //     Symbol captures the sled-with-handle shape; the
+    //     arrow communicates the motion vector clearly.
+    //   • Wall balls use a filled circle — a ball at small
+    //     sizes reads better than the more literal
+    //     `basketball.fill` which is too logo-y.
+    //   • Burpees lean on `figure.jumprope` (closest match
+    //     for explosive vertical movement).
+    //   • Sandbag lunges use `figure.cooldown` (a lunge-shape
+    //     glyph in the SF Symbols set).
+    //   • Farmers carry uses `scalemass` — represents the
+    //     load, not the carry, but reads as "weight" cleanly.
+    var glyph: String {
+        switch self {
+        case .run1, .run2, .run3, .run4, .run5, .run6, .run7, .run8:
+            return "figure.run"
+        case .skiErg:           return "figure.skiing.crosscountry"
+        case .sledPush:         return "arrow.up.right.circle"
+        case .sledPull:         return "arrow.down.left.circle"
+        case .burpeeBroadJumps: return "figure.jumprope"
+        case .rowing:           return "figure.rower"
+        case .farmersCarry:     return "scalemass"
+        case .sandbagLunges:    return "figure.cooldown"
+        case .wallBalls:        return "circle.fill"
+        }
+    }
+
     // Short display name for the race screen and split tables.
     var displayName: String {
         switch self {

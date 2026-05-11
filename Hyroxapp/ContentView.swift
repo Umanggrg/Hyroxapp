@@ -80,55 +80,40 @@ struct ContentView: View {
         // surface — keeps Watch concerns out of Settings (where they
         // got buried) and gives the companion a real top-level home.
         //
-        // Tab order: Feed | History | Race | Profile | Watch
+        // Tab order: Feed | History | Race (FAB) | Profile | Watch
+        //
+        // **v1 design-system shift — custom center-FAB tab bar.**
+        // Native TabView's tab bar is hidden via `.toolbar(.hidden,
+        // for: .tabBar)` on each child; we render a custom
+        // tab bar at the bottom via `.safeAreaInset` so the Race
+        // tab can render as a prominent coral circular FAB
+        // protruding above the bar (wireframe spec). Per-tab
+        // navigation state is preserved because TabView still
+        // owns the view tree — we just chrome it.
+        //
+        // Routing is unchanged: `selectedTab` is the source of
+        // truth, Quick Actions and deep links still write to it,
+        // and TabView reads it to swap the visible child.
         TabView(selection: $selectedTab) {
-            // Tab 1 — Feed. The front door. Chronological list
-            // of recent races from athletes you follow.
             FeedView()
                 .tag(Tab.feed)
-                .tabItem {
-                    Label("Feed", systemImage: "house")
-                }
+                .toolbar(.hidden, for: .tabBar)
 
-            // Tab 2 — History. Your own past races + free runs.
             HistoryView()
                 .tag(Tab.history)
-                .tabItem {
-                    Label("History", systemImage: "list.bullet.rectangle")
-                }
+                .toolbar(.hidden, for: .tabBar)
 
-            // Tab 3 — Race. The center tab, the cathedral.
-            // Wireframe variant treats this as a coral-tinted
-            // center-action button; we render it as a regular tab
-            // with the system tint for v1, with the visual emphasis
-            // coming from the icon weight + tint that
-            // `.tint(Color.accent)` applies app-wide. Custom
-            // center-FAB tab bar lands in a Phase 7 polish pass.
             RaceView()
                 .tag(Tab.race)
-                .tabItem {
-                    Label("Race", systemImage: "flag.checkered")
-                }
+                .toolbar(.hidden, for: .tabBar)
 
-            // Tab 4 — Profile. Identity + your own stats / trends.
             ProfileView()
                 .tag(Tab.profile)
-                .tabItem {
-                    Label("Profile", systemImage: "person.crop.circle")
-                }
+                .toolbar(.hidden, for: .tabBar)
 
-            // Tab 5 — Watch. New surface per the v1 IA. Pairing
-            // status, live HR streaming health, voice cue + Live
-            // Activity toggles, and a doorway to the per-feature
-            // Settings rows that relate specifically to the
-            // watchOS companion. Wraps WatchTabView (a thin
-            // settings-style screen for v1; richer "Watch
-            // dashboard" in v2).
             WatchTabView()
                 .tag(Tab.watch)
-                .tabItem {
-                    Label("Watch", systemImage: "applewatch")
-                }
+                .toolbar(.hidden, for: .tabBar)
         }
         .tint(Color.accent)
         // Drive color scheme from the user's setting. `.system`
@@ -137,13 +122,9 @@ struct ContentView: View {
         // `.dark` pre-light-mode; now reactive to Settings →
         // Appearance picker.
         .preferredColorScheme(profiles.first?.resolvedThemePreference.colorScheme)
-        // Solid background on the tab bar — the iOS default
-        // translucency softens the dark theme more than we want
-        // and lets content bleed through on scroll. .visible
-        // forces the bar to render its own background so the
-        // accent-coral icons sit on a stable surface.
-        .toolbarBackground(.visible, for: .tabBar)
-        .toolbarBackground(Color.background, for: .tabBar)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            customTabBar
+        }
         .onAppear(perform: bootstrap)
         // Foreground social notifications. Fires on every
         // active-phase transition — cold launch is covered
@@ -237,6 +218,115 @@ struct ContentView: View {
         guard let profile = profiles.first else { return }
         profile.lastSeenWhatsNewVersion = WhatsNewView.currentMarketingVersion
         try? modelContext.save()
+    }
+
+    // MARK: - Custom tab bar
+    //
+    // 5-slot bar with a coral circular FAB in slot 3 (Race).
+    // Sits in `.safeAreaInset` so it reserves space below the
+    // TabView's child content — child views can scroll all the
+    // way down without sliding under the bar.
+    //
+    // Each slot is a Button that writes to `selectedTab`. The
+    // active slot reads as coral; inactive slots are
+    // secondary-text. The Race FAB is always coral-filled
+    // regardless of active state — it IS the brand moment.
+    private var customTabBar: some View {
+        HStack(spacing: 0) {
+            tabBarItem(.feed,    systemImage: "house",                   label: "Feed")
+            tabBarItem(.history, systemImage: "list.bullet.rectangle",   label: "History")
+            raceFAB
+            tabBarItem(.profile, systemImage: "person.crop.circle",      label: "Profile")
+            tabBarItem(.watch,   systemImage: "applewatch",              label: "Watch")
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 8)
+        // Bottom padding accounts for the home indicator — iOS
+        // typically expects ~6-8pt above the indicator. The
+        // safeAreaInset itself respects the home indicator
+        // gap, so we only need this top-of-the-indicator
+        // breathing room.
+        .padding(.bottom, 6)
+        .background(
+            Color.background
+                .overlay(alignment: .top) {
+                    // Hairline above the bar to separate it
+                    // from scrolling content — same as iOS's
+                    // native tab bar separator.
+                    Rectangle()
+                        .fill(Color.divider)
+                        .frame(height: 0.5)
+                }
+                .ignoresSafeArea(.container, edges: .bottom)
+        )
+    }
+
+    private func tabBarItem(
+        _ tab: Tab,
+        systemImage: String,
+        label: String
+    ) -> some View {
+        let isActive = (selectedTab == tab)
+        return Button {
+            selectedTab = tab
+        } label: {
+            VStack(spacing: 2) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 22, weight: isActive ? .heavy : .semibold))
+                Text(label)
+                    .font(.system(size: 10, weight: .heavy))
+            }
+            .foregroundStyle(isActive ? Color.accent : Color.textSecondary)
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
+    }
+
+    // Center Race FAB. Sits in slot 3, visually elevated above
+    // the bar baseline so it reads as the primary action — the
+    // "thing this app is for." Wireframe spec: coral filled
+    // circle, soft accent halo, no label text below (the icon
+    // carries the meaning).
+    private var raceFAB: some View {
+        Button {
+            selectedTab = .race
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.accent, Color.accent.opacity(0.85)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 54, height: 54)
+                Image(systemName: "flag.checkered")
+                    .font(.system(size: 22, weight: .heavy))
+                    .foregroundStyle(Color.onAccent)
+            }
+            // Subtle coral spotlight so the FAB reads as the
+            // brand moment at glance. Tuned per mode — dialed
+            // back on light bg.
+            .shadow(
+                color: Color.accent.opacity(
+                    (profiles.first?.resolvedThemePreference.colorScheme == .light)
+                        ? 0.20 : 0.45
+                ),
+                radius: 14,
+                x: 0,
+                y: 4
+            )
+            // Lift up slightly so the FAB protrudes above the
+            // bar baseline like a typical app FAB tab.
+            .offset(y: -8)
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+        .accessibilityLabel("Race")
+        .accessibilityAddTraits(selectedTab == .race ? .isSelected : [])
     }
 
     // First-launch setup: ensure templates exist, ensure a UserProfile

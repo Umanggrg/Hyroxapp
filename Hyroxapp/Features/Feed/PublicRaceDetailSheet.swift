@@ -264,6 +264,17 @@ struct PublicRaceDetailSheet: View {
                 .font(.caption.weight(.heavy))
                 .foregroundStyle(Color.textTertiary)
                 .monospacedDigit()
+                .frame(width: 20)
+
+            // Station glyph — leading column so the eye can scan
+            // the column for station-kind at a glance instead of
+            // reading the label. Falls back to a minus when the
+            // station enum doesn't recognize the raw value (a
+            // future server-side station addition we don't know
+            // about yet).
+            Image(systemName: split.typedStation?.glyph ?? "minus")
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(Color.accent)
                 .frame(width: 24)
 
             VStack(alignment: .leading, spacing: 1) {
