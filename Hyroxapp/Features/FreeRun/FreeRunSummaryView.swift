@@ -57,6 +57,15 @@ struct FreeRunSummaryView: View {
                     if !run.splits.isEmpty {
                         splitsCard
                     }
+                    // §11 / §19 — same data-sources card we
+                    // surface on RaceSummaryView. Renders HR /
+                    // Motion / Calories attribution from the
+                    // registry (isCurrentSession: true — Free
+                    // Run summary always renders right after
+                    // finish so the registry state is fresh).
+                    // Self-hides when no HR source was
+                    // attributed (iPhone-only / no-HK runs).
+                    SourceProvenanceCard(isCurrentSession: true)
                     metaRow
                 }
                 .padding(.horizontal, Layout.screenMargin)
