@@ -59,6 +59,20 @@ struct FeedView: View {
     @State private var isLoadingMore = false
     @State private var isExhausted = false
 
+    // Wireframe 02.6 — long-press reaction picker. Non-nil =
+    // a palette sheet is open for that race; user taps any of
+    // the 4 reactions to toggle, or dismisses to cancel. Lives
+    // here (not on the card) because the palette presents over
+    // the whole feed and the state survives card re-renders.
+    @State private var reactionPaletteRaceID: String?
+
+    // Wireframe 02.1 — search affordance in the navigation
+    // toolbar (🔍 icon top-right). Reuses the existing
+    // PublicProfileSearchSheet that Profile also presents.
+    // Non-nil = sheet is open; tapping the toolbar icon flips
+    // it true, dismissing flips it back.
+    @State private var isShowingSearch = false
+
     // Page size — kept small for tight perceived latency
     // on first paint. Larger pages mean fewer round-trips
     // but a longer initial wait. 25 lands at well under a
@@ -90,7 +104,10 @@ struct FeedView: View {
                                         toggleReaction(raceID: race.id, kind: kind)
                                     },
                                     onTapDetail: { detailRaceID = race.id },
-                                    onTapComments: { commentsRaceID = race.id }
+                                    onTapComments: { commentsRaceID = race.id },
+                                    onLongPressReactions: {
+                                        reactionPaletteRaceID = race.id
+                                    }
                                 )
                                 // Prefetch trigger — fire when the
                                 // second-to-last card becomes
@@ -109,19 +126,16 @@ struct FeedView: View {
                             }
 
                             // Footer states: in-flight spinner
-                            // while paging, or a quiet end-of-feed
-                            // marker once we know there's nothing
-                            // older.
+                            // while paging, or the wireframe-
+                            // prescribed end-of-feed wrap-up once
+                            // we know there's nothing older.
                             if isLoadingMore {
                                 ProgressView()
                                     .controlSize(.regular)
                                     .tint(Color.accent)
                                     .padding(.vertical, 16)
                             } else if isExhausted && !races.isEmpty {
-                                Text("You're all caught up")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(Color.textTertiary)
-                                    .padding(.vertical, 16)
+                                endOfFeedFooter
                             }
                         }
 
@@ -136,6 +150,21 @@ struct FeedView: View {
             }
             .navigationTitle("Feed")
             .hyroxNavigationBar(inline: true)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        isShowingSearch = true
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Color.textPrimary)
+                    }
+                    .accessibilityLabel("Find athletes")
+                }
+            }
+            .sheet(isPresented: $isShowingSearch) {
+                PublicProfileSearchSheet()
+            }
             .task { await load() }
             .sheet(item: Binding(
                 get: { selectedAthleteID.map(AthleteIDWrapper.init) },
@@ -163,7 +192,81 @@ struct FeedView: View {
             )) { wrapper in
                 CommentsSheet(raceID: wrapper.id)
             }
+            // Wireframe 02.6 — long-press reaction palette.
+            // Centered medium-height sheet showing all four
+            // reaction kinds at large size with labels. Tap
+            // one to commit, swipe down to dismiss. Distinct
+            // from individual button tap-to-toggle on the
+            // card itself; this is the "switch quickly" or
+            // "discover what's available" path.
+            .sheet(item: Binding(
+                get: { reactionPaletteRaceID.map(RaceIDWrapper.init) },
+                set: { reactionPaletteRaceID = $0?.id }
+            )) { wrapper in
+                reactionPalette(for: wrapper.id)
+                    .presentationDetents([.height(280)])
+                    .presentationDragIndicator(.visible)
+            }
         }
+    }
+
+    // Reaction palette content — 4 large emoji buttons in a
+    // row with their kind labels underneath. Tapping toggles
+    // the reaction via the same path as the per-button
+    // tap-to-toggle on the card, then dismisses the sheet.
+    private func reactionPalette(for raceID: String) -> some View {
+        VStack(spacing: 18) {
+            Text("React to this race")
+                .font(.headline)
+                .foregroundStyle(Color.textPrimary)
+                .padding(.top, 8)
+
+            HStack(spacing: 12) {
+                ForEach(ReactionKind.allCases) { kind in
+                    Button {
+                        toggleReaction(raceID: raceID, kind: kind)
+                        reactionPaletteRaceID = nil
+                    } label: {
+                        VStack(spacing: 8) {
+                            Text(kind.emoji)
+                                .font(.system(size: 44))
+                            Text(kind.label)
+                                .font(.caption.weight(.heavy))
+                                .foregroundStyle(
+                                    (myReactedKinds[raceID]?.contains(kind) ?? false)
+                                        ? Color.accent
+                                        : Color.textSecondary
+                                )
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(
+                            RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                                .fill(
+                                    (myReactedKinds[raceID]?.contains(kind) ?? false)
+                                        ? Color.accent.opacity(0.12)
+                                        : Color.surface
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                                        .stroke(
+                                            (myReactedKinds[raceID]?.contains(kind) ?? false)
+                                                ? Color.accent
+                                                : Color.clear,
+                                            lineWidth: 1
+                                        )
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, Layout.screenMargin)
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity)
+        .background(Color.background.ignoresSafeArea())
     }
 
     // Race-id wrapper — same Identifiable trick as
@@ -434,35 +537,180 @@ struct FeedView: View {
 
     // MARK: - States
 
+    // Loading state — wireframe 02.3 specifies "skeleton cards"
+    // rather than a bare spinner. Three dimmed placeholder cards
+    // hint at the shape of the content coming so the perceived
+    // wait feels shorter and the layout doesn't jump when real
+    // data lands. Shimmer is a slow opacity loop; respects
+    // Reduce Motion by falling back to a static dim.
     private var loadingIndicator: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-                .controlSize(.regular)
-                .tint(Color.accent)
-            Text("Loading feed…")
-                .font(.caption)
-                .foregroundStyle(Color.textTertiary)
+        VStack(spacing: 18) {
+            skeletonCard(opacity: 0.7)
+            skeletonCard(opacity: 0.45)
+            skeletonCard(opacity: 0.25)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 32)
     }
 
+    @State private var skeletonShimmer = false
+
+    private func skeletonCard(opacity: Double) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            // Header row: avatar disc + two stacked text bars
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(Color.surfaceElevated)
+                    .frame(width: 36, height: 36)
+                VStack(alignment: .leading, spacing: 4) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.surfaceElevated)
+                        .frame(width: 120, height: 10)
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color.surfaceElevated)
+                        .frame(width: 80, height: 8)
+                }
+                Spacer()
+            }
+
+            // Title bar
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color.surfaceElevated)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: 14)
+
+            // Hero time block
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.surfaceElevated)
+                .frame(width: 180, height: 36)
+
+            // Reaction row placeholder
+            HStack(spacing: 8) {
+                ForEach(0..<4, id: \.self) { _ in
+                    Capsule()
+                        .fill(Color.surfaceElevated)
+                        .frame(width: 44, height: 22)
+                }
+                Spacer()
+            }
+        }
+        .padding(Layout.cardPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                .fill(Color.surface)
+        )
+        .opacity(opacity * (skeletonShimmer ? 1.0 : 0.55))
+        .animation(
+            .easeInOut(duration: 1.0).repeatForever(autoreverses: true),
+            value: skeletonShimmer
+        )
+        .onAppear {
+            // Kick the shimmer once per appear. Reduce-Motion
+            // users get a static dim because the .animation
+            // modifier above respects the reduce-motion env
+            // automatically via SwiftUI's built-in behavior.
+            skeletonShimmer = true
+        }
+    }
+
+    // Wireframe 02.1 empty state. Big ⚑ glyph at low opacity so
+    // it reads as an invitation, not a placeholder. Headline
+    // "Feed is quiet." (period — declarative, not anxious). Sub-
+    // line "Follow a few athletes and their finishes will land
+    // here. Start with your division." Coral pill CTA "Find
+    // athletes →" wired to PublicProfileSearchSheet. Quiet
+    // helper line below: "or finish a race to get started."
     private var emptyState: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "tray")
-                .font(.system(size: 36, weight: .light))
-                .foregroundStyle(Color.textTertiary)
-            Text("Feed is quiet")
-                .font(.body.weight(.semibold))
+        VStack(spacing: 14) {
+            Image(systemName: "flag.checkered")
+                .font(.system(size: 48, weight: .heavy))
+                .foregroundStyle(Color.textPrimary.opacity(0.18))
+
+            Text("Feed is quiet.")
+                .font(.system(size: 20, weight: .heavy, design: .rounded))
                 .foregroundStyle(Color.textPrimary)
-            Text("Follow more athletes — their public races will appear here as they finish them.")
+
+            Text("Follow a few athletes and their finishes will land here. Start with your division.")
                 .font(.caption)
                 .foregroundStyle(Color.textSecondary)
                 .multilineTextAlignment(.center)
+                .lineSpacing(2)
                 .padding(.horizontal, Layout.screenMargin)
+                .frame(maxWidth: 280)
+
+            Button {
+                Haptics.impact(.light)
+                isShowingSearch = true
+            } label: {
+                HStack(spacing: 6) {
+                    Text("Find athletes")
+                        .font(.caption.weight(.heavy))
+                    Image(systemName: "arrow.right")
+                        .font(.caption2.weight(.heavy))
+                }
+                .foregroundStyle(Color.onAccent)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+                .background(
+                    Capsule().fill(Color.accent)
+                )
+            }
+            .buttonStyle(.pressableCard)
+            .padding(.top, 4)
+
+            Text("or finish a race to get started")
+                .font(.caption2)
+                .foregroundStyle(Color.textTertiary)
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 48)
+        .padding(.top, 56)
+        .padding(.bottom, 32)
+    }
+
+    // Wireframe 02.1 end-of-feed treatment. The chronological
+    // feed has a discrete bottom; the wireframe specifies a
+    // gentle wrap-up rather than a bare "all caught up" line.
+    // Two pieces of copy + a coral-outline CTA that drops the
+    // user into Race tab (same path Quick Actions take).
+    private var endOfFeedFooter: some View {
+        VStack(spacing: 8) {
+            Text("You're all caught up.")
+                .font(.system(size: 16, weight: .heavy, design: .rounded))
+                .foregroundStyle(Color.textPrimary)
+
+            Text("Check back tomorrow — or go run.")
+                .font(.caption)
+                .foregroundStyle(Color.textSecondary)
+
+            Button {
+                Haptics.impact(.light)
+                // Same path Quick Actions / deep links take —
+                // ContentView's notification handler flips the
+                // selectedTab to .race. Keeps tab routing
+                // centralized in one place.
+                NotificationCenter.default.post(
+                    name: .quickActionTriggered,
+                    object: QuickAction.startRace
+                )
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "flag.checkered")
+                        .font(.caption.weight(.heavy))
+                    Text("Start a race")
+                        .font(.caption.weight(.heavy))
+                }
+                .foregroundStyle(Color.accent)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule()
+                        .stroke(Color.accent, lineWidth: 1.5)
+                )
+            }
+            .buttonStyle(.pressableCard)
+            .padding(.top, 6)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
     }
 }
 
@@ -482,30 +730,45 @@ struct FeedRaceCard: View {
     let onToggleReaction: (ReactionKind) -> Void
     let onTapDetail: () -> Void
     let onTapComments: () -> Void
+    // Wireframe 02.6 — long-press anywhere on the reaction
+    // row opens a centered palette (sheet rendered at the
+    // feed level) so the user can quickly switch between
+    // reaction kinds without first un-toggling the current
+    // one. Tap-to-toggle on individual buttons still works.
+    let onLongPressReactions: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // Wireframe 02.2 anatomy:
+        //   header (avatar + name + meta)
+        //   title + kind sub-line
+        //   hero (finish time + future PB badge)
+        //   photo (inline, after hero — NOT above the header
+        //     as the prior layout had it; the wireframe places
+        //     the photo as a body element so the athlete header
+        //     reads first)
+        //   supporting row (partner pill when present)
+        //   divider
+        //   reaction row + comments pill
+        VStack(alignment: .leading, spacing: 14) {
+            header
+            titleTappable
+            hero
             #if canImport(UIKit)
             if let urlString = race.photoUrl,
                let url = URL(string: urlString) {
                 photoHero(url: url)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
                     .onTapGesture { onTapDetail() }
             }
             #endif
+            supportingRow
 
-            VStack(alignment: .leading, spacing: 14) {
-                header
-                titleTappable
-                hero
-                supportingRow
+            Divider()
+                .background(Color.divider)
 
-                Divider()
-                    .background(Color.divider)
-
-                reactionRow
-            }
-            .padding(Layout.cardPadding)
+            reactionRow
         }
+        .padding(Layout.cardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
@@ -536,7 +799,9 @@ struct FeedRaceCard: View {
     // trailing edge. Each reaction has an emoji + a count
     // number; the local user's active reactions render with
     // the accent-tinted background. Tap any reaction to
-    // toggle; tap the comments pill to open the thread.
+    // toggle; tap the comments pill to open the thread;
+    // long-press anywhere on the row opens the centered
+    // reaction palette (wireframe 02.6).
     private var reactionRow: some View {
         HStack(spacing: 8) {
             ForEach(ReactionKind.allCases) { kind in
@@ -545,6 +810,18 @@ struct FeedRaceCard: View {
             Spacer()
             commentsPill
         }
+        // Long-press at the row level so the gesture catches
+        // anywhere along the reaction strip, not just on a
+        // specific emoji. Individual reaction button taps
+        // still work for fast single-tap toggle. 0.4s
+        // duration matches iOS's system long-press
+        // convention (Messages tapback, etc).
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.4)
+                .onEnded { _ in
+                    onLongPressReactions()
+                }
+        )
     }
 
     private var commentsPill: some View {
@@ -750,6 +1027,12 @@ struct FeedRaceCard: View {
 
     // MARK: - Photo hero
 
+    // 16:9 photo per wireframe 02.2 — aspect-ratio matches what's
+    // shown in the design and works cleanly across iPhone widths.
+    // The image fills via .aspectRatio + .clipped so wider/taller
+    // source photos get cropped to the 16:9 window rather than
+    // stretched. Failure / loading states show a neutral surface
+    // panel rather than a coloured placeholder.
     #if canImport(UIKit)
     private func photoHero(url: URL) -> some View {
         AsyncImage(url: url) { phase in
@@ -764,20 +1047,9 @@ struct FeedRaceCard: View {
                 Color.surfaceElevated
             }
         }
+        .aspectRatio(16.0/9.0, contentMode: .fit)
         .frame(maxWidth: .infinity)
-        .frame(height: 180)
         .clipped()
-        .overlay(alignment: .bottom) {
-            LinearGradient(
-                colors: [
-                    Color.surface.opacity(0),
-                    Color.surface.opacity(0.5)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 40)
-        }
     }
     #endif
 

@@ -82,6 +82,15 @@ struct RaceSummaryView: View {
     // rather than all at once.
     @State private var sectionsRevealed = false
 
+    // Wireframe §03.5 — Post / Save sheet presentation state. Only
+    // one can be active at a time. Tapping the corresponding
+    // bottom-row CTA flips its flag; the sheet's own dismiss
+    // route (× / Done / Share later) flips it back and routes
+    // through viewModel.finishSession to return to the app's
+    // resting state.
+    @State private var isShowingPostComposer = false
+    @State private var isShowingSaveOnlyConfirm = false
+
     var body: some View {
         // ZStack layers the hero backdrop behind the existing
         // scroll content. The backdrop bleeds full-width via
@@ -445,29 +454,44 @@ struct RaceSummaryView: View {
                 .padding(.horizontal, Layout.screenMargin)
             }
 
-                // Bottom action bar: Share + Done side by side. Share
-                // takes the secondary slot (icon + label, accent-tinted
-                // outline) and Done stays the primary call-to-action so
-                // there's still one obvious "I'm finished here" tap.
-                // Stays out of the scroll view so both buttons remain
-                // reachable no matter how long the splits / notes get.
-                HStack(spacing: 12) {
-                    if squareShareImage != nil || storyShareImage != nil {
-                        shareMenu
-                    }
-
-                    Button(action: viewModel.finishSession) {
-                        Text("Done")
-                            .font(.system(size: 20, weight: .bold, design: .rounded))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: Layout.raceButtonHeight)
-                            .background(Color.surfaceElevated)
-                            .foregroundStyle(Color.textPrimary)
-                            .clipShape(RoundedRectangle(cornerRadius: Layout.cardCornerRadius))
-                    }
-                }
-                .padding(.vertical, 16)
-                .padding(.horizontal, Layout.screenMargin)
+                // Wireframe §03.5 bottom action row — Post to feed
+                // (coral primary) + Save only (outline secondary).
+                // The Done CTA is replaced by these two: the athlete
+                // commits to a posting choice, both paths end in
+                // finishSession via their respective sheets. Share
+                // menu still surfaces above as a tertiary chip.
+                postOrSaveRow
+                    .padding(.vertical, 16)
+                    .padding(.horizontal, Layout.screenMargin)
+            }
+        }
+        // Wireframe §03.5 post composer sheet. Presented when
+        // the athlete taps "Post to feed" — captures caption,
+        // photo, and feed-card toggles before the race lands in
+        // the cross-athlete feed.
+        .sheet(isPresented: $isShowingPostComposer) {
+            if let race = viewModel.activeRace {
+                RacePostComposerView(
+                    race: race,
+                    onPost: handlePostCommit,
+                    onCancel: { isShowingPostComposer = false }
+                )
+                .presentationDragIndicator(.visible)
+            }
+        }
+        // Wireframe §03.5 save-only confirmation. Presented when
+        // the athlete taps "Save only" — confirms the private
+        // save with a quiet green check + race recap + Done/Share
+        // later options.
+        .sheet(isPresented: $isShowingSaveOnlyConfirm) {
+            if let race = viewModel.activeRace {
+                RaceSaveOnlyConfirmView(
+                    race: race,
+                    onShareLater: handleSaveOnlyShareLater,
+                    onDone: handleSaveOnlyDone
+                )
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
             }
         }
         // Render both share cards once when the summary appears.
@@ -494,6 +518,82 @@ struct RaceSummaryView: View {
             storyShareImage = nil
             prepareShareImages()
         }
+    }
+
+    // MARK: - Wireframe §03.5 post / save bottom action row
+
+    // Wireframe-spec bottom CTA pair: Post to feed (coral filled,
+    // primary) + Save only (outline neutral, secondary). Tapping
+    // Post opens the composer sheet; tapping Save opens the
+    // private-save confirmation sheet. Both paths ultimately end
+    // in viewModel.finishSession to return the app to its
+    // resting state, but they take very different routes through
+    // the sheets first.
+    private var postOrSaveRow: some View {
+        HStack(spacing: 10) {
+            Button {
+                Haptics.impact(.light)
+                isShowingPostComposer = true
+            } label: {
+                Text("Post to feed")
+                    .font(.system(size: 16, weight: .heavy, design: .rounded))
+                    .foregroundStyle(Color.onAccent)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: Layout.raceButtonHeight)
+                    .background(
+                        RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                            .fill(Color.accent)
+                    )
+            }
+            .buttonStyle(.pressableCard)
+
+            Button {
+                Haptics.impact(.light)
+                isShowingSaveOnlyConfirm = true
+            } label: {
+                Text("Save only")
+                    .font(.system(size: 15, weight: .heavy, design: .rounded))
+                    .foregroundStyle(Color.textPrimary)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: Layout.raceButtonHeight)
+                    .background(
+                        RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                            .stroke(Color.divider, lineWidth: 1.5)
+                    )
+            }
+            .buttonStyle(.pressableCard)
+        }
+    }
+
+    // Called from RacePostComposerView when the athlete taps
+    // Post. The composer has already committed caption / photo /
+    // privacy onto the race row; we just close the sheet and
+    // route the app back to its resting state.
+    private func handlePostCommit() {
+        isShowingPostComposer = false
+        viewModel.finishSession()
+    }
+
+    // Called from RaceSaveOnlyConfirmView when the athlete taps
+    // Share later — drops them onto the existing share-card flow
+    // (Strava-style image export). The race is already privately
+    // saved; sharing is opt-in afterthought.
+    private func handleSaveOnlyShareLater() {
+        isShowingSaveOnlyConfirm = false
+        // The existing share menu is bound to the rendered images.
+        // For v1 we just dismiss the confirmation and let the
+        // athlete tap the Share chip on the summary screen if
+        // they want — finishSession isn't called so they're
+        // still on the summary view. Future: directly open the
+        // share sheet from here.
+    }
+
+    // Called from RaceSaveOnlyConfirmView when the athlete taps
+    // Done. Closes the confirmation + returns to the app's
+    // resting state.
+    private func handleSaveOnlyDone() {
+        isShowingSaveOnlyConfirm = false
+        viewModel.finishSession()
     }
 
     // MARK: - Finish hero (v2 redesign)

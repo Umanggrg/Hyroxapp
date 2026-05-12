@@ -82,7 +82,9 @@ struct WatchAlertOverlay: View {
     private var tint: Color {
         switch cue {
         case .hold:    return Color.success
-        case .slow:    return Color.accent
+        case .slow:    return Color.slow
+        case .redline: return Color.redline
+        case .recover: return Color.recover
         case .push:    return Color(hex: 0x5B9BD5)
         case .workout, .none: return Color.surface
         }
@@ -94,6 +96,8 @@ struct WatchAlertOverlay: View {
         switch cue {
         case .hold:    return "hand.raised.fill"  // "stay here"
         case .slow:    return "exclamationmark.triangle.fill"
+        case .redline: return "flame.fill"  // critical
+        case .recover: return "lungs.fill"  // breathe down
         case .push:    return "bolt.fill"
         case .workout: return "dumbbell.fill"
         case .none:    return ""
@@ -104,6 +108,8 @@ struct WatchAlertOverlay: View {
         switch cue {
         case .hold:    return "HOLD"
         case .slow:    return "SLOW"
+        case .redline: return "REDLINE"
+        case .recover: return "RECOVER"
         case .push:    return "PUSH"
         case .workout: return "WORK"
         case .none:    return ""
@@ -114,6 +120,8 @@ struct WatchAlertOverlay: View {
         switch cue {
         case .hold:    return "On pace · stay steady"
         case .slow:    return "HR rising · pull back"
+        case .redline: return "Ease off NOW"
+        case .recover: return "Breathe down 30s"
         case .push:    return "More gas · go harder"
         case .workout: return ""
         case .none:    return ""
@@ -126,12 +134,13 @@ struct WatchAlertOverlay: View {
 // sled-push the wrist is loaded and any takeover reads as a
 // glitch (see §15: silence = you're fine on workout stations);
 // none because there's no HR sample yet, so any "alert" would
-// be premature.
+// be premature. The new redline/recover variants DO fire the
+// overlay — they're the most consequential cues.
 extension RaceStats.CoachingCue {
     var shouldShowAlertOverlay: Bool {
         switch self {
-        case .hold, .slow, .push: return true
-        case .workout, .none:     return false
+        case .hold, .slow, .redline, .recover, .push: return true
+        case .workout, .none:                          return false
         }
     }
 }

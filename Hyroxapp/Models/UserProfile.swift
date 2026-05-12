@@ -214,6 +214,17 @@ final class UserProfile {
     // Off → the chip just shows BPM + zone color, no command.
     var coachingCuesEnabled: Bool = true
 
+    // Full-screen coaching banner overlay (wireframe §03.3) that
+    // takes over the top of the race screen for 2.5s when the
+    // athlete enters a new HR state (HOLD / SLOW / REDLINE /
+    // RECOVER / PUSH). Distinct from `coachingCuesEnabled` above:
+    // that one controls the always-on inline chip text; this
+    // one controls the decisive interrupt-style overlay. The
+    // overlay also fires distinct haptic patterns per state.
+    // Off → no banner, no haptic. The inline chip continues to
+    // reflect state via its color/text.
+    var coachingOverlaysEnabled: Bool = true
+
     // Pace ahead/behind chip in the in-race header. Compares
     // actual elapsed vs naïve split of target finish time.
     // Off → no pace chip at all. Athletes who race by feel

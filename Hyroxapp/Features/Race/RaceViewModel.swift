@@ -985,6 +985,69 @@ final class RaceViewModel {
         countdownValue = nil
     }
 
+    // Wireframe §03.4 "End race here, save partial." End an
+    // in-progress race EARLY and persist it with however many
+    // segments the athlete actually completed. Distinct from
+    // `abandon()` (which throws the row away) and `advance()` on
+    // the final station (which finishes a complete race).
+    //
+    // Routes through `engine.forceFinish(at:)` which closes the
+    // currently-active segment as a real-elapsed Split and stamps
+    // the engine state to `.finished`. We then mirror that state
+    // onto the persisted Race row + tear down the Live Activity /
+    // Watch session the same way a natural finish does.
+    //
+    // Downstream views can detect a partial race by comparing
+    // `splits.count` to `totalSegments`.
+    func endEarlyAndSave() {
+        guard let race = activeRace, !race.isFinished else { return }
+        let now = Date()
+
+        engine.forceFinish(at: now)
+
+        // Mirror engine state onto the Race row using the same path
+        // a natural finish takes. This stamps `endedAt` and
+        // captures any closing-segment Split the engine just
+        // appended.
+        persistActiveRace()
+
+        // Write the partial race to HealthKit + rehydrate HR/cal
+        // segment stats so the History card has the same data
+        // surface a complete race does. Partial races still
+        // represent real work; they belong in Health.
+        saveFinishedRaceToHealthKit()
+        rehydrateSegmentStatsAfterFinish()
+
+        // End the Live Activity with a final state, same as a
+        // natural finish so the lock-screen ribbon shows
+        // "FINISHED" (and the athlete sees their partial total
+        // time briefly there).
+        #if canImport(ActivityKit)
+        let finalState = currentLiveActivityState()
+        LiveActivityService.shared.end(finalState: finalState)
+        #endif
+
+        // Tell the Watch the workout's done so it can finalize
+        // the HKWorkoutSession to HealthKit.
+        #if canImport(WatchConnectivity)
+        WatchCompanionService.shared.sendControl(.endWorkout(at: now))
+        #endif
+
+        // Push to Supabase so the partial race lands in the
+        // feed (if not marked private). Same fire-and-forget
+        // pattern the natural-finish path uses.
+        #if canImport(UIKit)
+        if let userID = AuthService.shared.user?.id.uuidString {
+            Task { @MainActor in
+                await RaceSyncService.pushFinishedRace(race, userID: userID)
+            }
+        }
+        #endif
+
+        stopHeartRatePolling()
+        cancelCountdown()
+    }
+
     // Abandon an in-progress race, removing its persisted row. Not wired into
     // v0.1 UI yet but available for a future "cancel race" affordance.
     func abandon() {

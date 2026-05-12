@@ -293,6 +293,14 @@ struct SettingsView: View {
             )
             .listRowBackground(Color.surface)
 
+            Toggle("Coaching overlays", isOn: $profile.coachingOverlaysEnabled)
+                .listRowBackground(Color.surface)
+
+            footnote(
+                "Full-width banner that takes the top of the screen for ~2 seconds when your HR enters a new state — HOLD / SLOW / REDLINE / RECOVER / PUSH. Each fires a distinct haptic. Off → no banner, no buzz."
+            )
+            .listRowBackground(Color.surface)
+
             Toggle("Pace chip", isOn: $profile.paceChipEnabled)
                 .listRowBackground(Color.surface)
 

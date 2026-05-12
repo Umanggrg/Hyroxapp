@@ -3572,19 +3572,32 @@ enum RaceStats {
     enum CoachingCue: String, Equatable, Sendable {
         // Athlete is at race-sustainable HR during a run. Reads as
         // affirmation: "you're doing it right, keep it here."
+        // Banner: blue, "Zone 4 lock-in".
         case hold
 
-        // Athlete's HR is above Z3 during a run. Tactical push
-        // mid-run is fine for short bursts (final 200m, hill);
-        // a sustained Z4-Z5 mid-run is pacing failure. The cue
-        // doesn't know which it is — it just flags "you can't
-        // hold this for 90 min."
+        // Athlete's HR is creeping above Z4 (but not redline) during
+        // a run. Tactical push mid-run is fine for short bursts; a
+        // sustained Z5 mid-run is pacing failure. Banner: amber,
+        // "Pull back 5%".
         case slow
+
+        // Athlete is at or near maxHR. Critical danger zone — they
+        // will pay for this in the next station. Banner: red, "Ease
+        // off NOW". Wireframe spec: triggered when HR ≥ maxHR - 5
+        // ("max-2" in the wireframe copy is illustrative; real
+        // physiology rarely hits that close to max for sustained
+        // periods).
+        case redline
+
+        // Athlete just exited a workout station or HR is dropping
+        // rapidly. The cue tells them to ride the descent: "Breathe
+        // down 30s." Banner: green, recovery-supportive copy.
+        case recover
 
         // Athlete is below Z3 during a run. They've got more in
         // the tank. Common at the start of races when fresh
         // legs feel slow, or when athlete is sandbagging out
-        // of fear.
+        // of fear. Final-run variant: "Last 600m · GO".
         case push
 
         // Currently on a workout station — no pace cue. Workouts
@@ -3596,33 +3609,100 @@ enum RaceStats {
         // state. UI hides the chip entirely in this case.
         case none
 
+        // Single-verb display label. Wireframe 03.3 uses verb-first
+        // typography on the banner — HOLD, SLOW, REDLINE, RECOVER,
+        // PUSH — and the same shortened forms work for the inline
+        // chip pill since the chip's space is tight too.
         var displayText: String {
             switch self {
-            case .hold:    return "HOLD PACE"
-            case .slow:    return "SLOW DOWN"
-            case .push:    return "PUSH HARDER"
+            case .hold:    return "HOLD"
+            case .slow:    return "SLOW"
+            case .redline: return "REDLINE"
+            case .recover: return "RECOVER"
+            case .push:    return "PUSH"
             case .workout: return "WORK"
             case .none:    return ""
             }
         }
 
+        // Wireframe 03.3 banner sub-line (left column): verb-first
+        // action language. Eight-to-twelve chars. "What should I do
+        // about this?"
+        var bannerActionLine: String {
+            switch self {
+            case .hold:    return "Zone 4 lock-in"
+            case .slow:    return "Pull back 5%"
+            case .redline: return "Ease off NOW"
+            case .recover: return "Breathe down 30s"
+            case .push:    return "Last segment · GO"
+            case .workout: return ""
+            case .none:    return ""
+            }
+        }
+
+        // Wireframe 03.3 banner sub-sub-line (smaller, lower
+        // opacity): the physiological detail. The "why" beneath
+        // the "what." Includes the current HR + a single-word
+        // tag describing the state. PUSH skips the HR detail
+        // because the cue is positional ("you're at the finish
+        // line"), not physiological.
+        func bannerDetail(currentHR: Double?) -> String {
+            let hrStr = currentHR.map { "\(Int($0.rounded())) bpm" } ?? "—"
+            switch self {
+            case .hold:    return "\(hrStr) · clean"
+            case .slow:    return "\(hrStr) · creeping"
+            case .redline: return "\(hrStr) · near max"
+            case .recover: return "\(hrStr) · trending down"
+            case .push:    return "earn the finish"
+            case .workout: return ""
+            case .none:    return ""
+            }
+        }
+
+        // Banner background color per state. These ARE the wireframe
+        // hex values (blue / amber / red / green / coral) — the same
+        // role-color palette CLAUDE.md §15 documents for the Watch
+        // alert overlay system. Distinct from the more general
+        // race-state colors so banner reads as decisive even when
+        // it overlaps a pace-amber background.
+        var bannerColorHex: UInt32 {
+            switch self {
+            case .hold:    return 0x0A84FF  // iOS systemBlue
+            case .slow:    return 0xFF9F0A  // iOS systemOrange
+            case .redline: return 0xFF3B30  // iOS systemRed
+            case .recover: return 0x32D74B  // iOS systemGreen
+            case .push:    return 0xFF4530  // brand coral
+            case .workout: return 0x000000  // banner not shown
+            case .none:    return 0x000000  // banner not shown
+            }
+        }
+
+        // True for states that should fire a banner overlay. .workout
+        // and .none don't — both are absence-of-coaching states.
+        var firesBanner: Bool {
+            switch self {
+            case .hold, .slow, .redline, .recover, .push: return true
+            case .workout, .none:                          return false
+            }
+        }
+
         // Coaching-cue colors map onto the HYROX zone palette so
         // the chip's color reinforces the same vocabulary the
-        // per-station tag uses. Hold is green (good zone), slow
-        // is red (above sustainable), push is blue (below race
-        // pace), workout is neutral white.
-        var colorHex: UInt {
+        // per-station tag uses. Distinct from `bannerColorHex`
+        // because the inline chip uses the existing race-state
+        // palette (lower visual weight) while the banner uses the
+        // alert-overlay palette (higher visual weight).
+        //
+        // UInt32 (not UInt) to match `Color(hex:)`'s parameter type
+        // — Swift won't implicitly convert UInt → UInt32 for
+        // variables, only for literals.
+        var colorHex: UInt32 {
             switch self {
             case .hold:    return 0x32D74B  // success green
-            // SLOW means "HR is above sustainable, ease back" — this
-            // is the redline / danger semantic. Maps to the same
-            // hex that `Color.redline` exposes after the v1 design-
-            // system shift. (Pre-v1 the comment read "accent red"
-            // because `Color.accent` used to be this hex; the
-            // accent has since moved to `#FF4530` and `#FF3B30` is
-            // exclusively the redline state color.)
-            case .slow:    return 0xFF3B30  // redline red
-            case .push:    return 0x5B9BD5  // calm blue (matches Z1)
+            case .slow:    return 0xFFB020  // slow amber (race-state)
+            case .redline: return 0xFF3B30  // redline red
+            case .recover: return 0x3A82F7  // recover blue (race-state)
+            case .push:    return 0xBFFF3E  // push lime (race-state)
             case .workout: return 0xF5F5F7  // textPrimary off-white
             case .none:    return 0x000000  // unused
             }
@@ -3666,6 +3746,14 @@ enum RaceStats {
             return .workout
         }
 
+        // Redline — at or near max HR regardless of personal band.
+        // Wireframe 03.3 spec: critical danger zone. Threshold is
+        // maxHR - 5 (close to ceiling without demanding literal
+        // maxHR-2, which is rarely sustained).
+        if hr >= Double(maxHR - 5) {
+            return .redline
+        }
+
         // Personalized path: when the athlete has enough history
         // to derive an observed race-pace band, classify against
         // it directly. Both bounds must be present and ordered
@@ -3688,6 +3776,92 @@ enum RaceStats {
         case .z3:      return .hold
         case .z4, .z5: return .slow
         }
+    }
+
+    // Overlay-cue variant for the 03.3 banner. Takes the richer
+    // context the banner needs (segment index, total segments,
+    // optional prior-HR sample) and returns the full 5-state
+    // palette including `.recover` (post-workout HR descent) and
+    // `.push` (final-run kick).
+    //
+    // The chip function above stays simpler — it's a live
+    // every-tick classifier without history. The banner fires
+    // less often (max once per 10s cooldown), so spending a few
+    // more inputs here is cheap.
+    //
+    // Inputs:
+    //   • currentHR / maxHR / currentStation / personalLower / personalUpper
+    //     — same as `coachingCue`.
+    //   • priorHR — the previous HR sample, used to detect downward
+    //     trends. nil disables `.recover` detection.
+    //   • completedSegmentsCount / totalSegments — used to detect
+    //     "this is the final run" for the PUSH variant.
+    //
+    // Decision order (first match wins):
+    //   1. Workout station → .workout (no banner)
+    //   2. HR ≥ maxHR - 5 → .redline
+    //   3. Recovering (priorHR - currentHR ≥ 8 bpm AND on a run
+    //      AND currentHR still above Z3 ceiling) → .recover
+    //   4. On the final segment AND HR < Z4 → .push
+    //   5. Otherwise → same classification as `coachingCue`.
+    static func coachingOverlayCue(
+        currentHR: Double?,
+        maxHR: Int,
+        currentStation: Station?,
+        completedSegmentsCount: Int,
+        totalSegments: Int,
+        priorHR: Double? = nil,
+        personalLowerHR: Double? = nil,
+        personalUpperHR: Double? = nil
+    ) -> CoachingCue {
+        guard let hr = currentHR,
+              hr > 0,
+              let station = currentStation,
+              maxHR > 0
+        else { return .none }
+
+        // 1. Workout — no banner.
+        if station.kind == .workout {
+            return .workout
+        }
+
+        // 2. Redline — same threshold as chip function.
+        if hr >= Double(maxHR - 5) {
+            return .redline
+        }
+
+        // 3. Recovery — meaningful downward HR trend while still
+        //    above race-pace ceiling. We want this to fire when
+        //    the athlete just left a workout and is trying to
+        //    settle their HR back into Z3 for the run.
+        if let prior = priorHR,
+           prior > 0,
+           prior - hr >= 8 {
+            let zone = HRZone.zone(for: hr, maxBPM: maxHR)
+            if zone == .z4 || zone == .z5 {
+                return .recover
+            }
+        }
+
+        // 4. Final-run kick — wireframe shows PUSH on RUN · 8/8.
+        //    Fire when the athlete is on the final segment AND
+        //    HR is below Z4 (so they have headroom to push).
+        let isFinalSegment = (completedSegmentsCount + 1) == totalSegments
+        if isFinalSegment {
+            let zone = HRZone.zone(for: hr, maxBPM: maxHR)
+            if zone == .z1 || zone == .z2 || zone == .z3 {
+                return .push
+            }
+        }
+
+        // 5. Fall back to the standard cue.
+        return coachingCue(
+            currentHR: currentHR,
+            maxHR: maxHR,
+            currentStation: currentStation,
+            personalLowerHR: personalLowerHR,
+            personalUpperHR: personalUpperHR
+        )
     }
 
     // MARK: - Effort score (snapshot-side, shared with watchOS)

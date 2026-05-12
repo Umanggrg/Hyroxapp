@@ -91,4 +91,45 @@ enum Haptics {
         WKInterfaceDevice.current().play(.failure)
         #endif
     }
+
+    // Wireframe 03.3 — per-coaching-cue haptic pattern. Each banner
+    // state has a distinct rhythm so the wrist (or pocket) can tell
+    // the cue apart before the eye reaches the screen:
+    //
+    //   • HOLD     → single gentle tap         (you're in the zone)
+    //   • SLOW     → two quick taps            (ease back)
+    //   • REDLINE  → three urgent heavy taps   (critical, act now)
+    //   • RECOVER  → single soft tap           (let the descent happen)
+    //   • PUSH     → strong single tap         (go go go)
+    //   • workout/none → no haptic
+    //
+    // The 3-tap REDLINE pattern uses asyncAfter to space out the
+    // impacts. Same approach the watchOS RaceView already takes
+    // for the same cue on the wrist.
+    static func coachingCue(_ cue: RaceStats.CoachingCue) {
+        switch cue {
+        case .hold:
+            impact(.light)
+        case .slow:
+            impact(.medium)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                impact(.medium)
+            }
+        case .redline:
+            impact(.heavy)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                impact(.heavy)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
+                impact(.heavy)
+            }
+        case .recover:
+            impact(.soft)
+        case .push:
+            impact(.heavy)
+        case .workout, .none:
+            // No haptic on these states — they're absence-of-cue.
+            break
+        }
+    }
 }

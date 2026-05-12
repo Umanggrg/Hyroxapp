@@ -283,6 +283,19 @@ struct WatchRaceView: View {
             // signal watchOS exposes without going to .notification
             // (which is too loud for an in-race nudge).
             Haptics.warning()
+        case .redline:
+            // Critical — three urgent impacts. Stronger than warning,
+            // matches the wireframe's "three urgent taps" haptic
+            // pattern for the REDLINE state.
+            Haptics.impact(.heavy)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { Haptics.impact(.heavy) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) { Haptics.impact(.heavy) }
+        case .recover:
+            // Calming — single soft tap. The wireframe specifies
+            // "long slow pulse"; closest haptic primitive is the
+            // light impact (Apple doesn't expose a sustained
+            // vibration on watchOS).
+            Haptics.impact(.light)
         case .push:
             // Gentle "more gas" tap. Light click, easy to miss
             // mid-stride which is the right tradeoff — pushing is
@@ -884,7 +897,9 @@ struct WatchRaceView: View {
                     let cueColor: Color = {
                         switch cue {
                         case .hold:    return Color.success
-                        case .slow:    return Color.accent
+                        case .slow:    return Color.slow
+                        case .redline: return Color.redline
+                        case .recover: return Color.recover
                         case .push:    return Color(hex: 0x5B9BD5)
                         case .workout, .none: return zone.color
                         }

@@ -273,6 +273,76 @@ struct RaceEngine: Sendable {
         state = .notStarted
     }
 
+    // End an in-progress race EARLY (wireframe §03.4 "End race here,
+    // save partial"). Closes whatever segment was active as a Split
+    // using its real elapsed time, then transitions to `.finished`
+    // with however many splits the athlete actually completed.
+    //
+    // Handles all three "in-flight" states:
+    //   • .inProgress  → close the currently-active segment, finish
+    //   • .paused      → resume math wouldn't fire here (we're not
+    //                    resuming, we're stopping), so the paused
+    //                    segment's elapsed-as-of-pause is what we
+    //                    capture. We use `pausedAt` as the natural
+    //                    end-instant for the closing Split.
+    //   • .inRoxzone   → no in-flight segment to close; just stamp
+    //                    finished with the splits we have.
+    //
+    // Result is a `.finished` state with `splits.count <` sequence.count.
+    // The Race row's `endedAt` is set to the same `now` so total
+    // duration math is consistent. Downstream views can detect a
+    // "partial" race by comparing `splits.count` vs `totalSegments`.
+    //
+    // No-op from `.notStarted` or already-`.finished` — both lack an
+    // in-flight race to end.
+    mutating func forceFinish(at now: Date) {
+        switch state {
+        case .inProgress(let startedAt, let segmentStart, var splits):
+            let index = splits.count
+            if index < sequence.count {
+                var completed = Split(
+                    station: sequence[index],
+                    startedAt: segmentStart,
+                    endedAt: now
+                )
+                if let roxzone = pendingRoxzoneSeconds {
+                    completed = completed.withRoxzone(seconds: roxzone)
+                    pendingRoxzoneSeconds = nil
+                }
+                splits.append(completed)
+            }
+            state = .finished(startedAt: startedAt, endedAt: now, splits: splits)
+
+        case .paused(let startedAt, let segmentStart, var splits, let pausedAt):
+            let index = splits.count
+            if index < sequence.count {
+                var completed = Split(
+                    station: sequence[index],
+                    startedAt: segmentStart,
+                    endedAt: pausedAt
+                )
+                if let roxzone = pendingRoxzoneSeconds {
+                    completed = completed.withRoxzone(seconds: roxzone)
+                    pendingRoxzoneSeconds = nil
+                }
+                splits.append(completed)
+            }
+            // Use pausedAt as the race's ended-at — if the athlete
+            // paused at 18:32 and then ended the race, their finish
+            // time is 18:32, not "now plus paused duration."
+            state = .finished(startedAt: startedAt, endedAt: pausedAt, splits: splits)
+
+        case .inRoxzone(let startedAt, let splits, _):
+            // No active segment to close — splits are already
+            // captured up to the start of this transition.
+            state = .finished(startedAt: startedAt, endedAt: now, splits: splits)
+
+        case .notStarted, .finished:
+            // Nothing to end.
+            return
+        }
+    }
+
     // End the current segment and enter Roxzone. Two-tap-advance
     // path: closes the just-finished segment with a Split entry,
     // transitions to .inRoxzone where the transition timer counts

@@ -363,7 +363,9 @@ struct WatchRaceMainPage: View {
     private func colorForCue(_ cue: RaceStats.CoachingCue, fallback: Color) -> Color {
         switch cue {
         case .hold:    return Color.success
-        case .slow:    return Color.accent
+        case .slow:    return Color.slow
+        case .redline: return Color.redline
+        case .recover: return Color.recover
         case .push:    return Color(hex: 0x5B9BD5)
         case .workout, .none: return fallback
         }
@@ -698,7 +700,9 @@ struct WatchRaceHRPage: View {
     private func colorForCue(_ cue: RaceStats.CoachingCue, fallback: Color) -> Color {
         switch cue {
         case .hold:    return Color.success
-        case .slow:    return Color.accent
+        case .slow:    return Color.slow
+        case .redline: return Color.redline
+        case .recover: return Color.recover
         case .push:    return Color(hex: 0x5B9BD5)
         case .workout, .none: return fallback
         }
