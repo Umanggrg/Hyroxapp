@@ -854,6 +854,17 @@ struct RaceDetailView: View {
                 )
                 .padding(.horizontal, Layout.screenMargin)
             }
+
+            // §19.2 — historical source provenance. Only
+            // renders when the race carries an `hrSourcePrimary`
+            // (set on finish for any race tracked after the
+            // §19 source-attribution layer landed). Older
+            // races without the field self-hide.
+            SourceProvenanceCard(
+                isCurrentSession: false,
+                race: race
+            )
+            .padding(.horizontal, Layout.screenMargin)
         }
         .padding(.vertical, 16)
     }

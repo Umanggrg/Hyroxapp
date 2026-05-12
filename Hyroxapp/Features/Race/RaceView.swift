@@ -82,6 +82,15 @@ struct RaceView: View {
     @State private var isShowingFinishHero = false
     @State private var finishHeroDismissTask: Task<Void, Never>?
 
+    // §19 — mid-race HR source fallover banner. Fires when
+    // SensorSourceRegistry's lastHRSource changes during an
+    // active race (Watch disconnects → AirPods take over, or
+    // vice versa). 2s auto-dismiss; no haptic — informational
+    // only.
+    @State private var hrSourceBanner: HRSourceBannerInfo?
+    @State private var hrSourceBannerDismissTask: Task<Void, Never>?
+    @State private var lastObservedHRSource: SensorSourceRegistry.HRSource = .unknown
+
     // Wireframe 03.4 — pause-sheet presentation state. Set true
     // when athlete taps the in-race pause button; the engine is
     // paused alongside so the underlying timer freezes while the
@@ -198,6 +207,7 @@ struct RaceView: View {
             countdownOverlayIfActive
             startRunOverlayIfActive
             coachingBannerOverlay
+            hrSourceBannerOverlay
         }
         .animation(
             reduceMotion ? .none : .spring(response: 0.4, dampingFraction: 0.85),
@@ -313,6 +323,16 @@ struct RaceView: View {
             }
             .onChange(of: viewModel.currentHeartRateBPM) { _, _ in
                 handleHeartRateChangeForWatchSync()
+            }
+            // §19 — mid-race HR source fallover. Watch the
+            // registry's lastHRSource; if it changes while a
+            // race is in progress AND the previous value was
+            // a real source (not .unknown — that's the initial
+            // assignment), fire a 2s informational banner so
+            // the athlete knows their HR data is intact under
+            // a different sensor.
+            .onChange(of: SensorSourceRegistry.shared.lastHRSource) { oldValue, newValue in
+                handleHRSourceChange(from: oldValue, to: newValue)
             }
             #if canImport(MultipeerConnectivity)
             .onChange(of: duoCoordinator?.session.state) { _, newState in
@@ -1060,6 +1080,90 @@ struct RaceView: View {
         }
     }
 
+    // MARK: - HR source fallover banner overlay (§19)
+
+    // Quiet 2s banner that fires when the HR source changes
+    // mid-race (Watch disconnects → AirPods take over, etc.).
+    // Sits below the coaching banner's z-index — coaching cues
+    // are higher-priority interruptions. No haptic — this is
+    // informational, not actionable.
+    @ViewBuilder
+    private var hrSourceBannerOverlay: some View {
+        if let info = hrSourceBanner, viewModel.hasStarted, !viewModel.isFinished {
+            VStack {
+                HRSourceBanner(info: info)
+                    .padding(.horizontal, 8)
+                    .padding(.top, 4)
+                    .onTapGesture {
+                        hrSourceBannerDismissTask?.cancel()
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
+                            hrSourceBanner = nil
+                        }
+                    }
+                Spacer()
+            }
+            .transition(
+                reduceMotion
+                    ? .opacity
+                    : .move(edge: .top).combined(with: .opacity)
+            )
+            .zIndex(9)  // just below the coaching banner
+        }
+    }
+
+    // Called by attachObservers' .onChange(of: lastHRSource).
+    // Only fires the banner when:
+    //   1. The race is actually running (hasStarted, not
+    //      finished, not pre-race).
+    //   2. The previous observed source was a real source
+    //      (.unknown is the registry's initial state — we
+    //      don't want to fire the banner on first-sample
+    //      arrival, just on real fallovers between two
+    //      known sources).
+    //   3. The change isn't a transient flicker we already
+    //      banner'd 2s ago.
+    private func handleHRSourceChange(
+        from oldValue: SensorSourceRegistry.HRSource,
+        to newValue: SensorSourceRegistry.HRSource
+    ) {
+        guard viewModel.hasStarted, !viewModel.isFinished else {
+            lastObservedHRSource = newValue
+            return
+        }
+        // Suppress the initial transition from .unknown into
+        // the first known source — that's normal warmup, not
+        // a fallover.
+        guard lastObservedHRSource != .unknown else {
+            lastObservedHRSource = newValue
+            return
+        }
+        guard oldValue != newValue else { return }
+
+        lastObservedHRSource = newValue
+
+        // Build the banner copy from the new source's label.
+        let info = HRSourceBannerInfo(
+            text: "HR source switched to \(newValue.shortLabel)",
+            symbolName: newValue.symbolName
+        )
+
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) {
+            hrSourceBanner = info
+        }
+
+        // Auto-dismiss after 2 seconds. Cancel any in-flight
+        // dismiss task first so a second fallover before the
+        // first one cleared resets the clock cleanly.
+        hrSourceBannerDismissTask?.cancel()
+        hrSourceBannerDismissTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
+                hrSourceBanner = nil
+            }
+        }
+    }
+
     // MARK: - Cathedral surface components
 
     // Row 1 — wireframe 03.2 lean header. Just two elements:
@@ -1661,12 +1765,20 @@ struct RaceView: View {
     // row of inline stats, not three separate tiles). Caps label
     // ABOVE, big rounded number BELOW.
     //
-    // Run variant:        HR (with zone)  |  DIST  |  CAL
+    // Run variant:        HR (with zone)  |  DIST  |  CAL   |  CAD (if AirPods)
     // Workout variant:    HR (with zone)  |  CAL   |  SPLIT
     //
     // The split swap on workout stations is wireframe-prescribed:
     // mid-station the athlete cares about THIS station's split
     // time, not cumulative race distance.
+    //
+    // §19.4 Phase 10H — when AirPods Pro 1+ / 4 / Max are in
+    // the audio route AND a cadence reading is available, a
+    // CAD cell appears at the trailing edge of the run-variant
+    // strip. Self-hides on the workout variant (head motion
+    // during sled push / wall balls isn't a meaningful cadence
+    // signal) and during the first ~2s before the rolling
+    // buffer fills.
     private func cathedralStatStrip(now: Date, isWorkout: Bool) -> some View {
         HStack(alignment: .top, spacing: 8) {
             statCellHR
@@ -1676,6 +1788,9 @@ struct RaceView: View {
             } else {
                 statCell(caption: "DIST", value: cumulativeDistanceString(now: now))
                 statCell(caption: "CAL", value: cumulativeCaloriesString)
+                if let spm = viewModel.currentCadenceSPM {
+                    statCellCadence(spm: spm)
+                }
             }
         }
     }
@@ -1687,10 +1802,19 @@ struct RaceView: View {
     @ViewBuilder
     private var statCellHR: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("HR")
-                .font(.caption2.weight(.heavy))
-                .tracking(0.8)
-                .foregroundStyle(Color.textSecondary)
+            HStack(spacing: 4) {
+                Text("HR")
+                    .font(.caption2.weight(.heavy))
+                    .tracking(0.8)
+                    .foregroundStyle(Color.textSecondary)
+                // §19 — source attribution glyph. Tiny SF Symbol
+                // next to the HR caption telling the athlete
+                // whether the current sample came from the
+                // Watch, the AirPods Pro 3 in their ears, or a
+                // fused stream. Hidden when no source is
+                // attributed yet (pre-first-sample).
+                hrSourceGlyph
+            }
             if let bpm = viewModel.currentHeartRateBPM {
                 let zone = HRZone.zone(for: bpm, maxBPM: maxHeartRate)
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -1704,7 +1828,7 @@ struct RaceView: View {
                         .foregroundStyle(zone.color.opacity(0.85))
                 }
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(Int(bpm.rounded())) beats per minute, \(zone.displayName)")
+                .accessibilityLabel("\(Int(bpm.rounded())) beats per minute, \(zone.displayName), source \(SensorSourceRegistry.shared.lastHRSource.shortLabel)")
             } else {
                 Text("—")
                     .font(.system(size: 22, weight: .heavy, design: .rounded))
@@ -1712,6 +1836,58 @@ struct RaceView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // §19 — HR source attribution glyph. Tiny SF Symbol that
+    // tells the athlete which device produced the BPM number
+    // they're reading. `applewatch` for Watch, `airpodspro` for
+    // AirPods Pro 3, `arrow.triangle.merge` when both are
+    // publishing within the same window. EmptyView before the
+    // first sample lands so the caption row stays clean.
+    @ViewBuilder
+    private var hrSourceGlyph: some View {
+        let source = SensorSourceRegistry.shared.lastHRSource
+        if source != .unknown {
+            Image(systemName: source.symbolName)
+                .font(.system(size: 9, weight: .heavy))
+                .foregroundStyle(Color.textTertiary)
+                .accessibilityHidden(true)
+        }
+    }
+
+    // §19.4 Phase 10H — cadence stat cell. Renders the live
+    // steps-per-minute derived from AirPods head motion. Caps
+    // "CAD" label + AirPods glyph above the number to signal
+    // *which* device produced the metric (Trakrr never gets
+    // cadence from the Watch on this path — Watch cadence
+    // lives in its own pedometer pipeline that we don't
+    // surface in this row). Only rendered when
+    // `viewModel.currentCadenceSPM` is non-nil — caller
+    // (cathedralStatStrip) handles the nil case by omitting
+    // the cell entirely.
+    private func statCellCadence(spm: Int) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Text("CAD")
+                    .font(.caption2.weight(.heavy))
+                    .tracking(0.8)
+                    .foregroundStyle(Color.textSecondary)
+                Image(systemName: "airpodspro")
+                    .font(.system(size: 9, weight: .heavy))
+                    .foregroundStyle(Color.textTertiary)
+                    .accessibilityHidden(true)
+            }
+            Text("\(spm)")
+                .font(.system(size: 22, weight: .heavy, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(Color.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .contentTransition(.numericText())
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(spm) steps per minute from AirPods")
     }
 
     // Generic flat stat cell — caps label + big number. Used for
@@ -3218,4 +3394,50 @@ struct CoachingBanner: View {
 #Preview("Pre-race") {
     RaceView()
         .preferredColorScheme(.dark)
+}
+
+// MARK: - HR source banner (§19)
+
+// Plain value payload for the 2s mid-race fallover banner.
+// Stored on `RaceView.hrSourceBanner` and consumed by
+// `HRSourceBanner` for display. Kept as a value type so
+// SwiftUI `@State` reacts cleanly when a new fallover
+// replaces an existing banner.
+struct HRSourceBannerInfo: Equatable {
+    let text: String
+    let symbolName: String
+}
+
+// Quiet pill banner — small SF Symbol + caption text in a
+// surface-fill capsule. Mirrors the Live Activity HR pill's
+// visual weight so the in-app banner reads in the same
+// language as the lock-screen treatment. No coaching tint —
+// this isn't an action cue, it's a "your data is still
+// flowing under a different sensor" reassurance.
+struct HRSourceBanner: View {
+    let info: HRSourceBannerInfo
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: info.symbolName)
+                .font(.system(size: 12, weight: .heavy))
+                .foregroundStyle(Color.accent)
+            Text(info.text)
+                .font(.system(size: 13, weight: .heavy))
+                .foregroundStyle(Color.textPrimary)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            Capsule()
+                .fill(Color.surfaceElevated)
+                .overlay(
+                    Capsule()
+                        .stroke(Color.accent.opacity(0.35), lineWidth: 1)
+                )
+        )
+        .accessibilityLabel(info.text)
+    }
 }

@@ -466,6 +466,15 @@ final class HealthKitService {
     // any HYROX station, but short enough that we're reporting "HR
     // now," not "HR from yesterday."
     func currentHeartRate() async -> Double? {
+        await currentHeartRateWithSource()?.bpm
+    }
+
+    /// Same query as `currentHeartRate()` but also returns the
+    /// sample's source name — drives the §19 HR source attribution
+    /// (Apple Watch vs AirPods Pro 3 vs iPhone) without callers
+    /// having to issue their own query. Tuple is nil when no
+    /// recent sample exists, otherwise both fields are populated.
+    func currentHeartRateWithSource() async -> (bpm: Double, sourceName: String)? {
         guard isAvailable else { return nil }
         guard let hrType = HKObjectType.quantityType(forIdentifier: .heartRate) else {
             return nil
@@ -482,9 +491,6 @@ final class HealthKitService {
             ascending: false
         )
 
-        // HKSampleQuery is callback-based; wrap in a continuation so
-        // the caller can simply `await`. `withCheckedContinuation`
-        // gives us runtime safety against accidentally resuming twice.
         return await withCheckedContinuation { continuation in
             let query = HKSampleQuery(
                 sampleType: hrType,
@@ -496,12 +502,16 @@ final class HealthKitService {
                     continuation.resume(returning: nil)
                     return
                 }
-                // HealthKit reports HR in `count/min`. Build the unit
-                // explicitly so a locale / HealthKit API shift doesn't
-                // silently change the interpreted value.
                 let bpmUnit = HKUnit.count().unitDivided(by: .minute())
                 let bpm = sample.quantity.doubleValue(for: bpmUnit)
-                continuation.resume(returning: bpm)
+                // Source name comes from the writing app/device's
+                // bundle display name. For Watch HR it's "Apple
+                // Watch" (or the user's customized device name);
+                // for AirPods Pro 3 it's "AirPods Pro 3" per
+                // Apple's docs. SensorSourceRegistry.HRSource.classify
+                // handles the substring matching.
+                let sourceName = sample.sourceRevision.source.name
+                continuation.resume(returning: (bpm, sourceName))
             }
             store.execute(query)
         }

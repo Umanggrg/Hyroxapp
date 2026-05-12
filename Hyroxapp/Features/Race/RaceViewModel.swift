@@ -47,6 +47,17 @@ final class RaceViewModel {
     // reading, those are historical per-segment aggregates.
     private(set) var currentHeartRateBPM: Double?
 
+    /// §19.4 Phase 10H — live cadence in steps-per-minute,
+    /// derived from AirPods Pro 1+ / 4 / Max head motion via
+    /// `HeadphoneMotionService`. Nil when AirPods aren't in
+    /// the audio route, when the athlete isn't running, or
+    /// during the first ~2 seconds while the rolling buffer
+    /// fills. Read this property on the live race screen +
+    /// post-race summary; it's the cadence chip data source.
+    var currentCadenceSPM: Int? {
+        HeadphoneMotionService.shared.currentCadenceSPM
+    }
+
     // Handle to the background polling Task so we can cancel it when
     // the race finishes, the user abandons, or the Race view
     // disappears. Nil outside of an active race.
@@ -1142,6 +1153,20 @@ final class RaceViewModel {
             race.pausedAt = nil
             race.roxzoneStartedAt = nil
             race.pendingRoxzoneSeconds = nil
+            // §19.2 — stamp the dominant HR source for this
+            // race so the SourceProvenanceCard renders on
+            // RaceDetailView for historical races (not just
+            // live on RaceSummary). Snapshot the registry's
+            // lastHRSource at finish; if a fallover happened
+            // mid-race, this captures whichever source was
+            // active at the end. Future v2: track all sources
+            // used during the race rather than just the last.
+            if race.hrSourcePrimary == nil {
+                let source = SensorSourceRegistry.shared.lastHRSource
+                if source != .unknown {
+                    race.hrSourcePrimary = source.shortLabel
+                }
+            }
         }
 
         saveContextSilently()
@@ -1215,6 +1240,11 @@ final class RaceViewModel {
         guard update.bpm >= 30, update.bpm <= 230 else { return }
 
         currentHeartRateBPM = update.bpm
+        // §19 — every accepted Watch sample updates the source
+        // attribution registry so the live HR chip's source glyph
+        // shows `applewatch` even when polling momentarily falls
+        // back to HK between Watch pushes.
+        SensorSourceRegistry.shared.recordHRSource(.watch)
     }
 
     // MARK: - Live HR polling
@@ -1228,6 +1258,13 @@ final class RaceViewModel {
     // Guarded by `canImport(HealthKit)` so macOS builds compile
     // without the polling path at all.
     private func startHeartRatePolling() {
+        // §19.4 Phase 10H — pair the cadence stream with the
+        // HR polling lifecycle. HeadphoneMotionService.start()
+        // is a safe no-op when AirPods aren't motion-capable,
+        // so this never breaks Watch-only or iPhone-only
+        // racers.
+        HeadphoneMotionService.shared.start()
+
         #if canImport(HealthKit)
         stopHeartRatePolling()
 
@@ -1236,27 +1273,33 @@ final class RaceViewModel {
             // Loop until cancelled. Task.isCancelled trips on
             // stopHeartRatePolling() or when the task is GC'd.
             while !Task.isCancelled {
-                if let bpm = await HealthKitService.shared.currentHeartRate() {
-                    // Defer to the Watch streaming source when it's
-                    // recent. Without this gate, polling would
-                    // overwrite a fresh Watch sample (165 bpm @
-                    // t=10s) with a STALER HK-polled sample (158
-                    // bpm @ t=8s) — the polled query looks back 60s
-                    // and returns the most-recent-in-HK sample,
-                    // which can lag the Watch's WCSession push by
-                    // a few seconds since `HKLiveWorkoutBuilder`
-                    // doesn't write to HK during the workout
-                    // (samples land on `finishWorkout()`).
-                    //
+                // §19 — `currentHeartRateWithSource()` returns the
+                // BPM AND the writing source's name in one query.
+                // We classify the source via the registry so the
+                // attribution chip shows the correct glyph
+                // (AirPods Pro 3 / Apple Watch / iPhone fallback)
+                // for HK-polled samples too.
+                if let result = await HealthKitService.shared.currentHeartRateWithSource() {
+                    let bpm = result.bpm
+                    let watchSampleAge = Date().timeIntervalSince(self.lastWatchHRSampleAt)
                     // 10s grace window: if a Watch sample arrived
                     // within the last 10s, the Watch is considered
                     // "live" and we skip the polled write. After
                     // 10s of silence we assume Watch streaming is
                     // dropped (app killed, HK denied, out of
                     // range) and let polling fill the gap.
-                    let watchSampleAge = Date().timeIntervalSince(self.lastWatchHRSampleAt)
                     if watchSampleAge >= 10 {
                         self.currentHeartRateBPM = bpm
+                        // Attribute the polled sample by its source
+                        // name. For an AirPods-only racer this
+                        // surfaces as `.airPods("AirPods Pro 3")`;
+                        // for a Watch user with Watch streaming
+                        // dropped, the polled HK sample is still
+                        // Watch-sourced, so `.watch` shows.
+                        let source = SensorSourceRegistry.HRSource.classify(
+                            sourceName: result.sourceName
+                        )
+                        SensorSourceRegistry.shared.recordHRSource(source)
                     }
                 }
                 // `try? await Task.sleep` — on cancellation, sleep
@@ -1275,6 +1318,12 @@ final class RaceViewModel {
         heartRatePollTask?.cancel()
         heartRatePollTask = nil
         currentHeartRateBPM = nil
+        // §19.4 Phase 10H — tear down the cadence stream
+        // alongside HR polling. Both are race-scoped; leaving
+        // CMHeadphoneMotionManager subscribed after the race
+        // would drain AirPods battery without any UI surface
+        // consuming the values.
+        HeadphoneMotionService.shared.stop()
     }
 
     // MARK: - HealthKit

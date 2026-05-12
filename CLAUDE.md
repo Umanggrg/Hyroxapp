@@ -1278,7 +1278,7 @@ Reference for what hardware we have access to, how each sensor maps to HYROX-spe
 
 ### 18.1 — Complete Apple Watch Sensor Inventory
 
-Every sensor available on Apple Watch for a watchOS workout app, the framework to access it, and its HYROX use case.
+Every sensor available on Apple Watch for a watchOS workout app, the framework to access it, and its HYROX use case. For AirPods Pro 3 sensors and the adaptive multi-device sourcing strategy, see §19.
 
 | Sensor | Framework | Data | HYROX Use Case | Min Hardware |
 | :---- | :---- | :---- | :---- | :---- |
@@ -1380,8 +1380,163 @@ Features where Trakrr has a green checkmark and every competitor has a red X.
 | Race simulation mode (structured) | Partial | ❌ | ❌ | ❌ | N/A | ✅ |
 | Doubles partner sync | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 architecture shipped |
 | HYROX Score composite | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| AirPods Pro 3 HR ingestion (no-Watch racing) | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (§19) |
+| Adaptive multi-device sourcing (Watch + AirPods fusion) | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (§19) |
+| Running-economy metrics from AirPods (cadence, vertical osc., posture drift) | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (§19) |
 | Free / no subscription lock | ❌ | ❌ | ✅ | Freemium | ❌ ($30/mo) | ✅ |
 
 Legend: 🟢 \= shipped in current build, ✅ \= planned/in backlog, ❌ \= competitor doesn't offer it.
 
-Six features already shipped that no competitor has. Thirteen more in the pipeline. This is a defensible moat built on HYROX-specific sensor intelligence, not generic fitness tracking.  
+Six features already shipped that no competitor has. Sixteen more in the pipeline (including three AirPods-derived from §19). This is a defensible moat built on HYROX-specific sensor intelligence, not generic fitness tracking.
+
+---
+
+## 19\. AirPods Integration + Adaptive Sensor Sourcing
+
+Apple shipped **AirPods Pro 3** (fall 2025) with in-ear optical heart rate sensors and motion sensors that are addressable by third-party apps. Combined with iOS 26's HealthKit fan-in (Apple does HR source fusion at the OS level), this opens a path for Trakrr to deliver \~85% of the in-race coaching experience **without an Apple Watch** — and to deliver three running-economy metrics (cadence, vertical oscillation, posture drift) that even Watch-equipped competitors can't surface because the wrist is the wrong place to measure them.
+
+This section is the spec for that integration: what sensors AirPods expose, which Trakrr features they power, the adaptive sensor-sourcing architecture, and the phased roadmap.
+
+### 19.1 — AirPods Pro 3 Sensor Inventory
+
+Every sensor the AirPods family exposes to third-party iOS apps, the framework to access it, and the HYROX features it powers. Parallel to §18.1 for Apple Watch.
+
+| Sensor | Framework | Data | HYROX Use Case | Min Hardware |
+| :---- | :---- | :---- | :---- | :---- |
+| **In-ear Optical Heart Rate** (PPG) | HealthKit (`HKLiveWorkoutBuilder`) — HR samples appear with `sourceRevision` = AirPods Pro 3 | Continuous HR during workouts, ~1Hz | Every §13.10 HR Intelligence feature (zones, drift, recovery, efficiency, engine score, coaching cues) — same path as Watch HR | **AirPods Pro 3 only** (Apple may extend to future models) |
+| **Head Motion** (accel + gyro + magnetometer) | CoreMotion (`CMHeadphoneMotionManager`) — `CMDeviceMotion` at ~50Hz | Attitude (roll/pitch/yaw), rotation rate, user acceleration, gravity, magnetic field | Cadence (spm), vertical oscillation (cm/step), ground contact time (ms), posture pitch drift across race, head-motion rep counting on wall balls / burpees / lunges | AirPods Pro 1+, AirPods 4, AirPods Max — **not** AirPods 2/3 (non-Pro) |
+| **Apple-derived Steps + Distance** | HealthKit (Apple writes the samples from in-ear motion processing) | Step count, distance for the workout | Indoor 1km run distance without GPS, fallback when Watch pedometer absent | AirPods Pro 3 |
+| **Apple-derived Calories** | HealthKit (Apple computes from HR + motion + health profile) | Active calories burned during workout | Per-station calorie estimates when Watch absent | AirPods Pro 3 |
+| **In-ear Detection State** | `AVAudioSession.routeChangeNotification` | Pod inserted / removed events | Failover trigger when athlete removes AirPods mid-race, re-prompt voice cues when pod re-inserted | All AirPods |
+| **Audiogram + dB Exposure** | HealthKit (`environmentalAudioExposure`, hearing test results) | Personalized hearing thresholds, cumulative loud-noise exposure | Volume-cap coaching cues per user's hearing profile (minor / accessibility) | AirPods Pro 2 / Pro 3 |
+| **Force Sensor / Stem Squeeze** | Not exposed to third parties (system-managed) | — | — | Pro 2 / 4 / Max |
+
+**Key framework notes for implementation:**
+
+- **HR is automatic.** Apple's documentation states: *"If you're wearing an Apple Watch and AirPods Pro 3 during your workout, they work together to provide you with multiple streams of heart rate data for even better coverage. The highest-confidence source in the moment is automatically used to provide heart rate data."* Trakrr's existing `HKLiveWorkoutBuilder` pipeline (§13.8 Tier 1\) ingests these samples without modification. The work is on the UX side — surfacing which device is the active source.
+
+- `CMHeadphoneMotionManager` requires `NSMotionUsageDescription` in Info.plist (same as Watch / iPhone CoreMotion). No new entitlement.  
+
+- `CMHeadphoneMotionManager.isDeviceMotionAvailable` returns `false` for AirPods 2 / 3 (non-Pro) and AirPods that aren't motion-equipped. Capability check is mandatory before subscribing.  
+
+- AirPods Pro 3 HR works **when wearing just one AirPod**. Pro 3 also continues streaming HR to the iPhone even if the audio is routed to a different device (e.g. Apple TV during a workout video).  
+
+- HRV / RR-intervals from AirPods are **not** published to HealthKit as of iOS 26. Avg HR samples are. HRV remains the Watch's domain — relevant for Readiness Banner accuracy.  
+
+- `AVAudioSession.routeChangeNotification` carries the `AVAudioSessionRouteChangeReasonKey` reason — `newDeviceAvailable` / `oldDeviceUnavailable` distinguish insertions from removals.
+
+### 19.2 — Adaptive Sensor Sourcing Architecture
+
+The plumbing that lets Trakrr work transparently across four device profiles. One service owns capability detection; every feature reads from it.
+
+**Service: `SensorSourceRegistry`** (`Shared/SensorSourceRegistry.swift`)
+
+`@Observable` service. Reactive properties for what's connected right now:
+
+- `hasWatch: Bool` — from `WCSession.default.isPaired`
+- `watchReachable: Bool` — from `WCSession.default.isReachable`
+- `hasAirPodsMotion: Bool` — from `CMHeadphoneMotionManager().isDeviceMotionAvailable`
+- `hasAirPodsHR: Bool` — derived: AirPods Pro 3 model name from `AVAudioSession.currentRoute.outputs[].portName`, OR most-recent `HKHeartRateSample.sourceRevision` includes "AirPods"
+- `iPhoneInPocket: Bool` — derived from `CMMotionActivityManager` (stationary + low activity confidence)
+
+Computed property `DeviceProfile`:
+
+| Profile | Meaning | What features light up |
+| :---- | :---- | :---- |
+| `.full` | Watch + AirPods Pro 3 + iPhone | Everything. HR fused across Watch + AirPods. Rep counting can fuse wrist + head IMU. |
+| `.watchOnly` | Watch + iPhone, no AirPods or non-motion AirPods | Current pre-AirPods Trakrr. All §13.10 features work. |
+| `.airpodsOnly` | AirPods Pro 3 + iPhone, no Watch | All §13.10 HR features work. SpO2 / skin temp / overnight HRV / ECG gone. Watch race surface gone. AirPods-exclusive features (cadence, vertical osc., posture drift) light up. |
+| `.minimal` | iPhone only | Race timer + pace ghost + roxzone + Live Activity. No HR-dependent features. |
+
+The registry updates reactively as devices connect / disconnect mid-session. Subscribers re-render via `@Observable`.
+
+**Per-feature capability gates**
+
+Most HR-dependent views already handle `currentHeartRateBPM: Int?` being nil — render a placeholder. What needs to change:
+
+- **HR source attribution chip** — when HR is present, render a tiny glyph next to the BPM number indicating Watch vs AirPods vs fused. Live race screen, Watch race page (mirror), Live Activity HR chip (when fused).
+- **Pre-race source check on TrainHubView** — small status row above the action grid: "Sensors ready: Apple Watch · AirPods Pro 3". Tap → sheet detail listing what each device contributes. Sets expectations before the athlete taps Start Race.
+- **Mid-race fallover banner** — when source changes mid-race (Watch disconnects, AirPods inserted, etc.), 2s banner: *"HR source switched to AirPods Pro 3"*. Quiet, informative, no haptic.
+- **Post-race source provenance block** — on RaceSummary + RaceDetail Overview tab: *"HR · 187 samples from Apple Watch + 62 from AirPods Pro 3 (fused) · Motion · AirPods Pro 3 · Calories · iPhone derived"*. Trust through transparency.
+
+### 19.3 — Feature-by-Device Viability Matrix
+
+Authoritative reference for which Trakrr features work across each `DeviceProfile`. 🟢 fully functional · 🟡 degraded · 🔴 unavailable.
+
+| Feature | iPhone only | iPhone + Watch | iPhone + AirPods Pro 3 | iPhone + Watch + AirPods Pro 3 |
+| :---- | :----: | :----: | :----: | :----: |
+| Race timer / pace ghost / predicted finish | 🟢 | 🟢 | 🟢 | 🟢 |
+| Roxzone (transition) tracking | 🟢 | 🟢 | 🟢 | 🟢 |
+| Live Activity (lock screen + Dynamic Island) | 🟢 | 🟢 | 🟢 | 🟢 |
+| HR chip + zones (live) | 🔴 | 🟢 | 🟢 | 🟢 fused |
+| Coaching cues (HOLD / SLOW / PUSH / WORK) | 🔴 | 🟢 | 🟢 | 🟢 fused |
+| HR Drift / Cardiac Drift | 🔴 | 🟢 | 🟢 | 🟢 |
+| Recovery Score (post-race) | 🔴 | 🟢 | 🟢 | 🟢 |
+| Recovery tile (in-race, 30s drop) | 🔴 | 🟢 | 🟢 | 🟢 |
+| Engine Score composite + sub-scores | 🔴 | 🟢 | 🟢 | 🟢 |
+| Efficiency Score (output ÷ HR cost) | 🔴 | 🟢 | 🟢 | 🟢 |
+| Aerobic decoupling | 🔴 | 🟢 | 🟢 | 🟢 |
+| HR zone time-in-zone breakdown | 🔴 | 🟢 | 🟢 | 🟢 |
+| Calories per station | 🔴 | 🟢 | 🟢 (Apple computes) | 🟢 |
+| Steps / distance on 1km runs | 🟡 if carried | 🟢 | 🟢 (Apple computes) | 🟢 |
+| Cadence (live spm) | 🟡 if carried | 🟢 via Watch pedometer | 🟢 via custom `CMHeadphoneMotionManager` | 🟢 fused |
+| Vertical oscillation (running economy) | 🔴 | 🟡 wrist is bad position | 🟢 head is ideal position | 🟢 |
+| Posture drift fatigue signal | 🔴 | 🔴 | 🟢 unique to AirPods | 🟢 |
+| Ground contact time | 🔴 | 🟡 | 🟢 | 🟢 |
+| Guardrails (per-segment HR ceilings) | 🔴 | 🟢 | 🟢 | 🟢 |
+| SpO2 per station | 🔴 | 🟢 Series 6+ | 🔴 | 🟢 Watch only |
+| Skin temperature | 🔴 | 🟢 S8+/Ultra | 🔴 | 🟢 Watch only |
+| Overnight HRV → richer Readiness Banner | 🔴 | 🟢 | 🟡 avg HR only, no RR-intervals from AirPods today | 🟢 Watch primary |
+| ECG / clinical-grade HR | 🔴 | 🟢 S4+ | 🔴 | 🟢 Watch only |
+| Watch race surface (3-page nav + alert overlay) | 🔴 | 🟢 | 🔴 | 🟢 |
+| Hold-to-finish wrist gesture | 🔴 | 🟢 | 🔴 | 🟢 |
+| Voice cue audio output | 🟡 phone speaker | 🟡 phone speaker | 🟢 in ears | 🟢 in ears |
+| Rep counting (IMU on rep stations) | 🔴 | 🟡 §13.8 Tier 2 — wrist-positioned | 🟡 head motion good for wall balls + burpees, weaker for sled push | 🟢 fused = highest confidence |
+
+**The big takeaway:** an athlete with iPhone + AirPods Pro 3 alone gets ~85% of Trakrr's value plus three running-economy metrics (vertical oscillation, posture drift, ground contact) that the Watch can't deliver well. The hard losses (SpO2, skin temp, ECG, overnight HRV) are clinical / recovery-tier metrics — important but not the headline in-race experience.
+
+### 19.4 — Phase 10 Roadmap (AirPods Integration)
+
+Phased rollout. Each phase ships independently and stays useful in isolation.
+
+| Phase | Scope | Effort | Status |
+| :---- | :---- | :---- | :---- |
+| **10 A** | Update CLAUDE.md (this section). | ~2 hrs | 🟡 in progress |
+| **10 B** | `SensorSourceRegistry` service + `DeviceProfile` enum. Reactive capability detection, no UI yet. | ~2 days | ⚪ |
+| **10 C** | HR source attribution glyph on live race screen + Watch race page mirror. Reads `HKHeartRateSample.sourceRevision`. | ~1 day | ⚪ |
+| **10 D** | Post-race source provenance block on RaceSummary + RaceDetail Overview tab. | ~1 day | ⚪ |
+| **10 E** | Pre-race sensor check on TrainHubView (status row + tap-for-detail sheet). | ~1 day | ⚪ |
+| **10 F** | Mid-race HR-source fallover banner. | ~1 day | ⚪ |
+| **10 G** | Verify build across all four DeviceProfile scenarios. | ~½ day | ⚪ |
+| **10 H** | Live cadence (spm) from `CMHeadphoneMotionManager`. Band-pass filter Z-axis impact, peak detect, publish to RaceViewModel.currentCadenceSPM. Render alongside HR chip. | ~3 days | ⚪ |
+| **10 I** | Vertical oscillation as post-race running-economy metric. Z-axis displacement math, new "Running Economy" section on Race detail Runs tab. | ~3 days | ⚪ |
+| **10 J** | Posture drift fatigue insight. Read `attitude.pitch` through race, compute first-half vs second-half delta, surface as narrative insight. | ~2 days | ⚪ |
+| **10 K** | Ground contact time (running-economy completer). | ~1-2 weeks | ⚪ |
+| **10 L** | Multi-sensor rep count fusion — combine Watch IMU (§13.8 Tier 2) + AirPods head motion + confidence scoring. Gated on Tier 2 shipping first. | ~1 week | ⚪ |
+
+**Sub-phases 10 A–G ship the adaptive sourcing layer (the "Trakrr works with Watch, AirPods, or both" wedge).** That alone is marketable as: *"the first iOS HYROX app that doesn't require an Apple Watch."*
+
+**Sub-phases 10 H–L ship the AirPods-exclusive metrics (the "Trakrr gives you running-economy data the Watch can't" wedge).** That positions the app against Stryd / Garmin Forerunner in the running-economy category at a $0 hardware cost.
+
+### 19.5 — What's automatic vs custom
+
+| Feature | Automatic via HealthKit | Custom Trakrr code |
+| :---- | :---- | :---- |
+| Watch HR | ✅ (existing) | — |
+| AirPods Pro 3 HR | ✅ (Apple does fusion at OS layer) | — |
+| AirPods-derived steps / distance / calories | ✅ (Apple writes to HealthKit) | — |
+| Source attribution UI | — | Read `HKHeartRateSample.sourceRevision`, render glyph |
+| Cadence (spm) | ❌ Apple writes step *count*, not rolling cadence | Custom: band-pass filter on `CMHeadphoneMotionManager` accel data |
+| Vertical oscillation | ❌ Apple doesn't compute | Custom: peak-to-peak Z-axis displacement |
+| Ground contact time | ❌ | Custom: impact spike → reversal interval |
+| Posture drift across race | ❌ | Custom: continuous `attitude.pitch` log → first-half / second-half delta |
+
+**Pattern:** Apple handles the data ingestion layer. Trakrr's value-add is the **HYROX-specific interpretation** of that data — the metrics, the coaching insights, the narrative, the comparison-against-baselines. Same playbook as the existing HR Intelligence layer (§13.10).
+
+### 19.6 — Strategic positioning
+
+Right now every competitor HYROX app (ROXFIT, Intervals Pro, Garmin native, Strava) assumes Apple Watch. An athlete without a Watch has no path to engine analytics.
+
+Trakrr being the first to say *"bring your AirPods Pro 3 and we'll give you 85% of the HYROX coaching experience"* is a real wedge. Plus the three running-economy metrics (vertical oscillation, posture drift, ground contact) that even Watch-equipped competitors can't surface — because the wrist is the wrong place to measure them.
+
+It's not just a feature add. It's an addressable-market expansion + a defensible technical moat.  

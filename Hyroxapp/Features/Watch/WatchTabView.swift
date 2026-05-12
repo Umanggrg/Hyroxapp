@@ -4,34 +4,33 @@ import SwiftData
 import WatchConnectivity
 #endif
 
-// Tab 5 — Watch. New top-level surface introduced in the v1
-// design-system shift. Pre-v1 the Watch tab didn't exist; watch-
-// related controls were buried inside Settings and pairing /
-// reachability state was invisible to the athlete unless they
-// opened Apple's first-party Watch app.
+// Tab 5 — Devices (formerly "Watch"). Top-level surface for
+// the athlete to see what's connected and what each device
+// contributes to their race. Originally Watch-only when the
+// v1 design system shipped; expanded to multi-device in §19
+// when AirPods Pro 3 ingestion landed.
 //
-// v1 scope (this file):
-//   • Pairing + reachability status block at the top
-//   • Section of toggles that affect the in-race Watch
-//     experience — voice cues, coaching cues, pace chip,
-//     predicted finish projection, Live Activity. Bound to
-//     `UserProfile` directly so flipping a switch here updates
-//     the same source-of-truth the existing Settings screen
-//     writes to.
-//   • Footer pairing instructions when the watch isn't paired
+// Current scope:
+//   • Apple Watch section — pairing + app-installed +
+//     reachable status, pairing footer when not paired
+//   • AirPods section — connected state, model name, motion
+//     + HR sensor availability (§19.1), pairing footer when
+//     not connected
+//   • Shared In-race toggles — voice cues, coaching cues,
+//     pace chip, predicted finish, Live Activity. Bind
+//     directly to UserProfile so flipping here writes
+//     through to the same source-of-truth Settings reads.
+//
+// Tab bar label stays "Watch" because the SF Symbol icon
+// is `applewatch` and the existing routing key is `.watch`.
+// Inside, the navigation title is "Devices" — honestly
+// reflects the multi-device scope without a tab restructure.
 //
 // Deferred to v2 (separate file or substantial expansion):
 //   • Real-time HR streaming health gauge
 //   • Live-activity preview tile
 //   • Per-feature "what this does" inline explainers
 //   • A "Re-install on Watch" CTA wired to WKExtension
-//
-// `@Bindable` on the profile is what makes the toggles
-// write-through to SwiftData on flip. Identical pattern to
-// SettingsView; the same toggles live in both places by
-// design — Settings holds the canonical list, the Watch tab
-// surfaces the subset that's specifically watch-shaped so
-// athletes don't have to dig through Settings mid-pairing.
 struct WatchTabView: View {
 
     @Query(sort: [SortDescriptor(\UserProfile.createdAt, order: .forward)])
@@ -55,12 +54,10 @@ struct WatchTabView: View {
                 ScrollView {
                     VStack(spacing: Spacing.md) {
                         hero
-                        statusBlock
+                        watchSection
+                        airPodsSection
                         if let profile = profiles.first {
                             inRaceSection(profile: profile)
-                        }
-                        if !isPaired {
-                            pairingFooter
                         }
                         Spacer(minLength: Spacing.lg)
                     }
@@ -68,45 +65,94 @@ struct WatchTabView: View {
                     .padding(.top, Spacing.md)
                 }
             }
-            .navigationTitle("Watch")
+            .navigationTitle("Devices")
             .hyroxNavigationBar(inline: false)
-            .onAppear { refreshTick += 1 }
+            .onAppear {
+                refreshTick += 1
+                // §19 — refresh the AirPods / Watch connection
+                // registry too. Audio-route changes auto-fire
+                // while the app is backgrounded, but WCSession
+                // pairing changes don't, so a manual refresh on
+                // appear keeps the status rows honest.
+                SensorSourceRegistry.shared.refresh()
+            }
             .onChange(of: scenePhase) { _, newPhase in
-                if newPhase == .active { refreshTick += 1 }
+                if newPhase == .active {
+                    refreshTick += 1
+                    SensorSourceRegistry.shared.refresh()
+                }
             }
         }
     }
 
     // MARK: - Hero
 
-    // Brand moment at the top of the screen — coral-tinted
-    // applewatch glyph in a soft halo. Single visual anchor
-    // before the data-dense status block. Sized to read at
-    // glance distance without dominating the screen.
+    // Brand moment at the top — coral-tinted Watch + AirPods
+    // glyphs sharing a single halo to signal the multi-device
+    // story. Reads as "these are the sensors that make Trakrr
+    // work for you." Caps subtitle picks the right copy based
+    // on what's actually connected so the hero isn't lying to
+    // an iPhone-only athlete.
     private var hero: some View {
         VStack(spacing: Spacing.xs) {
             ZStack {
                 Circle()
                     .fill(Color.accent.opacity(0.14))
-                    .frame(width: 96, height: 96)
+                    .frame(width: 112, height: 112)
                 Circle()
                     .stroke(Color.accent.opacity(0.35), lineWidth: 1.5)
-                    .frame(width: 96, height: 96)
-                Image(systemName: "applewatch")
-                    .font(.system(size: 38, weight: .bold))
-                    .foregroundStyle(Color.accent)
+                    .frame(width: 112, height: 112)
+                HStack(spacing: 8) {
+                    Image(systemName: "applewatch")
+                        .font(.system(size: 32, weight: .bold))
+                        .foregroundStyle(
+                            isPaired ? Color.accent : Color.accent.opacity(0.35)
+                        )
+                    Image(systemName: "airpodspro")
+                        .font(.system(size: 32, weight: .bold))
+                        .foregroundStyle(
+                            isAirPodsConnected ? Color.accent : Color.accent.opacity(0.35)
+                        )
+                }
             }
             .padding(.top, Spacing.sm)
 
-            Text("Wrist-first racing")
+            Text(heroSubtitle)
                 .capsLabelStyle()
         }
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: - Status block
+    // Subtitle picks the right brand line based on what's
+    // actually connected. Avoids a generic "Connected devices"
+    // that reads as marketing copy.
+    private var heroSubtitle: String {
+        switch (isPaired, isAirPodsConnected) {
+        case (true, true):   return "Wrist + ears connected"
+        case (true, false):  return "Wrist-first racing"
+        case (false, true):  return "AirPods connected"
+        case (false, false): return "Connect a sensor to begin"
+        }
+    }
 
-    private var statusBlock: some View {
+    // MARK: - Watch section
+
+    // Section wrapping the Apple Watch pairing / reachability /
+    // installed status. Composes the caps section label, the
+    // existing status block, and the existing pairing footer
+    // (when not paired) into one logical unit.
+    private var watchSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text("Apple Watch").capsLabelStyle()
+                .padding(.horizontal, 4)
+            watchStatusBlock
+            if !isPaired {
+                watchPairingFooter
+            }
+        }
+    }
+
+    private var watchStatusBlock: some View {
         VStack(spacing: Spacing.sm) {
             statusRow(
                 label: "Paired",
@@ -127,6 +173,67 @@ struct WatchTabView: View {
                 value: isReachable ? "Yes" : "No",
                 tint: isReachable ? Color.onPace : Color.textTertiary,
                 symbol: isReachable ? "dot.radiowaves.left.and.right" : "dot.radiowaves.left.and.right"
+            )
+        }
+        .padding(Layout.cardPadding)
+        .background(
+            RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                .fill(Color.surface)
+        )
+    }
+
+    // MARK: - AirPods section (§19)
+
+    // Parallel device card for AirPods Pro 1+ / 4 / Max / Pro 3.
+    // Reads from SensorSourceRegistry (which auto-subscribes
+    // to audio-route changes) so connecting / disconnecting
+    // AirPods updates this section in real time. Status rows
+    // cover: connected, model name, motion sensor capability
+    // (false on AirPods 2/3 non-Pro), heart rate capability
+    // (true only on AirPods Pro 3 today).
+    private var airPodsSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text("AirPods").capsLabelStyle()
+                .padding(.horizontal, 4)
+            airPodsStatusBlock
+            if !isAirPodsConnected {
+                airPodsPairingFooter
+            }
+        }
+    }
+
+    private var airPodsStatusBlock: some View {
+        let registry = SensorSourceRegistry.shared
+        let connected = isAirPodsConnected
+        let modelName = registry.airPodsModelName
+
+        return VStack(spacing: Spacing.sm) {
+            statusRow(
+                label: "Connected",
+                value: connected ? "Yes" : "Not connected",
+                tint: connected ? Color.onPace : Color.textTertiary,
+                symbol: connected ? "checkmark.circle.fill" : "circle"
+            )
+            Divider().background(Color.divider)
+            statusRow(
+                label: "Model",
+                value: modelName ?? "—",
+                tint: connected ? Color.textPrimary : Color.textTertiary,
+                symbol: "airpodspro"
+            )
+            Divider().background(Color.divider)
+            statusRow(
+                label: "Motion sensors",
+                value: registry.hasAirPodsMotion ? "Available" : "Not on this model",
+                tint: registry.hasAirPodsMotion ? Color.onPace : Color.textTertiary,
+                symbol: registry.hasAirPodsMotion ? "figure.run" : "circle"
+            )
+            Divider().background(Color.divider)
+            statusRow(
+                label: "Heart rate",
+                value: registry.hasAirPodsHR ? "Available" : "Pro 3 only",
+                tint: registry.hasAirPodsHR ? Color.onPace : Color.textTertiary,
+                symbol: registry.hasAirPodsHR ? "heart.fill" : "heart"
             )
         }
         .padding(Layout.cardPadding)
@@ -245,17 +352,39 @@ struct WatchTabView: View {
         .padding(Layout.cardPadding)
     }
 
-    // MARK: - Pairing footer
+    // MARK: - Pairing footers
 
-    // Only renders when the Apple Watch isn't paired. Tells the
+    // Renders only when the Apple Watch isn't paired. Tells the
     // athlete the next concrete step rather than leaving the
     // empty-state ambiguous.
-    private var pairingFooter: some View {
+    private var watchPairingFooter: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             Text("Pair your Apple Watch")
                 .font(.headline)
                 .foregroundStyle(Color.textPrimary)
             Text("Open the iOS Watch app and pair an Apple Watch. Once paired, install Trakrr on the watch and the in-race controls will become available from the wrist.")
+                .font(.caption)
+                .foregroundStyle(Color.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(Layout.cardPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                .fill(Color.surface)
+        )
+    }
+
+    // Renders when no AirPods are currently in the audio route.
+    // Two-paragraph copy explains how to connect and what
+    // pairing unlocks — sets expectations about which model
+    // gets which features (motion is Pro 1+, HR is Pro 3).
+    private var airPodsPairingFooter: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text("Connect your AirPods")
+                .font(.headline)
+                .foregroundStyle(Color.textPrimary)
+            Text("Pop your AirPods in your ears or select them from Control Center → AirPlay. Once connected, Trakrr surfaces the right features for your model — cadence from AirPods Pro 1+ and continuous heart rate from AirPods Pro 3.")
                 .font(.caption)
                 .foregroundStyle(Color.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -304,5 +433,19 @@ struct WatchTabView: View {
         #else
         return false
         #endif
+    }
+
+    // §19 — true when any AirPods are currently the active
+    // audio output, regardless of model. The status block
+    // renders specific capability detail (motion / HR) per
+    // SensorSourceRegistry so the athlete knows what their
+    // particular AirPods can do for Trakrr. `_ = refreshTick`
+    // ties this property to the same re-evaluation trigger
+    // the Watch status helpers use — guarantees a fresh
+    // reading after a scene-phase return.
+    private var isAirPodsConnected: Bool {
+        _ = refreshTick
+        let registry = SensorSourceRegistry.shared
+        return registry.hasAirPodsMotion || registry.hasAirPodsHR
     }
 }

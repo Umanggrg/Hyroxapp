@@ -67,6 +67,12 @@ struct TrainHubView: View {
     // the sheet's title / template prefilter can adapt.
     @State private var builderIntent: BuilderIntent? = nil
 
+    // §19 — drives the sensor-detail sheet presented when the
+    // pre-race sensor row is tapped. Lists what each connected
+    // device contributes so the athlete sets expectations
+    // before they start.
+    @State private var isSensorDetailPresented = false
+
     enum RaceStartIntent: Hashable, Identifiable {
         case race
         case simulation
@@ -95,6 +101,8 @@ struct TrainHubView: View {
                 VStack(spacing: 18) {
                     header
                         .padding(.top, 8)
+
+                    sensorStatusRow
 
                     actionGrid
 
@@ -137,8 +145,86 @@ struct TrainHubView: View {
                     }
                 )
             }
+            .sheet(isPresented: $isSensorDetailPresented) {
+                SensorDetailSheet()
+                    .presentationDetents([.medium])
+                    .presentationDragIndicator(.visible)
+            }
             #endif
+            .onAppear {
+                // §19 — refresh the registry's reactive view of
+                // connected devices when the Train hub appears.
+                // Audio-route changes auto-fire while the app is
+                // backgrounded but WCSession pairing changes
+                // don't, so re-checking on .onAppear keeps the
+                // status row honest.
+                SensorSourceRegistry.shared.refresh()
+            }
         }
+    }
+
+    // MARK: - Sensor status row (§19)
+
+    // Inline status pill above the action grid. Renders the
+    // current device profile's label ("Apple Watch + AirPods
+    // Pro 3" / "Apple Watch" / "AirPods" / "iPhone only") plus
+    // small device glyphs and an info chevron. Tap opens the
+    // SensorDetailSheet for per-device contribution detail.
+    //
+    // Reads `SensorSourceRegistry.shared` directly — @Observable
+    // tracks the dependency through the body re-evaluation, so
+    // device-connect events update the row without a manual
+    // subscription.
+    private var sensorStatusRow: some View {
+        let registry = SensorSourceRegistry.shared
+        let profile = registry.profile
+
+        return Button {
+            isSensorDetailPresented = true
+        } label: {
+            HStack(spacing: 8) {
+                HStack(spacing: 4) {
+                    if registry.hasWatch {
+                        Image(systemName: "applewatch")
+                            .font(.system(size: 11, weight: .heavy))
+                            .foregroundStyle(Color.accent)
+                    }
+                    if registry.hasAirPodsHR || registry.hasAirPodsMotion {
+                        Image(systemName: "airpodspro")
+                            .font(.system(size: 11, weight: .heavy))
+                            .foregroundStyle(Color.accent)
+                    }
+                    if !registry.hasWatch && !registry.hasAirPodsHR && !registry.hasAirPodsMotion {
+                        Image(systemName: "iphone")
+                            .font(.system(size: 11, weight: .heavy))
+                            .foregroundStyle(Color.textSecondary)
+                    }
+                }
+
+                Text(profile.displayLabel)
+                    .font(.system(size: 12, weight: .heavy))
+                    .foregroundStyle(Color.textPrimary)
+                    .lineLimit(1)
+
+                Spacer(minLength: 4)
+
+                Image(systemName: "info.circle")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.textTertiary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                    .fill(Color.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                    .stroke(Color.divider, lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Sensors connected: \(profile.displayLabel). Tap for details.")
     }
 
     // MARK: - Header
@@ -304,5 +390,157 @@ struct TrainHubView: View {
     }
     private var liveActivityEnabled: Bool {
         profiles.first?.liveActivityEnabled ?? true
+    }
+}
+
+// MARK: - SensorDetailSheet (§19)
+
+// Presented from the sensor status row on TrainHubView. Lists
+// every connected device and what it contributes to the
+// athlete's race. Sets expectations before they tap Start
+// Race — especially valuable in the airpodsOnly profile where
+// the athlete might wonder if HR coverage will work without
+// a Watch.
+//
+// Per CLAUDE.md §19.3 feature-by-device viability matrix.
+private struct SensorDetailSheet: View {
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    intro
+
+                    deviceCards
+
+                    Spacer(minLength: 12)
+                }
+                .padding(.horizontal, Layout.screenMargin)
+                .padding(.vertical, 16)
+            }
+            .background(Color.background.ignoresSafeArea())
+            .navigationTitle("Sensors")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var intro: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(SensorSourceRegistry.shared.profile.displayLabel.uppercased())
+                .font(.caption2.weight(.heavy))
+                .tracking(1.0)
+                .foregroundStyle(Color.accent)
+
+            Text(introCopy)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(Color.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var introCopy: String {
+        switch SensorSourceRegistry.shared.profile {
+        case .full:
+            return "Apple Watch + AirPods Pro 3 — both sensors stream HR and motion. The OS picks the highest-confidence source per moment, and Trakrr fuses the streams across the race."
+        case .watchOnly:
+            return "Apple Watch on wrist — full HR analytics stack works. Pair AirPods Pro 3 to add running-economy metrics (cadence, vertical oscillation, posture drift)."
+        case .airpodsOnly:
+            return "AirPods Pro 3 in ears — full HR analytics stack works via in-ear PPG. SpO2 / skin temp / overnight HRV require an Apple Watch."
+        case .minimal:
+            return "iPhone only — race timer, pace ghost, and Live Activity work. HR-derived metrics (zones, coaching cues, engine score) require an Apple Watch or AirPods Pro 3."
+        }
+    }
+
+    private var deviceCards: some View {
+        VStack(spacing: 8) {
+            if SensorSourceRegistry.shared.hasWatch {
+                deviceCard(
+                    icon: "applewatch",
+                    title: "Apple Watch",
+                    capabilities: [
+                        "Heart rate · zones · coaching cues",
+                        "Recovery score · engine score · drift",
+                        "Rep counting on stations (Tier 2)",
+                        "SpO2 · skin temperature · overnight HRV"
+                    ]
+                )
+            }
+            if SensorSourceRegistry.shared.hasAirPodsHR || SensorSourceRegistry.shared.hasAirPodsMotion {
+                deviceCard(
+                    icon: "airpodspro",
+                    title: SensorSourceRegistry.shared.airPodsModelName ?? "AirPods",
+                    capabilities: airPodsCapabilities
+                )
+            }
+            deviceCard(
+                icon: "iphone",
+                title: "iPhone",
+                capabilities: [
+                    "Race timer · pace ghost · roxzone tracking",
+                    "Live Activity · Dynamic Island",
+                    "Step count + distance (when carried)"
+                ]
+            )
+        }
+    }
+
+    private var airPodsCapabilities: [String] {
+        var caps: [String] = []
+        if SensorSourceRegistry.shared.hasAirPodsHR {
+            caps.append("Heart rate · zones · coaching cues")
+            caps.append("Calories · steps · distance")
+        }
+        if SensorSourceRegistry.shared.hasAirPodsMotion {
+            caps.append("Cadence · vertical oscillation")
+            caps.append("Posture drift fatigue insight")
+        }
+        if caps.isEmpty {
+            caps.append("Connected — no motion or HR sensors on this model")
+        }
+        return caps
+    }
+
+    private func deviceCard(
+        icon: String,
+        title: String,
+        capabilities: [String]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .heavy))
+                    .foregroundStyle(Color.accent)
+                Text(title)
+                    .font(.system(size: 15, weight: .heavy, design: .rounded))
+                    .foregroundStyle(Color.textPrimary)
+                Spacer()
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(capabilities, id: \.self) { cap in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 9, weight: .heavy))
+                            .foregroundStyle(Color.success)
+                        Text(cap)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.textSecondary)
+                    }
+                }
+            }
+        }
+        .padding(Layout.cardPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                .fill(Color.surface)
+        )
     }
 }

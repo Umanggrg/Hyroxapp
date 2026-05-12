@@ -358,6 +358,17 @@ struct RaceSummaryView: View {
                             .padding(.top, 8)
                     }
 
+                    // §19 — post-race source provenance. Quiet
+                    // card telling the athlete what sensors made
+                    // this race possible (HR via Watch / AirPods
+                    // Pro 3 / fused; motion via head IMU or
+                    // wrist; calories computed by which device).
+                    // Self-hides when the registry hasn't seen
+                    // a recognized HR source yet — typical for
+                    // iPhone-only races with no HR data.
+                    SourceProvenanceCard(isCurrentSession: true)
+                        .padding(.top, 8)
+
                     // Race-day weight projection — when the athlete
                     // logged sub-race-weight on at least one station,
                     // surface what the race would total at official

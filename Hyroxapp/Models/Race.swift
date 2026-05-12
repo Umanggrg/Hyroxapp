@@ -213,6 +213,16 @@ final class Race {
     var feltRating: Int?
     var sleepHoursLast: Double?
 
+    // §19.2 — primary HR source attribution for this race. Set
+    // on finish from `SensorSourceRegistry.shared.lastHRSource.
+    // shortLabel` — values like "Apple Watch", "AirPods Pro 3",
+    // or "Fused". Nil for races finished before the source-
+    // attribution layer landed; the SourceProvenanceCard
+    // self-hides in that case. Future v2: extend to track all
+    // sources used during the race (when a fallover happens
+    // mid-race) rather than just the last one.
+    var hrSourcePrimary: String?
+
     // Athlete-defined organizing tags. Free-form lowercase strings
     // ("zone2", "race-sim", "morning", "brick", "strength-focus")
     // — the athlete picks their own taxonomy. Stored as a single
