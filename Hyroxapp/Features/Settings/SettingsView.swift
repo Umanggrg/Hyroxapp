@@ -3,6 +3,9 @@ import SwiftData
 #if canImport(UIKit)
 import UIKit
 #endif
+#if canImport(Auth)
+import Auth
+#endif
 
 // The Settings sheet. Home for app-wide preferences — today just the HYROX
 // division, tomorrow a growing list (audio cues, run distance defaults,
@@ -42,6 +45,8 @@ struct SettingsView: View {
     // shows a stable number even if @Query updates mid-prompt.
     @State private var isShowingClearConfirm = false
     @State private var isShowingResetConfirm = false
+    @State private var isShowingSignOutConfirm = false
+    @State private var isShowingDeleteAccountConfirm = false
 
     // Drives the Edit Profile sheet pushed from the profile row
     // at the top of Settings. Keeps the editor near where the
@@ -60,6 +65,7 @@ struct SettingsView: View {
                 notificationsSection
                 privacySection
                 dataSection
+                accountSection
                 aboutSection
             }
             .scrollContentBackground(.hidden)
@@ -123,7 +129,7 @@ struct SettingsView: View {
     }
 
     // Avatar bubble — uses profile.avatarData if set, otherwise the
-    // SF Symbol fallback (matches ProfileHeaderView's treatment).
+    // SF Symbol fallback (matches ProfileHero's treatment).
     // 44pt diameter is the iOS standard for compact-row avatars.
     @ViewBuilder
     private var profileAvatar: some View {
@@ -570,6 +576,151 @@ struct SettingsView: View {
         exportFile = nil
     }
 
+    // Account section — Sign Out + Delete Account request.
+    // Lives between Data and About so the destructive actions
+    // cluster at the bottom of the form, matching the iOS
+    // Settings → Apple ID convention.
+    //
+    // Both rows are gated behind confirmation alerts. Sign Out
+    // is reversible (user can sign back in); Delete Account is
+    // an email-based request for v1 (server-side immediate-
+    // delete RPC is queued — see CLAUDE.md notes). App Store
+    // Guideline 5.1.1(v) requires apps with account creation
+    // to support in-app deletion; an email-based request is
+    // compliant as long as the option is visible AND we
+    // process the request within 30 days.
+    //
+    // The whole section is hidden when there's no signed-in
+    // user — Account actions would be meaningless on the
+    // signed-out splash. AuthService is the source of truth.
+    @ViewBuilder
+    private var accountSection: some View {
+        if isSignedIn {
+            Section {
+                Button {
+                    isShowingSignOutConfirm = true
+                } label: {
+                    HStack {
+                        Image(systemName: "rectangle.portrait.and.arrow.right")
+                            .foregroundStyle(Color.accent)
+                        Text("Sign out")
+                            .foregroundStyle(Color.textPrimary)
+                        Spacer()
+                    }
+                }
+                .listRowBackground(Color.surface)
+
+                Button(role: .destructive) {
+                    isShowingDeleteAccountConfirm = true
+                } label: {
+                    HStack {
+                        Image(systemName: "person.crop.circle.badge.xmark")
+                        Text("Delete account")
+                        Spacer()
+                    }
+                }
+                .listRowBackground(Color.surface)
+
+                footnote(
+                    "Sign out keeps your data on this device. Delete account permanently removes your profile, races, photos, and follow graph from our servers."
+                )
+                .listRowBackground(Color.surface)
+            } header: {
+                Text("Account")
+            }
+            .alert(
+                "Sign out?",
+                isPresented: $isShowingSignOutConfirm
+            ) {
+                Button("Cancel", role: .cancel) { }
+                Button("Sign out", role: .destructive) {
+                    performSignOut()
+                }
+            } message: {
+                Text("You can sign back in any time with the same account. Your races stay on this device.")
+            }
+            .alert(
+                "Delete your account?",
+                isPresented: $isShowingDeleteAccountConfirm
+            ) {
+                Button("Cancel", role: .cancel) { }
+                Button("Email request", role: .destructive) {
+                    requestAccountDeletion()
+                }
+            } message: {
+                Text("We'll open a pre-filled email to support@trakrr.app. We process deletion requests within 30 days. This permanently removes your profile, races, photos, and follow graph from our servers.")
+            }
+        }
+    }
+
+    // True only when AuthService reports a signed-in user. The
+    // setting sheet renders for unauthenticated users too
+    // (offline mode), in which case the Account section is
+    // simply absent — they have no account to manage.
+    private var isSignedIn: Bool {
+        #if canImport(Auth)
+        return AuthService.shared.user != nil
+        #else
+        return false
+        #endif
+    }
+
+    // Sign out via AuthService (clears Supabase session + local
+    // auth state). Dismisses the sheet so the app's auth gate
+    // can flip back to splash on the next render. Local
+    // SwiftData rows stay intact — the user can sign back in
+    // and the same races, profile, settings are still there.
+    private func performSignOut() {
+        #if canImport(Auth)
+        AuthService.shared.signOut()
+        #endif
+        dismiss()
+    }
+
+    // Open a pre-filled support email. The mailto: URL carries
+    // subject + body so the user only has to tap Send. iOS
+    // routes to whichever mail client they've set up — we
+    // don't presume Apple Mail.
+    //
+    // Why not MFMailComposeViewController? It's heavier (sheet
+    // + delegate dance) and fails silently on simulator. A
+    // mailto: URL is universal: Mail, Gmail, Outlook all
+    // handle it. If the user has no mail client configured,
+    // iOS surfaces its own "no mail app" alert — graceful
+    // degradation.
+    private func requestAccountDeletion() {
+        let userID = currentUserIDForSupport
+        let subject = "Trakrr account deletion request"
+        let body = """
+        Please delete my Trakrr account.
+
+        User ID: \(userID)
+        Handle: @\(profile.handle.isEmpty ? "(not set)" : profile.handle)
+
+        I understand this permanently removes my profile, races, photos, and follow graph.
+        """
+
+        let encodedSubject = subject.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? subject
+        let encodedBody = body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? body
+        let mailURL = "mailto:support@trakrr.app?subject=\(encodedSubject)&body=\(encodedBody)"
+
+        if let url = URL(string: mailURL) {
+            UIApplication.shared.open(url)
+        }
+    }
+
+    // Surface the local user's Supabase UUID in support
+    // emails — speeds up the manual deletion sweep on our
+    // side. Falls back to a dash so the email template still
+    // looks well-formed even in the no-auth edge case.
+    private var currentUserIDForSupport: String {
+        #if canImport(Auth)
+        return AuthService.shared.user?.id.uuidString ?? "—"
+        #else
+        return "—"
+        #endif
+    }
+
     // About section — brand wordmark + version + tagline.
     // Bottom-of-Settings polish: gives the page a real "end" so
     // the user doesn't feel like the form just stops mid-data.
@@ -601,9 +752,64 @@ struct SettingsView: View {
                     .foregroundStyle(Color.textSecondary)
             }
             .listRowBackground(Color.surface)
+
+            // Legal + support links. Each row opens its target
+            // URL in the user's default browser (or Mail, for
+            // the support row). External destinations live on
+            // the marketing site (trakrr.app/privacy, /terms)
+            // so legal updates don't need an app release.
+            externalLinkRow(
+                title: "Privacy Policy",
+                systemImage: "lock.shield",
+                url: "https://trakrr.app/privacy"
+            )
+
+            externalLinkRow(
+                title: "Terms of Service",
+                systemImage: "doc.text",
+                url: "https://trakrr.app/terms"
+            )
+
+            externalLinkRow(
+                title: "Support",
+                systemImage: "envelope",
+                url: "mailto:support@trakrr.app"
+            )
         } header: {
             Text("About")
         }
+    }
+
+    // External link row helper — chevron-style nav row that
+    // opens the given URL via `UIApplication.open`. iOS
+    // surfaces the appropriate handler (Safari, Mail, etc.);
+    // we don't presume which app the user prefers. The
+    // arrow.up.right glyph matches Apple's Settings convention
+    // for "leaves the app" links vs. the chevron-right for
+    // in-app navigation.
+    private func externalLinkRow(
+        title: String,
+        systemImage: String,
+        url: String
+    ) -> some View {
+        Button {
+            if let target = URL(string: url) {
+                UIApplication.shared.open(target)
+            }
+        } label: {
+            HStack {
+                Image(systemName: systemImage)
+                    .foregroundStyle(Color.accent)
+                Text(title)
+                    .foregroundStyle(Color.textPrimary)
+                Spacer()
+                Image(systemName: "arrow.up.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.textTertiary)
+            }
+        }
+        .buttonStyle(.plain)
+        .listRowBackground(Color.surface)
     }
 
     // MARK: - Helpers

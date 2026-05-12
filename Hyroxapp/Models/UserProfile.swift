@@ -57,6 +57,12 @@ final class UserProfile {
     var location: String
     var bio: String
 
+    // Wireframe §05.2 — home gym free-form text. Surfaces on
+    // the profile page (next to division pill) and powers
+    // per-race "where I trained" auto-fill on Edit Notes.
+    // Lightweight migration: default empty string for old rows.
+    var homeGym: String = ""
+
     // Compressed JPEG of the chosen avatar. `nil` means "show the default
     // SF Symbol fallback". Kept as Data rather than filesystem path so the
     // whole profile travels with the model (and later syncs) as one unit.

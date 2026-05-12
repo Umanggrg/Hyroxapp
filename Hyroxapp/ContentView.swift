@@ -249,8 +249,18 @@ struct ContentView: View {
         //   3. The FAB itself, painted last so it sits cleanly above
         //      the hairline, the bg tint, and any neighbor labels.
         ZStack(alignment: .top) {
-            // Layer 1+2: bar background + 4 tab items
+            // Layer 1+2: bar background + 4 tab items. A top
+            // spacer reserves vertical space the FAB will
+            // visually occupy when it protrudes — without it,
+            // `.safeAreaInset(edge: .bottom)` only reserves the
+            // bar's intrinsic height (~50pt) for scrolling
+            // children, and the FAB's protruding top arc covers
+            // the last row of any scrollable content. The 36pt
+            // top spacer expands the inset so scrollable bodies
+            // end well clear of the FAB.
             VStack(spacing: 0) {
+                Color.clear
+                    .frame(height: 36)
                 Rectangle()
                     .fill(Color.divider)
                     .frame(height: 0.5)
@@ -272,8 +282,16 @@ struct ContentView: View {
                 .padding(.bottom, 6)
             }
             .background(
-                Color.background
-                    .ignoresSafeArea(.container, edges: .bottom)
+                // Tinted bg covers ONLY the bar's intrinsic strip
+                // (hairline + tab items) — the 36pt FAB-clearance
+                // spacer above stays transparent so the FAB's
+                // halo can fade naturally over scrolling content
+                // beneath, not over a solid bg.
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: 36)
+                    Color.background
+                        .ignoresSafeArea(.container, edges: .bottom)
+                }
             )
 
             // Layer 3: FAB, painted on top of the bar. Vertically

@@ -49,7 +49,7 @@ struct PublicProfileSheet: View {
                     .padding(.top, 16)
                 }
             }
-            .navigationTitle("Athlete")
+            .navigationTitle(navigationTitle)
             .hyroxNavigationBar(inline: true)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -59,6 +59,29 @@ struct PublicProfileSheet: View {
             .task {
                 await load()
             }
+        }
+        // Drag indicator + medium/large detents so the sheet
+        // feels like a peek rather than a full-screen takeover.
+        // The drag-down dismiss gesture works on every iOS
+        // sheet; the indicator makes it discoverable. Detents
+        // give the user the choice — quick peek (medium) or
+        // dig in (large).
+        .presentationDragIndicator(.visible)
+        .presentationDetents([.medium, .large])
+    }
+
+    // Dynamic navigation title — generic placeholder while the
+    // lookup is in flight, then the athlete's handle (or
+    // display name as a fallback) once the profile resolves.
+    // Surfaces useful identity in the toolbar without making
+    // the card's hero name redundant.
+    private var navigationTitle: String {
+        switch phase {
+        case .loading, .notFound:
+            return "Athlete"
+        case .result(let profile):
+            let trimmed = profile.handle.trimmingCharacters(in: .whitespaces)
+            return trimmed.isEmpty ? profile.displayName : "@\(trimmed)"
         }
     }
 

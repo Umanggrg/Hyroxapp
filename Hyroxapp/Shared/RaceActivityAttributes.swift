@@ -102,6 +102,16 @@ public struct RaceActivityAttributes: ActivityAttributes {
         //   5 = Z5 VO2 Max        (red)
         public var currentHRZone: Int?
 
+        // Optional target finish time for this race. Drives the
+        // lock-screen pace-ghost line: "+0:12 ahead" / "on pace"
+        // / "-0:08 behind" rendered just below the hero timer.
+        // Nil means the athlete didn't set a target (lock screen
+        // hides the line and lays the timer + station block out
+        // tight against the progress bar). Same naïve even-split
+        // model the Watch race page uses — keeps the widget's
+        // math local and identical across surfaces.
+        public var targetDuration: TimeInterval?
+
         public init(
             phase: Phase,
             timerStart: Date,
@@ -113,7 +123,8 @@ public struct RaceActivityAttributes: ActivityAttributes {
             totalStations: Int,
             currentStationName: String,
             currentHR: Int? = nil,
-            currentHRZone: Int? = nil
+            currentHRZone: Int? = nil,
+            targetDuration: TimeInterval? = nil
         ) {
             self.phase = phase
             self.timerStart = timerStart
@@ -126,6 +137,7 @@ public struct RaceActivityAttributes: ActivityAttributes {
             self.currentStationName = currentStationName
             self.currentHR = currentHR
             self.currentHRZone = currentHRZone
+            self.targetDuration = targetDuration
         }
     }
 

@@ -54,6 +54,21 @@ struct HistoryView: View {
     // the existing chip filters); `runs` shows only Free Runs.
     @State private var selectedActivity: HistoryActivityKind = .all
 
+    // Wireframe §04.1 primary mode switcher — List / Calendar /
+    // Trends. The wireframe positions this as the top-level
+    // navigation; activity-kind + filter chips live below it
+    // and only apply in List mode.
+    @State private var selectedMode: HistoryMode = .list
+
+    // State-driven navigation for the new modes. List/Calendar
+    // rows use button callbacks (cleaner than passing a
+    // NavigationLink destination into reusable mode views), so
+    // we surface the destination via these @State bindings and
+    // a pair of navigationDestination(item:) modifiers on the
+    // NavigationStack below.
+    @State private var raceDestination: Race?
+    @State private var runDestination: FreeRun?
+
     // Selected tag (nil = no tag filter). Composes with selectedFilter
     // — both apply in series, so the user can do "PBs Only" + tag
     // "zone2" to see PB races that were also zone-2 sessions.
@@ -82,65 +97,7 @@ struct HistoryView: View {
                 if races.isEmpty && freeRuns.isEmpty {
                     emptyState
                 } else {
-                    ScrollView {
-                        LazyVStack(spacing: 14) {
-                            // At-a-glance stats summary — total
-                            // races, PB, last-race relative date.
-                            // Provides framing for the feed
-                            // beneath without crowding it.
-                            HistoryHero(races: races)
-                                .padding(.bottom, 2)
-
-                            // Activity-kind switch — All / Races /
-                            // Runs. Pinned above the race-specific
-                            // filter chips so the user picks "what
-                            // am I looking at" first, then narrows
-                            // within that category.
-                            FilterChipRow(
-                                filters: HistoryActivityKind.allCases,
-                                selection: $selectedActivity,
-                                label: \.displayName
-                            )
-                            .padding(.horizontal, -Layout.screenMargin)
-
-                            // Race-specific filter chips. Hidden
-                            // when the user has selected the Runs-
-                            // only view since the chips don't apply
-                            // (PBs / customWorkouts / mode are race
-                            // concepts).
-                            if selectedActivity != .runs {
-                                FilterChipRow(
-                                    filters: HistoryFilter.allCases,
-                                    selection: $selectedFilter,
-                                    label: \.displayName
-                                )
-                                .padding(.horizontal, -Layout.screenMargin)
-
-                                // Tag filter row sits below the
-                                // preset chips. Composes with the
-                                // active preset — both filters
-                                // apply in series. Auto-hides when
-                                // no tags exist on any race.
-                                TagFilterRow(
-                                    tags: availableTags,
-                                    selection: $selectedTag
-                                )
-                                .padding(.horizontal, -Layout.screenMargin)
-                            }
-
-                            if filteredItems.isEmpty {
-                                noResultsState
-                                    .padding(.top, 40)
-                            } else {
-                                ForEach(filteredItems) { item in
-                                    historyRow(for: item)
-                                        .applyScrollAppearTransition()
-                                }
-                            }
-                        }
-                        .padding(.horizontal, Layout.screenMargin)
-                        .padding(.vertical, Layout.screenMargin)
-                    }
+                    historyScrollBody
                 }
             }
             .navigationTitle("History")
@@ -161,6 +118,18 @@ struct HistoryView: View {
                 // through to its own `dismiss` env value, which
                 // pops the nav stack and lands the user back on
                 // the History feed.
+                FreeRunSummaryView(run: run)
+            }
+            // State-driven nav destinations for the wireframe §04.1
+            // List/Calendar modes — those modes use button-callback
+            // navigation rather than NavigationLink wrappers. When
+            // a row taps, its mode flips the corresponding @State
+            // optional to non-nil and these modifiers push the
+            // destination automatically.
+            .navigationDestination(item: $raceDestination) { race in
+                RaceDetailView(race: race)
+            }
+            .navigationDestination(item: $runDestination) { run in
                 FreeRunSummaryView(run: run)
             }
             .navigationDestination(for: HistoryDestination.self) { destination in
@@ -213,6 +182,131 @@ struct HistoryView: View {
     // fetched lazily on render.
     private var hasAnyPhoto: Bool {
         races.contains { $0.photoData != nil || $0.photoURL != nil }
+    }
+
+    // Wireframe §04.1 mode-aware body. Hero stats persist at the
+    // top regardless of mode (athletes want the at-a-glance count
+    // + PB even when they're scrubbing through the calendar).
+    // Mode chip row sits beneath the hero; below that, each mode
+    // renders its own content.
+    private var historyScrollBody: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 14) {
+                HistoryHero(races: races)
+                    .padding(.bottom, 2)
+
+                modeChipRow
+
+                switch selectedMode {
+                case .list:
+                    listModeContent
+                case .calendar:
+                    HistoryCalendarMode(
+                        races: races,
+                        freeRuns: freeRuns,
+                        onRaceTap: { race in raceDestination = race },
+                        onRunTap: { run in runDestination = run }
+                    )
+                case .trends:
+                    HistoryTrendsMode(races: races)
+                }
+            }
+            .padding(.horizontal, Layout.screenMargin)
+            .padding(.vertical, Layout.screenMargin)
+        }
+    }
+
+    // Wireframe §04.1 primary mode switcher. Three pills: List
+    // (default) / Calendar / Trends. Coral active, neutral
+    // outline inactive — same shape as the feed's filter chips.
+    private var modeChipRow: some View {
+        HStack(spacing: 6) {
+            ForEach(HistoryMode.allCases) { mode in
+                modeChip(mode)
+            }
+            Spacer()
+        }
+    }
+
+    private func modeChip(_ mode: HistoryMode) -> some View {
+        let isActive = (selectedMode == mode)
+        return Button {
+            Haptics.impact(.light)
+            withAnimation(.smooth(duration: 0.2)) {
+                selectedMode = mode
+            }
+        } label: {
+            Text(mode.displayName)
+                .font(.caption.weight(.heavy))
+                .foregroundStyle(isActive ? Color.accent : Color.textSecondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule()
+                        .fill(isActive ? Color.accent.opacity(0.12) : Color.clear)
+                )
+                .overlay(
+                    Capsule()
+                        .stroke(isActive ? Color.accent : Color.divider, lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // List-mode body. When the search field is active, swaps
+    // the standard grouped list for the wireframe §04.1
+    // dedicated search-results layout (HistorySearchResults).
+    // Otherwise renders the existing activity-kind / filter /
+    // tag chip chain + weekly-grouped HistoryListMode.
+    @ViewBuilder
+    private var listModeContent: some View {
+        let trimmedQuery = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !trimmedQuery.isEmpty {
+            // Search active → dedicated results view with
+            // station-summary card when query matches a station
+            // name. No filter chips here — search results stand
+            // alone per wireframe.
+            HistorySearchResults(
+                query: trimmedQuery,
+                races: races,
+                onRaceTap: { race in raceDestination = race }
+            )
+        } else {
+            FilterChipRow(
+                filters: HistoryActivityKind.allCases,
+                selection: $selectedActivity,
+                label: \.displayName
+            )
+            .padding(.horizontal, -Layout.screenMargin)
+
+            if selectedActivity != .runs {
+                FilterChipRow(
+                    filters: HistoryFilter.allCases,
+                    selection: $selectedFilter,
+                    label: \.displayName
+                )
+                .padding(.horizontal, -Layout.screenMargin)
+
+                TagFilterRow(
+                    tags: availableTags,
+                    selection: $selectedTag
+                )
+                .padding(.horizontal, -Layout.screenMargin)
+            }
+
+            if filteredItems.isEmpty {
+                noResultsState
+                    .padding(.top, 40)
+            } else {
+                HistoryListMode(
+                    items: filteredItems,
+                    allRaces: races,
+                    onRaceTap: { race in raceDestination = race },
+                    onRunTap: { run in runDestination = run }
+                )
+            }
+        }
     }
 
     // Render a history row for a unified `HistoryItem` —
@@ -404,6 +498,29 @@ enum HistoryItem: Identifiable, Hashable {
         switch self {
         case .race(let r): return r.createdAt
         case .run(let r): return r.createdAt
+        }
+    }
+}
+
+// Wireframe §04.1 primary mode. The athlete picks one of three
+// views into their history archive:
+//   • List     — reverse-chronological logbook, weekly grouped
+//   • Calendar — month heatmap with race-day indicators
+//   • Trends   — finish-time chart + station deep dive
+// Search is reachable across all three via the .searchable
+// nav-bar field; race detail is the universal tap-into.
+enum HistoryMode: Int, CaseIterable, Identifiable, Hashable {
+    case list
+    case calendar
+    case trends
+
+    var id: Int { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .list:     return "List"
+        case .calendar: return "Calendar"
+        case .trends:   return "Trends"
         }
     }
 }

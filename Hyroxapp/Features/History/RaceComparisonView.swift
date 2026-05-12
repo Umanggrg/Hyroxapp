@@ -75,6 +75,8 @@ struct RaceComparisonView: View {
 
                     if let a = raceA, let b = raceB {
                         comparisonHero(a: a, b: b).applyScrollAppearTransition()
+                        handwrittenObservation(a: a, b: b)
+                            .applyScrollAppearTransition()
                         aggregatesCard(a: a, b: b).applyScrollAppearTransition()
                         splitsCompareCard(a: a, b: b).applyScrollAppearTransition()
                     } else {
@@ -122,14 +124,23 @@ struct RaceComparisonView: View {
     }
 
     private func picker(label: String, race: Race?, side: Side) -> some View {
-        Button {
+        // Wireframe §04.2 spec: Race A reads as the reference
+        // (coral border + coral caps label), Race B as the
+        // comparison target (neutral divider border). This
+        // pairs visually with the hand-written observation
+        // ("A faster by 0:42") that lives below.
+        let isA = (side == .a)
+        let borderColor = isA ? Color.accent : Color.divider
+        let labelColor = isA ? Color.accent : Color.textTertiary
+
+        return Button {
             pickingSide = side
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(label)
                     .font(.caption2.weight(.heavy))
                     .tracking(0.6)
-                    .foregroundStyle(Color.textTertiary)
+                    .foregroundStyle(labelColor)
 
                 if let race {
                     Text(race.name.isEmpty
@@ -155,7 +166,7 @@ struct RaceComparisonView: View {
                     .fill(Color.surface)
                     .overlay(
                         RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
-                            .stroke(Color.divider, lineWidth: 1)
+                            .stroke(borderColor, lineWidth: isA ? 1.5 : 1)
                     )
             )
         }
@@ -245,6 +256,46 @@ struct RaceComparisonView: View {
     // `comparisonHero` shows the delta as the headline 64pt
     // number above the per-race stack, replacing the small
     // pill treatment.)
+
+    // MARK: - Hand-written observation (wireframe §04.2)
+
+    // Italic serif observation between the hero and the
+    // aggregates — wireframe-style "A faster by 0:42" or
+    // "Same finish, different paths." Picks a phrase based
+    // on the delta direction. Tinted green when A wins,
+    // amber when B does, neutral on tie. Designed to feel
+    // like a coach's margin note, not a system label.
+    //
+    // The text + tint computation is extracted to
+    // `observationCopy(a:b:)` because @ViewBuilder doesn't
+    // allow local `let` mutation across if/else branches —
+    // the compiler interprets the conditional as a view-builder
+    // expression returning Void arms, which doesn't conform to View.
+    private func handwrittenObservation(a: Race, b: Race) -> some View {
+        let copy = observationCopy(a: a, b: b)
+        return Text(copy.text)
+            .font(.system(size: 18, weight: .semibold, design: .serif))
+            .italic()
+            .foregroundStyle(copy.tint)
+            .frame(maxWidth: .infinity)
+            .multilineTextAlignment(.center)
+    }
+
+    private func observationCopy(a: Race, b: Race) -> (text: String, tint: Color) {
+        let aTotal = a.totalDuration ?? 0
+        let bTotal = b.totalDuration ?? 0
+        let delta = abs(aTotal - bTotal)
+        let aFaster = aTotal < bTotal
+        let isTie = (delta < 1)
+
+        if isTie {
+            return ("Same finish, different paths.", Color.textPrimary)
+        } else if aFaster {
+            return ("A faster by \(RaceStats.format(delta))", Color.success)
+        } else {
+            return ("B faster by \(RaceStats.format(delta))", Color.warning)
+        }
+    }
 
     // MARK: - Aggregates row (avg HR, calories)
 

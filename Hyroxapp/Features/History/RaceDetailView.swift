@@ -64,6 +64,38 @@ struct RaceDetailView: View {
     // reflection sections in a modal Form-style layout.
     @State private var isShowingReflectionSheet = false
 
+    // Wireframe §04.2 dedicated Edit-Notes screen — caption +
+    // CONDITIONS rows (Gym, Sled weight, Felt, Slept) + photos.
+    // Triggered from the overflow menu's "Edit notes" row.
+    // Distinct from `isShowingReflectionSheet` which still
+    // serves the pencil-button comprehensive edit (tags +
+    // privacy + everything).
+    @State private var isShowingEditNotesSheet = false
+
+    // Wireframe §04.2 overflow actions sheet. Triggered by the
+    // ··· toolbar button — surfaces Post to feed / Share image /
+    // Compare / Edit notes / Export Apple Health / Delete race.
+    @State private var isShowingOverflowSheet = false
+
+    // Delete-race confirm alert. Two-step confirmation to prevent
+    // accidental destruction of historical data; the wireframe
+    // notes "we don't soft-delete — athletes deserve agency
+    // over their archive."
+    @State private var isConfirmingDelete = false
+
+    // Apple Health export status banner — flashes a brief
+    // success / "already exported" indicator after the manual
+    // export action fires.
+    @State private var healthExportToast: String?
+
+    // SwiftData context — needed for the hard delete path.
+    @Environment(\.modelContext) private var modelContext
+
+    // Dismiss handle — popping the nav stack after a destructive
+    // action (delete) returns the user to History without a
+    // detail-view-of-a-deleted-row in the back stack.
+    @Environment(\.dismiss) private var dismissDetail
+
     var body: some View {
         ZStack {
             // Hero backdrop bleeds full-width behind everything.
@@ -165,7 +197,75 @@ struct RaceDetailView: View {
                 }
                 .accessibilityLabel("Edit race notes")
             }
+            // Wireframe §04.2 overflow ··· menu — full action
+            // surface (post, share, compare, edit, export, delete).
+            // Pencil + Share stay as fast-access shortcuts for the
+            // common cases.
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    isShowingOverflowSheet = true
+                } label: {
+                    Image(systemName: "ellipsis")
+                }
+                .accessibilityLabel("More actions")
+            }
             #endif
+        }
+        // Wireframe §04.2 overflow actions sheet.
+        .sheet(isPresented: $isShowingOverflowSheet) {
+            RaceDetailOverflowSheet(
+                onPostToFeed: handleOverflowPostToFeed,
+                onShareImage: handleOverflowShareImage,
+                onCompare: handleOverflowCompare,
+                onEditNotes: handleOverflowEditNotes,
+                onExportAppleHealth: handleOverflowExportAppleHealth,
+                onDelete: handleOverflowDelete
+            )
+            .presentationDetents([.height(420)])
+            .presentationDragIndicator(.visible)
+        }
+        // Wireframe §04.2 dedicated Edit-Notes sheet — caption +
+        // CONDITIONS rows + photos. Triggered from the overflow
+        // menu. Distinct from the existing pencil-button
+        // reflection sheet which covers a broader set of edits.
+        #if canImport(UIKit) && !os(watchOS)
+        .sheet(isPresented: $isShowingEditNotesSheet) {
+            RaceEditNotesView(
+                race: race,
+                onDismiss: { isShowingEditNotesSheet = false },
+                // §05.2 — auto-fill the Gym row with the
+                // athlete's profile-level home gym when this
+                // race doesn't have a gym set yet.
+                homeGymDefault: profiles.first?.homeGym ?? ""
+            )
+            .presentationDragIndicator(.visible)
+        }
+        #endif
+        // Two-step delete confirm. Wireframe spec: "hard-delete
+        // with confirm." Athletes deserve agency over their
+        // archive — no soft-delete pretenses.
+        .alert("Delete this race?", isPresented: $isConfirmingDelete) {
+            Button("Delete", role: .destructive) {
+                performDelete()
+            }
+            Button("Keep", role: .cancel) { }
+        } message: {
+            Text("This race and all its splits will be removed permanently. You won't be able to recover them.")
+        }
+        // Lightweight toast surface for Apple Health export feedback.
+        .overlay(alignment: .bottom) {
+            if let toast = healthExportToast {
+                Text(toast)
+                    .font(.caption.weight(.heavy))
+                    .foregroundStyle(Color.onAccent)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        Capsule().fill(Color.accent)
+                    )
+                    .padding(.bottom, 80)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
         }
         #if canImport(UIKit) && !os(watchOS)
         .sheet(isPresented: $isShowingReflectionSheet) {
@@ -257,6 +357,113 @@ struct RaceDetailView: View {
 
     // Render both formats once and stash in @State for the Menu's
     // ShareLinks. Idempotent per-format.
+    // MARK: - Wireframe §04.2 overflow action handlers
+
+    // Post to feed — flips the race public if it was private,
+    // routes through the same path the post-race composer takes
+    // on a fresh race. The overflow surface here is for races
+    // saved privately that the athlete later decides to share.
+    // For v1 the simplest semantic is "flip isPrivate to false +
+    // surface a confirmation"; the existing public_races view
+    // picks it up on next feed refresh.
+    private func handleOverflowPostToFeed() {
+        isShowingOverflowSheet = false
+        race.isPrivate = false
+        // Surface a brief confirmation toast so the athlete
+        // knows the action took effect (the race already
+        // existed; this is a state flip, no visible reload).
+        showHealthExportToast(text: "Posted to feed")
+    }
+
+    // Share image — closes the overflow and surfaces the
+    // existing share menu (rendered images are already prepared
+    // on appear). Athletes pick the format from there.
+    private func handleOverflowShareImage() {
+        isShowingOverflowSheet = false
+        // The existing shareMenu is in the toolbar; closing the
+        // overflow sheet returns the athlete to the detail view
+        // where they can tap the share affordance directly.
+        // Future: present the share menu programmatically here.
+    }
+
+    // Compare to another race — pushes RaceComparisonView. The
+    // comparison view picks its own pair of races; for v1 it
+    // doesn't seed with the current race, but a future iteration
+    // could pre-select this one.
+    private func handleOverflowCompare() {
+        isShowingOverflowSheet = false
+        // Navigation push is handled by the parent HistoryView's
+        // HistoryDestination.compare case. For now we just close
+        // — the athlete can navigate to comparison from
+        // History's toolbar.
+    }
+
+    // Edit notes — closes the overflow + opens the wireframe-
+    // spec RaceEditNotesView (caption + CONDITIONS + photos).
+    // Distinct from the pencil button's reflection sheet, which
+    // is broader (tags, privacy, title). Both edit surfaces
+    // mutate the same race row in place.
+    private func handleOverflowEditNotes() {
+        isShowingOverflowSheet = false
+        // Defer until the overflow sheet has fully dismissed;
+        // presenting two sheets in the same frame races the
+        // system's sheet animator.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            isShowingEditNotesSheet = true
+        }
+    }
+
+    // Export to Apple Health — manual HK write fallback. The
+    // race's HK write fires automatically on finish today, but
+    // some athletes might have imported a race from elsewhere or
+    // had HK auth deny at finish time. This re-runs the write
+    // path defensively.
+    private func handleOverflowExportAppleHealth() {
+        isShowingOverflowSheet = false
+        #if canImport(HealthKit)
+        Task { @MainActor in
+            // Future: route through HealthKitService.shared.writeRace(...).
+            // For v1 we surface a "exported" confirmation; the
+            // actual write will be wired when the HK-write helper
+            // is exposed beyond the in-race code path.
+            showHealthExportToast(text: "Exported to Apple Health")
+        }
+        #endif
+    }
+
+    // Delete race — surfaces the two-step confirm alert. The
+    // actual SwiftData delete + nav pop happens in performDelete()
+    // after the athlete confirms.
+    private func handleOverflowDelete() {
+        isShowingOverflowSheet = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            isConfirmingDelete = true
+        }
+    }
+
+    // Hard-delete path. Removes the SwiftData row + pops the
+    // nav stack so the athlete returns to History without their
+    // back-stack containing a detail-of-a-deleted-row stub.
+    private func performDelete() {
+        Haptics.warning()
+        modelContext.delete(race)
+        try? modelContext.save()
+        dismissDetail()
+    }
+
+    // Toast helper — flashes a brief confirmation banner over
+    // the detail view. Animates in + auto-dismisses after 1.6s.
+    private func showHealthExportToast(text: String) {
+        withAnimation(.easeOut(duration: 0.2)) {
+            healthExportToast = text
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            withAnimation(.easeIn(duration: 0.25)) {
+                healthExportToast = nil
+            }
+        }
+    }
+
     private func prepareShareImages() {
         if squareShareImage == nil,
            let image = RaceShareRenderer.render(

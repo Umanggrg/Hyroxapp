@@ -913,10 +913,19 @@ struct RaceView: View {
         .padding(.horizontal, Layout.screenMargin)
     }
 
-    // Pre-race start screen. RaceStartView owns its own padding
-    // so the hero backdrop can bleed full-width.
+    // Pre-race phase — wireframe §14 Train tab. The hub renders
+    // the 2×2 action grid (Race Mode / Race Simulation / Quick
+    // Station / Compromised) + recommended workout card, and
+    // navigates into RaceStartView (existing setup screen) when
+    // the athlete picks Race Mode or Race Simulation. Quick
+    // Station + Compromised open CustomWorkoutBuilderView as a
+    // sheet from inside the hub.
+    //
+    // RaceStartView's existing bindings flow through TrainHubView
+    // unchanged so the Duo + pairing surfaces stay wired without
+    // any callsite-level adjustments here.
     private var preRacePhase: some View {
-        RaceStartView(
+        TrainHubView(
             viewModel: viewModel,
             selectedMode: $selectedMode,
             duoCoordinator: $duoCoordinator,

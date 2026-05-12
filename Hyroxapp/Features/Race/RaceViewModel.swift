@@ -137,6 +137,13 @@ final class RaceViewModel {
             HRZone.zone(for: $0, maxBPM: maxHeartRate).rawValue
         }
 
+        // Target finish time — drives the lock-screen pace ghost
+        // line. Threaded through every ContentState construction
+        // below so the widget always has the data when it's
+        // available, regardless of which phase the race is in
+        // when the next push happens.
+        let targetDuration = activeRace?.targetDuration
+
         switch engine.state {
         case .notStarted:
             return nil
@@ -149,7 +156,8 @@ final class RaceViewModel {
                 totalStations: engine.sequence.count,
                 currentStationName: stationName,
                 currentHR: hr,
-                currentHRZone: hrZone
+                currentHRZone: hrZone,
+                targetDuration: targetDuration
             )
         case .paused(let raceStart, let segStart, _, let pausedAt):
             return RaceActivityAttributes.ContentState(
@@ -162,7 +170,8 @@ final class RaceViewModel {
                 totalStations: engine.sequence.count,
                 currentStationName: stationName,
                 currentHR: hr,
-                currentHRZone: hrZone
+                currentHRZone: hrZone,
+                targetDuration: targetDuration
             )
         case .inRoxzone(let raceStart, _, let roxStart):
             return RaceActivityAttributes.ContentState(
@@ -174,7 +183,8 @@ final class RaceViewModel {
                 totalStations: engine.sequence.count,
                 currentStationName: stationName,
                 currentHR: hr,
-                currentHRZone: hrZone
+                currentHRZone: hrZone,
+                targetDuration: targetDuration
             )
         case .finished(let raceStart, let endedAt, _):
             return RaceActivityAttributes.ContentState(
@@ -187,7 +197,8 @@ final class RaceViewModel {
                 totalStations: engine.sequence.count,
                 currentStationName: stationName,
                 currentHR: hr,
-                currentHRZone: hrZone
+                currentHRZone: hrZone,
+                targetDuration: targetDuration
             )
         }
     }

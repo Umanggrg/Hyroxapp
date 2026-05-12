@@ -3,12 +3,12 @@ import SwiftUI
 import UIKit
 #endif
 
-// v2 redesign hero header for Profile. Replaces the v1
-// ProfileHeaderView (which still exists, kept for any prior
-// callers / previews). The new hero treats the top of Profile
-// as a moment, not a header — coral spotlight backdrop, large
-// avatar with accent ring, name in display weight, single
-// stand-out PB number underneath.
+// v2 redesign hero header for Profile. The hero treats the
+// top of Profile as a moment, not a header — coral spotlight
+// backdrop, large avatar with accent ring, name in display
+// weight, single stand-out PB number underneath. (The earlier
+// flat ProfileHeaderView was pruned once ProfileView fully
+// migrated to this view.)
 //
 // Anatomy:
 //   • Subtle radial coral glow (via HeroBackdrop's logic
@@ -71,7 +71,9 @@ struct ProfileHero: View {
 
                 nameAndHandle
 
-                divisionPill
+                identityPills
+
+                bioAndLocation
 
                 followStatsLine
 
@@ -205,6 +207,22 @@ struct ProfileHero: View {
         }
     }
 
+    // §05.2 identity-pill row — Division pill (always rendered)
+    // + optional Home Gym pill. When the athlete hasn't set a
+    // home gym, only the Division pill shows so the row reads
+    // clean. When both are set, they sit side-by-side as the
+    // identity strip between the handle and the social-graph
+    // line.
+    private var identityPills: some View {
+        HStack(spacing: 6) {
+            divisionPill
+            if !profile.homeGym.isEmpty {
+                gymPill
+            }
+        }
+        .padding(.horizontal, 16)
+    }
+
     // Division pill — small caps wordmark with coral border. Same
     // treatment used by the share-card athlete footer so the
     // identity reads consistently across surfaces.
@@ -228,6 +246,74 @@ struct ProfileHero: View {
                         .stroke(Color.accent.opacity(0.35), lineWidth: 1)
                 )
         )
+    }
+
+    // Home gym pill — neutral surface treatment (not coral) so
+    // it reads as supporting identity rather than competing with
+    // the division pill. Hidden entirely when the athlete hasn't
+    // set a home gym yet. Truncates with a tail ellipsis at
+    // longer gym names so the row stays single-line on a 375pt
+    // device.
+    private var gymPill: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "building.2.fill")
+                .font(.caption2.weight(.bold))
+            Text(profile.homeGym)
+                .font(.caption.weight(.heavy))
+                .tracking(0.4)
+                .textCase(.uppercase)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .foregroundStyle(Color.textSecondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            Capsule()
+                .fill(Color.surface)
+                .overlay(
+                    Capsule()
+                        .stroke(Color.divider, lineWidth: 1)
+                )
+        )
+    }
+
+    // Bio + location strip — quiet metadata between the identity
+    // pills and the social-graph line. Hidden entirely when both
+    // fields are empty so a fresh-onboarded athlete doesn't see
+    // an empty gap. Location renders as a small caps + pin icon
+    // line; bio as a soft body paragraph beneath. Both center-
+    // aligned to match the rest of the hero column.
+    @ViewBuilder
+    private var bioAndLocation: some View {
+        let trimmedLocation = profile.location.trimmingCharacters(in: .whitespaces)
+        let trimmedBio = profile.bio.trimmingCharacters(in: .whitespaces)
+
+        if !trimmedLocation.isEmpty || !trimmedBio.isEmpty {
+            VStack(spacing: 6) {
+                if !trimmedLocation.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "mappin.and.ellipse")
+                            .font(.caption2.weight(.bold))
+                        Text(trimmedLocation)
+                            .font(.caption.weight(.semibold))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(Color.textSecondary)
+                }
+
+                if !trimmedBio.isEmpty {
+                    Text(trimmedBio)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(Color.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 24)
+                }
+            }
+            .padding(.top, 2)
+        }
     }
 
     // Followers / Following inline line — Strava convention:
@@ -299,52 +385,91 @@ struct ProfileHero: View {
         }
     }
 
-    // 4-tile stat row with REAL hierarchy: PB is the hero (32pt
-    // accent), the other three sit secondary. This is the
-    // information-hierarchy fix for v1's flat four-equal-tiles
-    // approach — there IS a most-important number for an
-    // athlete's profile, and it's their PB.
+    // Wireframe §05.1 asymmetric 4-tile stat row — coral PB tile
+    // leftmost as the visual anchor (1.4fr in the wireframe),
+    // RACES / AVG / STREAK as the three equal secondaries
+    // (1fr each). Equal widths in the SwiftUI realization since
+    // fractional-flex isn't first-class, but the hero tile's
+    // larger numeric, coral tint, and sub-line do the visual
+    // hierarchy work the wireframe asymmetry implies.
+    //
+    // Tile order matches the wireframe: PB · RACES · AVG · STREAK.
     private var statsRow: some View {
-        HStack(spacing: 0) {
-            statTile(
-                value: "\(raceCount)",
-                label: "RACES",
-                isHero: false
-            )
-            divider
-            statTile(
-                value: pbDisplay,
-                label: "PB",
-                isHero: true
-            )
-            divider
-            statTile(
-                value: avgDisplay,
-                label: "AVG",
-                isHero: false
-            )
-            divider
-            statTile(
-                value: "\(streakDays)",
-                label: "STREAK",
-                isHero: false
+        HStack(spacing: 4) {
+            heroPBTile
+            secondaryStatTile(value: "\(raceCount)", label: "RACES")
+            secondaryStatTile(value: avgDisplay, label: "AVG")
+            secondaryStatTile(
+                value: "\(streakDays)\(streakDays > 0 ? " 🔥" : "")",
+                label: "STREAK"
             )
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
-        // Stats-row card — token-aligned to
-        // `Layout.cardCornerRadius` for consistency. Value was
-        // already correct (16); the rename is for grep-ability
-        // and so a future radius retune sweeps this surface too.
+        .padding(.horizontal, Layout.screenMargin)
+    }
+
+    // Hero PB tile — coral wash, big rounded number, caps "PB"
+    // label + a small contextual sub-line. Reads as the headline
+    // stat on the row.
+    private var heroPBTile: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(pbDisplay)
+                .font(.system(size: 20, weight: .heavy, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(Color.accent)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+
+            Text("PB")
+                .font(.system(size: 9, weight: .heavy))
+                .tracking(0.7)
+                .foregroundStyle(Color.accent)
+
+            // Sub-line — wireframe shows "Ski Erg · best" or
+            // "Nov 9 · −42s". For v1 we render a quiet "best
+            // finish" anchor when the athlete has races, falling
+            // back to a dash placeholder when not.
+            Text(raceCount > 0 ? "best finish" : "no races yet")
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(Color.textTertiary)
+                .padding(.top, 1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 12)
         .background(
             RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
-                .fill(Color.surface.opacity(0.85))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
-                        .stroke(Color.divider.opacity(0.6), lineWidth: 1)
-                )
+                .fill(Color.accent.opacity(0.10))
         )
-        .padding(.horizontal, Layout.screenMargin)
+        .overlay(
+            RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                .stroke(Color.accent.opacity(0.35), lineWidth: 1)
+        )
+    }
+
+    // Plain stat tile — rounded number + caps label, neutral
+    // surface fill. Three of these sit to the right of the hero
+    // tile in the stat row.
+    private func secondaryStatTile(value: String, label: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(value)
+                .font(.system(size: 18, weight: .heavy, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(Color.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+
+            Text(label)
+                .font(.system(size: 9, weight: .heavy))
+                .tracking(0.7)
+                .foregroundStyle(Color.textSecondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                .fill(Color.surface)
+        )
     }
 
     private var divider: some View {

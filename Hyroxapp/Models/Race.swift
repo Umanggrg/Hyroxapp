@@ -194,6 +194,25 @@ final class Race {
     // private races entirely.
     var isPrivate: Bool = false
 
+    // Wireframe §04.3 edge case — provenance flag for races
+    // imported from Apple Health rather than recorded in-app.
+    // Future Health-import flow will flip this true; for now
+    // every new race starts at false. Drives the small "↓ Health"
+    // tag on History list rows. Lightweight migration: existing
+    // rows pick up the false default cleanly.
+    var importedFromHealth: Bool = false
+
+    // Wireframe §04.2 Edit-Notes screen — optional CONDITIONS
+    // metadata the athlete can attach post-race. All optional /
+    // empty-by-default so existing rows don't need backfill.
+    //
+    //   • gym       — free-form location string ("Brooklyn Strength")
+    //   • feltRating — 1-10 perceived effort / how-did-this-feel
+    //   • sleepHoursLast — hours slept the night before (7.2)
+    var gym: String = ""
+    var feltRating: Int?
+    var sleepHoursLast: Double?
+
     // Athlete-defined organizing tags. Free-form lowercase strings
     // ("zone2", "race-sim", "morning", "brick", "strength-focus")
     // — the athlete picks their own taxonomy. Stored as a single

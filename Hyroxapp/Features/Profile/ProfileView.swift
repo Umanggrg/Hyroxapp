@@ -12,9 +12,13 @@ import Auth
 enum ProfileDestination: Hashable {
     case performanceDetail
     case trendsDetail
+    // Wireframe §05.2 All Stats deep-dive — FINISH TIMES tri-tile
+    // + per-station PBs + milestones chip wrap. Pushed from a
+    // "See all stats" entry on the profile summary section.
+    case allStats
 }
 
-// The Profile tab. Composes a `ProfileHeaderView` reading from the live
+// The Profile tab. Composes a `ProfileHero` reading from the live
 // `UserProfile` model with a stats grid computed from all finished races.
 // Bootstraps a default `UserProfile` on first launch so the header always
 // has something to render; an Edit button in the toolbar presents the
@@ -279,6 +283,8 @@ struct ProfileView: View {
                         division: division,
                         maxHR: maxHR
                     )
+                case .allStats:
+                    AllStatsView(races: races)
                 }
             }
             .toolbar {
@@ -340,6 +346,32 @@ struct ProfileView: View {
                 bootstrapIfNeeded()
                 prepareProfileShareImage()
                 refreshFollowCounts()
+            }
+            // Cross-surface sync: when a FollowButton anywhere
+            // in the app (public profile sheet, followers /
+            // following list row, future feed kudos surface)
+            // flips the local user's follow state, the
+            // followingCount displayed on this Profile screen
+            // needs to bump in place. We could re-query
+            // FollowService.counts on every broadcast but that
+            // round-trips per tap and feels laggy; instead we
+            // delta-update locally since the broadcast carries
+            // the new state directly. The follower count is
+            // unaffected — broadcasts only fire when WE flip a
+            // state, and that changes who WE follow, not who
+            // follows us.
+            .onReceive(
+                NotificationCenter.default.publisher(
+                    for: .followStateChanged
+                )
+            ) { note in
+                guard
+                    let info = note.userInfo,
+                    let isFollowing = info[FollowBroadcastKey.isFollowing] as? Bool
+                else { return }
+                if let current = followingCount {
+                    followingCount = max(0, current + (isFollowing ? 1 : -1))
+                }
             }
             // Re-bake the card when the race count changes — that's
             // the most common reason the card content shifts. We
@@ -766,6 +798,28 @@ struct ProfileView: View {
                 icon: "trophy.fill"
             )
             StationPersonalBestsView(races: races)
+
+            // Wireframe §05.2 "All stats" deep-dive entry. Pushed
+            // via the existing ProfileDestination dispatch so the
+            // back-stack handling matches Performance / Trends
+            // detail.
+            NavigationLink(value: ProfileDestination.allStats) {
+                HStack(spacing: 6) {
+                    Text("See all stats")
+                        .font(.caption.weight(.heavy))
+                        .foregroundStyle(Color.accent)
+                    Image(systemName: "arrow.right")
+                        .font(.caption2.weight(.heavy))
+                        .foregroundStyle(Color.accent)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                        .stroke(Color.accent.opacity(0.35), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.pressableCard)
         }
         .padding(.horizontal, Layout.screenMargin)
     }
@@ -1413,16 +1467,98 @@ struct ProfileView: View {
         ]
     }
 
+    // Wireframe §05.1 empty-state — dashed-border container with
+    // the brand flag glyph, declarative copy, and a coral CTA
+    // that drops the athlete into the Race tab. A small
+    // "SUGGESTED FIRST WORKOUT" tile beneath suggests an
+    // approachable first session (matches the wireframe's
+    // 2-station sim · 20 min nudge).
     private var emptyStats: some View {
-        VStack(spacing: 8) {
-            Text("No stats yet")
-                .font(.sectionHeader)
+        VStack(spacing: 14) {
+            dashedFirstRaceCTA
+            suggestedFirstWorkoutTile
+        }
+    }
+
+    // The dashed-border CTA card. Tapping the coral pill posts
+    // the same QuickAction notification feed's end-of-feed uses
+    // — ContentView's handler flips the selected tab to .race
+    // and lands the athlete on the Race Start screen.
+    private var dashedFirstRaceCTA: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "flag.checkered")
+                .font(.system(size: 36, weight: .heavy))
+                .foregroundStyle(Color.textPrimary.opacity(0.20))
+
+            Text("No races yet.")
+                .font(.system(size: 16, weight: .heavy, design: .rounded))
                 .foregroundStyle(Color.textPrimary)
-            Text("Finish a race to see your PB, average time, and more.")
-                .font(.body)
+                .padding(.top, 2)
+
+            Text("Your first finish lives here forever. Start with a sim.")
+                .font(.caption)
                 .foregroundStyle(Color.textSecondary)
                 .multilineTextAlignment(.center)
+                .lineSpacing(2)
+                .padding(.horizontal, 16)
+                .frame(maxWidth: 220)
+
+            Button {
+                Haptics.impact(.light)
+                NotificationCenter.default.post(
+                    name: .quickActionTriggered,
+                    object: QuickAction.startRace
+                )
+            } label: {
+                HStack(spacing: 6) {
+                    Text("Start your first race")
+                        .font(.caption.weight(.heavy))
+                    Image(systemName: "arrow.right")
+                        .font(.caption2.weight(.heavy))
+                }
+                .foregroundStyle(Color.onAccent)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 9)
+                .background(
+                    Capsule().fill(Color.accent)
+                )
+            }
+            .buttonStyle(.pressableCard)
+            .padding(.top, 8)
         }
-        .padding(.vertical, 32)
+        .padding(.vertical, 24)
+        .frame(maxWidth: .infinity)
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(
+                    Color.divider,
+                    style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])
+                )
+        )
+    }
+
+    // SUGGESTED FIRST WORKOUT caps + a small recommendation
+    // tile. Static for v1; future logic could surface a
+    // personalized session based on division / training history
+    // (similar to the Weakness-to-Workout Engine on profile).
+    private var suggestedFirstWorkoutTile: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("SUGGESTED FIRST WORKOUT").capsLabelStyle()
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("2-station sim · 20 min")
+                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+                    .foregroundStyle(Color.textPrimary)
+                Text("Ski + Burpee. A taste of HYROX without a full race.")
+                    .font(.caption2)
+                    .foregroundStyle(Color.textSecondary)
+            }
+            .padding(Layout.cardPadding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                    .fill(Color.surface)
+            )
+        }
     }
 }

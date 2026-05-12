@@ -59,28 +59,26 @@ struct RaceLiveActivity: Widget {
                     .foregroundStyle(islandTimerColor(for: context.state.phase))
 
             } compactTrailing: {
-                // Compact — right side. The current station's
-                // abbreviated name (RUN / PUSH / PULL / WALL etc.)
-                // in a phase-colored capsule. Reads more on-brand
-                // than a bare number — HYROX athletes know these
-                // station names by reputation and the abbreviation
-                // signals "this is your current discipline" at a
-                // glance. The capsule tint doubles as a state
-                // signal — coral while running, amber when
-                // paused/in-roxzone, green when finished.
-                Text(stationAbbreviation(for: context.state.currentStationName))
-                    .font(.caption2.weight(.heavy))
-                    .tracking(0.5)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(
-                        Capsule()
-                            .fill(
-                                islandTimerColor(for: context.state.phase)
-                                    .opacity(0.30)
-                            )
-                    )
+                // Compact — right side. Two-mode display:
+                //   • When HR is publishing — render a small
+                //     heart glyph + BPM in a zone-colored
+                //     capsule. The compact island is a 1.5s
+                //     glance surface; HR is the most dynamic
+                //     effort signal we have, so it deserves
+                //     priority over the station name (which
+                //     the user just advanced to and remembers).
+                //   • When no HR sample yet — fall back to the
+                //     station abbreviation pill (RUN / PUSH /
+                //     PULL / WALL) so the compact island isn't
+                //     empty. The abbreviation also reads more
+                //     on-brand than a bare number.
+                //
+                // The expanded view always shows BOTH (station
+                // + HR via the lock-screen chip), so this
+                // compact toggle never hides information — it
+                // just picks the more useful of the two for a
+                // glance.
+                compactTrailingContent(state: context.state)
 
             } minimal: {
                 // Minimal — single-element view shown when
@@ -120,6 +118,65 @@ struct RaceLiveActivity: Widget {
             Text(formatDuration(state.frozenElapsed ?? 0))
                 .font(.caption2.weight(.heavy))
                 .monospacedDigit()
+        }
+    }
+
+    // MARK: - Compact trailing content
+
+    // Two-mode compact-trailing renderer. See compactTrailing
+    // block above for the full rationale.
+    @ViewBuilder
+    private func compactTrailingContent(
+        state: RaceActivityAttributes.ContentState
+    ) -> some View {
+        if let hr = state.currentHR {
+            // HR mode — heart icon + BPM in zone-colored pill.
+            HStack(spacing: 3) {
+                Image(systemName: "heart.fill")
+                    .font(.system(size: 9, weight: .heavy))
+                Text("\(hr)")
+                    .font(.caption2.weight(.heavy))
+                    .monospacedDigit()
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                Capsule()
+                    .fill(compactHRTint(zone: state.currentHRZone).opacity(0.40))
+            )
+        } else {
+            // Station abbreviation fallback — same shape as
+            // before. Phase color drops out on this branch so
+            // running / paused / finished all read consistently
+            // when HR is absent (which is the common case
+            // before the first sample lands).
+            Text(stationAbbreviation(for: state.currentStationName))
+                .font(.caption2.weight(.heavy))
+                .tracking(0.5)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 2)
+                .background(
+                    Capsule()
+                        .fill(islandTimerColor(for: state.phase).opacity(0.30))
+                )
+        }
+    }
+
+    // Tint for the compact trailing HR pill. Mirrors the
+    // lock-screen hrZoneColor() palette (kept duplicated for
+    // the same reason — widget target doesn't include
+    // HRZone.swift). Falls back to phase color when zone is
+    // unknown so the pill never goes flat-gray.
+    private func compactHRTint(zone: Int?) -> Color {
+        switch zone {
+        case 1: return Color(red: 0.36, green: 0.61, blue: 0.84)
+        case 2: return Color.success
+        case 3: return Color(red: 1.0, green: 0.84, blue: 0.04)
+        case 4: return Color.warning
+        case 5: return Color.accent
+        default: return Color.accent
         }
     }
 
@@ -306,6 +363,13 @@ private struct LockScreenView: View {
                 stationBlock
             }
 
+            // Pace ghost line — same naïve-even-split math the
+            // Watch race page uses. Tells the user at a lock-
+            // screen glance whether they're ahead, on pace, or
+            // behind their target. Hidden when no target was
+            // set (paused / finished phases also skip render).
+            paceGhost
+
             // Progress bar across the bottom — segment count
             // visualization. Cosmetic but helps the lock-screen
             // glance read as "X of Y stations done."
@@ -318,6 +382,83 @@ private struct LockScreenView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
+    }
+
+    // Pace ghost — green / textSecondary / coral label based on
+    // how far ahead or behind the target finish pace the
+    // athlete is right now. Hidden during paused / finished /
+    // roxzone phases AND when no target was set. Uses the same
+    // naïve-even-split model as the Watch race page so the
+    // glance reading is identical across surfaces.
+    //
+    // Calculation:
+    //   • perSegment = targetDuration / totalStations
+    //   • expected = completedSegments × perSegment +
+    //                activeFraction × perSegment
+    //   • delta = expected - elapsed   (positive ⇒ ahead)
+    //
+    // Active fraction approximates how much of the current
+    // segment is "done" by elapsed-since-segment-start over
+    // per-segment budget, clamped 0...1. Same caveat as the
+    // Watch implementation — workouts and runs share one
+    // budget; a finer benchmark-split model lives in §13.1
+    // Tier 2.
+    @ViewBuilder
+    private var paceGhost: some View {
+        if state.phase == .running,
+           let target = state.targetDuration,
+           target > 0,
+           state.totalStations > 0 {
+            // Wrap the label/tint/delta decision in an IIFE so
+            // the @ViewBuilder body sees a single value, not a
+            // mutating let-then-if-else chain (which Swift
+            // treats as a Void statement and rejects with
+            // "Type '()' cannot conform to 'View'"). Same
+            // pattern WatchRaceMainPage.paceDelta uses for the
+            // same constraint.
+            let resolved: (label: String, tint: Color, delta: TimeInterval) = {
+                let elapsed = Date().timeIntervalSince(state.timerStart)
+                let completed = max(0, state.currentStationIndex - 1)
+                let perSegment = target / Double(state.totalStations)
+                let segmentElapsed = Date().timeIntervalSince(state.segmentStart)
+                let activeFraction = max(0, min(1, segmentElapsed / perSegment))
+                let expected = Double(completed) * perSegment + activeFraction * perSegment
+                let delta = expected - elapsed
+                let absSeconds = Int(abs(delta).rounded())
+
+                if absSeconds <= 5 {
+                    return ("on pace", Color.white.opacity(0.65), delta)
+                } else if delta > 0 {
+                    return ("+\(formatDelta(absSeconds)) ahead", Color.success, delta)
+                } else {
+                    return ("-\(formatDelta(absSeconds)) behind", Color.accent, delta)
+                }
+            }()
+
+            HStack(spacing: 4) {
+                Image(systemName: resolved.delta > 5
+                    ? "chevron.up"
+                    : (resolved.delta < -5 ? "chevron.down" : "minus"))
+                    .font(.system(size: 9, weight: .heavy))
+                Text(resolved.label)
+                    .font(.system(size: 11, weight: .heavy))
+                    .monospacedDigit()
+            }
+            .foregroundStyle(resolved.tint)
+        }
+    }
+
+    // Format a positive integer second count as "M:SS" or "Ss"
+    // depending on size. Mirrors the Watch race page's
+    // helper so the pace ghost reads identically on both
+    // surfaces.
+    private func formatDelta(_ seconds: Int) -> String {
+        let mins = seconds / 60
+        let secs = seconds % 60
+        if mins > 0 {
+            return String(format: "%d:%02d", mins, secs)
+        }
+        return "\(secs)s"
     }
 
     private var phaseChip: some View {

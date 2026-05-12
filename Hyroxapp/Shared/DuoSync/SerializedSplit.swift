@@ -29,6 +29,24 @@ struct SerializedSplit: Codable, Sendable, Equatable {
     let heartRateMaxBPM: Double?
     let activeCaloriesKcal: Double?
 
+    // HR boundary samples — the values at specific moments
+    // relative to the split's window. Powers the recovery
+    // metric (drop in BPM in the 30s after the segment ended)
+    // and per-station HR fingerprints. Both default nil so old
+    // Codable payloads decode cleanly without these fields.
+    //
+    //   • heartRateEndBPM — HR at (or closest to) endedAt.
+    //     The reference point recovery is measured against.
+    //
+    //   • heartRateRecovery30sBPM — HR 30s after endedAt.
+    //     Compared against heartRateEndBPM to compute the
+    //     recovery drop (higher drop = better conditioning).
+    //
+    // Both are needed together for the recovery calculation;
+    // the consumer guards on both being non-nil.
+    let heartRateEndBPM: Double?
+    let heartRateRecovery30sBPM: Double?
+
     // Manual stats the athlete enters via StationStatsSheet.
     let weightKg: Double?
     let repsCompleted: Int?
@@ -44,6 +62,8 @@ struct SerializedSplit: Codable, Sendable, Equatable {
         self.heartRateAvgBPM = split.heartRateAvgBPM
         self.heartRateMaxBPM = split.heartRateMaxBPM
         self.activeCaloriesKcal = split.activeCaloriesKcal
+        self.heartRateEndBPM = split.heartRateEndBPM
+        self.heartRateRecovery30sBPM = split.heartRateRecovery30sBPM
         self.weightKg = split.weightKg
         self.repsCompleted = split.repsCompleted
         self.rpe = split.rpe
@@ -64,6 +84,8 @@ struct SerializedSplit: Codable, Sendable, Equatable {
             endedAt: endedAt,
             heartRateAvgBPM: heartRateAvgBPM,
             heartRateMaxBPM: heartRateMaxBPM,
+            heartRateEndBPM: heartRateEndBPM,
+            heartRateRecovery30sBPM: heartRateRecovery30sBPM,
             activeCaloriesKcal: activeCaloriesKcal,
             weightKg: weightKg,
             repsCompleted: repsCompleted,

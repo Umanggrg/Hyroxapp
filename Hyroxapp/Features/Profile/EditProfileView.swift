@@ -30,6 +30,13 @@ struct EditProfileView: View {
     @State private var bio: String
     @State private var avatarData: Data?
 
+    // Wireframe §05.2 — additional fields the wireframe specs:
+    //   • homeGym: free-form "Brooklyn Strength" string
+    //   • division: tap-row that drives a Picker (or could
+    //     push to a dedicated division screen later)
+    @State private var homeGym: String
+    @State private var division: Division
+
     @State private var photoItem: PhotosPickerItem?
 
     // Set when the user taps "Remove Photo." Distinct from "avatarData
@@ -45,6 +52,8 @@ struct EditProfileView: View {
         _location = State(initialValue: profile.location)
         _bio = State(initialValue: profile.bio)
         _avatarData = State(initialValue: profile.avatarData)
+        _homeGym = State(initialValue: profile.homeGym)
+        _division = State(initialValue: profile.resolvedDivision)
     }
 
     var body: some View {
@@ -53,6 +62,8 @@ struct EditProfileView: View {
                 avatarSection
                 detailsSection
                 bioSection
+                divisionSection
+                homeGymSection
             }
             .scrollContentBackground(.hidden)
             .background(Color.background)
@@ -168,6 +179,34 @@ struct EditProfileView: View {
         }
     }
 
+    // Wireframe §05.2 — division picker row. Inline Picker (rather
+    // than a push-style detail) so the athlete picks + sees the
+    // selection in one tap. The 5 wireframe options map to our
+    // Division enum's cases.
+    private var divisionSection: some View {
+        Section("Division") {
+            Picker("Division", selection: $division) {
+                ForEach(Division.allCases, id: \.self) { div in
+                    Text(div.displayName).tag(div)
+                }
+            }
+            .pickerStyle(.menu)
+            .listRowBackground(Color.surface)
+        }
+    }
+
+    // Wireframe §05.2 home gym row — single TextField captures
+    // "Brooklyn Strength" style location. Used by the new Edit
+    // Notes screen's Gym row as the default suggestion.
+    private var homeGymSection: some View {
+        Section("Home Gym") {
+            TextField("Add a gym", text: $homeGym)
+                .listRowBackground(Color.surface)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.words)
+        }
+    }
+
     private var avatarPreview: some View {
         ZStack {
             // Coral spotlight halo behind the avatar — same visual
@@ -271,6 +310,14 @@ struct EditProfileView: View {
         profile.handle = Self.normalizedHandle(handle)
         profile.location = location.trimmingCharacters(in: .whitespaces)
         profile.bio = bio.trimmingCharacters(in: .whitespaces)
+
+        // Wireframe §05.2 — commit the two new fields. Home gym
+        // gets the same whitespace trim the rest of the strings
+        // get; division is enum-backed, no normalization needed.
+        // Both write-through the same Supabase push path below
+        // because they live on the same UserProfile row.
+        profile.homeGym = homeGym.trimmingCharacters(in: .whitespaces)
+        profile.resolvedDivision = division
 
         // Detect whether the avatar changed in this edit session.
         // Three transitions are possible:

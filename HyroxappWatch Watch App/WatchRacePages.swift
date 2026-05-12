@@ -498,6 +498,17 @@ struct WatchRaceSplitsPage: View {
                 .monospacedDigit()
                 .foregroundStyle(Color.textSecondary)
 
+            // §15 splits sketch — vs-target delta column. Same
+            // sign convention as the Race page's pace ghost
+            // (positive ⇒ ahead of target ⇒ green, negative ⇒
+            // behind ⇒ coral). Hidden when no target is set so
+            // the row stays clean for free-form training. ±2s
+            // window reads as "on target" to suppress jitter
+            // from naïve per-segment splits (workouts and runs
+            // share one budget here; the benchmarked-split
+            // model in §13.1 Tier 2 would tighten this).
+            deltaLabel(for: duration)
+
             Spacer()
 
             if let zone {
@@ -508,6 +519,50 @@ struct WatchRaceSplitsPage: View {
             }
         }
         .padding(.vertical, 2)
+    }
+
+    // Render the per-segment delta vs target ("+0:08" green,
+    // "-0:12" coral, "±" muted). Returns EmptyView when no
+    // target was set on the race.
+    @ViewBuilder
+    private func deltaLabel(for duration: TimeInterval) -> some View {
+        if let target = snapshot.targetDuration,
+           target > 0,
+           snapshot.totalStations > 0 {
+            let perSegment = target / Double(snapshot.totalStations)
+            // delta = perSegment - actualDuration
+            // Positive ⇒ finished under target ⇒ ahead.
+            let delta = perSegment - duration
+            let absSeconds = Int(abs(delta).rounded())
+
+            if absSeconds <= 2 {
+                Text("±")
+                    .font(.system(size: 10, weight: .heavy))
+                    .foregroundStyle(Color.textTertiary)
+            } else if delta > 0 {
+                Text("+\(formatDeltaShort(absSeconds))")
+                    .font(.system(size: 10, weight: .heavy))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.success)
+            } else {
+                Text("-\(formatDeltaShort(absSeconds))")
+                    .font(.system(size: 10, weight: .heavy))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.accent)
+            }
+        }
+    }
+
+    // Compact M:SS / Ss formatter for the splits-row delta —
+    // tighter than the race page's helper so the row stays
+    // single-line on a 40mm wrist.
+    private func formatDeltaShort(_ seconds: Int) -> String {
+        let mins = seconds / 60
+        let secs = seconds % 60
+        if mins > 0 {
+            return String(format: "%d:%02d", mins, secs)
+        }
+        return "\(secs)s"
     }
 
     private var activeRow: some View {
@@ -567,8 +622,14 @@ struct WatchRaceSplitsPage: View {
 // MARK: - HR page (scroll down)
 
 // Engine-room detail. §15 sketch shows current HR, zone bar, avg,
-// peak, ceiling (if guardrails are set — guardrails not shipped
-// yet, so we omit), and recovery (HR drop since last station).
+// peak, ceiling, and recovery. We render Avg + Peak + Ceiling
+// tiles when those values are available. Recovery (HR drop
+// between stations) intentionally omitted — `SerializedSplit`
+// doesn't carry entry/end/recovery boundary samples (those live
+// only on the iPhone-side `Split` model). Extending the wire
+// schema to ship boundaries through the snapshot would unlock a
+// fourth tile; for now the page shows what it can compute from
+// what's on the wire.
 struct WatchRaceHRPage: View {
 
     let snapshot: RaceStateSnapshot
@@ -651,15 +712,16 @@ struct WatchRaceHRPage: View {
         }
     }
 
-    // Avg / Peak / Zone row. Avg + peak come from the host-derived
-    // per-split stats already accumulated on the snapshot's splits
-    // array. Recovery (HR drop between stations) is intentionally
-    // omitted from this v1 page — `SerializedSplit` doesn't carry
-    // the entry/end/recovery-30s/-60s boundary samples (those live
-    // only on the iPhone-side `Split` model). When we extend the
-    // wire schema to ship boundaries through the snapshot, this
-    // row gains a third tile for "▼N bpm 30s" recovery — for now
-    // the page keeps two clean tiles.
+    // Avg / Peak / Ceiling / Recovery row. Avg + peak come from
+    // the host-derived per-split stats already accumulated on
+    // the snapshot's splits array. Ceiling comes from §17.1
+    // guardrails (`snapshot.segmentHRCeiling`). Recovery is the
+    // average HR drop across all splits where both endHR and
+    // the 30s-recovery sample are present — higher drop reads
+    // as better cardiovascular conditioning. All four tiles
+    // gracefully self-hide when their underlying data is nil
+    // so a race with no HR auth (or pre-first-split) still
+    // shows whatever's available without "—" holes.
     @ViewBuilder
     private var statsGrid: some View {
         let avgs = snapshot.splits.compactMap(\.heartRateAvgBPM)
@@ -667,13 +729,140 @@ struct WatchRaceHRPage: View {
         let avgHR: Int? = avgs.isEmpty ? nil : Int((avgs.reduce(0, +) / Double(avgs.count)).rounded())
         let peakHR: Int? = peaks.max().map { Int($0.rounded()) }
 
-        HStack(spacing: 8) {
-            statTile(label: "AVG", value: avgHR.map { "\($0)" } ?? "—", unit: "bpm")
-            statTile(label: "PEAK", value: peakHR.map { "\($0)" } ?? "—", unit: "bpm")
+        // Ceiling lives on the snapshot when guardrails resolved
+        // a value for the current station. When nil, the tile
+        // omits itself so the row stays visually balanced
+        // rather than leaving a "—" hole.
+        let ceiling = snapshot.segmentHRCeiling.map { Int($0.rounded()) }
+        let ceilingTint = ceilingTileTint()
+
+        // Recovery — avg BPM drop in the 30s after each
+        // completed station, taken across all splits with both
+        // boundary samples present. Self-hides until at least
+        // one split has both samples (typically after the
+        // second station, since recovery samples land 30s past
+        // a segment end).
+        let recoveryDrop = averageRecoveryDrop()
+
+        // 2-row 2-col grid when ceiling AND recovery both
+        // present (4 tiles), falls back to a single-row layout
+        // otherwise. Keeps each tile tappably-sized on the
+        // 40mm baseline rather than shrinking to fit four
+        // tiles in one row.
+        let hasCeiling = ceiling != nil
+        let hasRecovery = recoveryDrop != nil
+
+        if hasCeiling && hasRecovery {
+            VStack(spacing: 6) {
+                HStack(spacing: 6) {
+                    avgTile(avgHR)
+                    peakTile(peakHR)
+                }
+                HStack(spacing: 6) {
+                    statTile(
+                        label: "CEIL",
+                        value: ceiling.map { "\($0)" } ?? "—",
+                        unit: "bpm",
+                        valueColor: ceilingTint
+                    )
+                    statTile(
+                        label: "RECOV",
+                        value: recoveryDrop.map { "▼\($0)" } ?? "—",
+                        unit: "bpm",
+                        valueColor: Color.success
+                    )
+                }
+            }
+        } else {
+            HStack(spacing: 6) {
+                avgTile(avgHR)
+                peakTile(peakHR)
+                if let ceiling {
+                    statTile(
+                        label: "CEIL",
+                        value: "\(ceiling)",
+                        unit: "bpm",
+                        valueColor: ceilingTint
+                    )
+                }
+                if let drop = recoveryDrop {
+                    statTile(
+                        label: "RECOV",
+                        value: "▼\(drop)",
+                        unit: "bpm",
+                        valueColor: Color.success
+                    )
+                }
+            }
         }
     }
 
-    private func statTile(label: String, value: String, unit: String) -> some View {
+    // Render an AVG tile from an optional HR value. Extracted
+    // so the 2x2 grid and the fallback 1-row layout share the
+    // same render code.
+    private func avgTile(_ value: Int?) -> some View {
+        statTile(
+            label: "AVG",
+            value: value.map { "\($0)" } ?? "—",
+            unit: "bpm",
+            valueColor: Color.textPrimary
+        )
+    }
+
+    private func peakTile(_ value: Int?) -> some View {
+        statTile(
+            label: "PEAK",
+            value: value.map { "\($0)" } ?? "—",
+            unit: "bpm",
+            valueColor: Color.textPrimary
+        )
+    }
+
+    // Average HR drop in the 30s after each completed station.
+    // Same definition StationDetailView uses on the iPhone-side
+    // boundary HR row — endHR minus the 30s-recovery sample.
+    // Higher drop = better recovery / engine conditioning.
+    //
+    // Returns nil until at least one split has BOTH samples.
+    // The very first split usually doesn't have a 30s sample
+    // yet (it lands ~30s after the segment ended) so this
+    // value typically resolves after segment 2 completes.
+    private func averageRecoveryDrop() -> Int? {
+        let drops: [Double] = snapshot.splits.compactMap { split in
+            guard let endHR = split.heartRateEndBPM,
+                  let r30 = split.heartRateRecovery30sBPM else { return nil }
+            return endHR - r30
+        }
+        guard !drops.isEmpty else { return nil }
+        let avg = drops.reduce(0, +) / Double(drops.count)
+        return Int(avg.rounded())
+    }
+
+    // Resolve the ceiling tile's value color based on current HR
+    // vs the guardrail bands. Mirrors the Race page's chip tint
+    // (silent / approaching / above) so the same visual language
+    // reads across both surfaces. Defaults to textPrimary when
+    // current HR isn't available or no ceiling is set.
+    private func ceilingTileTint() -> Color {
+        guard
+            let ceiling = snapshot.segmentHRCeiling,
+            let approach = snapshot.segmentHRApproachThreshold,
+            let hr = WatchWorkoutManager.shared.currentHeartRateBPM
+                ?? snapshot.currentHeartRateBPM,
+            hr > 0
+        else { return Color.textPrimary }
+
+        if hr >= ceiling   { return Color.accent }
+        if hr >= approach  { return Color.warning }
+        return Color.textPrimary
+    }
+
+    private func statTile(
+        label: String,
+        value: String,
+        unit: String,
+        valueColor: Color = Color.textPrimary
+    ) -> some View {
         VStack(spacing: 1) {
             Text(label)
                 .font(.system(size: 8, weight: .heavy))
@@ -682,7 +871,7 @@ struct WatchRaceHRPage: View {
             Text(value)
                 .font(.system(size: 14, weight: .heavy, design: .rounded))
                 .monospacedDigit()
-                .foregroundStyle(Color.textPrimary)
+                .foregroundStyle(valueColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
             Text(unit)

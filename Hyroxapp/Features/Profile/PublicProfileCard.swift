@@ -3,9 +3,11 @@ import SwiftUI
 #if canImport(UIKit)
 import UIKit
 #endif
-#if canImport(Auth)
-import Auth
-#endif
+
+// NB: PublicProfileCard no longer imports `Auth` directly —
+// the own-profile guard moved into `FollowButton`, which is
+// the only place that needs to know whether `profile.id`
+// matches the local signed-in user.
 
 // Standalone card rendering one athlete's public profile —
 // avatar, name, handle, division, location, bio, follow CTA.
@@ -28,8 +30,6 @@ struct PublicProfileCard: View {
 
     let profile: RemotePublicProfile
 
-    @State private var followState: FollowState = .loading
-
     // Public race aggregates loaded lazily on appear. Optional —
     // nil means "still loading," explicit `.none` (mapped to
     // the noRaces local state) means "this athlete has no
@@ -42,13 +42,6 @@ struct PublicProfileCard: View {
     // disambiguates so the UI doesn't render an empty section
     // while loading.
     @State private var recentRaces: [RemotePublicRace] = []
-
-    private enum FollowState {
-        case loading
-        case notFollowing
-        case following
-        case pending
-    }
 
     private enum StatsState {
         case loading
@@ -80,10 +73,15 @@ struct PublicProfileCard: View {
                     .padding(.horizontal, Layout.screenMargin)
             }
 
-            if !isOwnProfile {
-                followButton
-                    .padding(.top, 8)
-            }
+            // The FollowButton component handles its own
+            // own-profile guard (renders EmptyView), state
+            // fetch, optimistic flip, and cross-surface
+            // broadcast — caller doesn't have to thread any
+            // of that. Padding-top stays here to preserve
+            // the visual rhythm even when the button hides
+            // itself on the local user's own profile.
+            FollowButton(userID: profile.id, size: .large)
+                .padding(.top, 8)
 
             statsRow
                 .padding(.top, 12)
@@ -95,7 +93,6 @@ struct PublicProfileCard: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal, Layout.screenMargin)
         .onAppear {
-            refreshFollowState()
             refreshStats()
             refreshRecentRaces()
         }
@@ -331,92 +328,7 @@ struct PublicProfileCard: View {
         }
     }
 
-    // MARK: - Follow
-
-    private var isOwnProfile: Bool {
-        #if canImport(Auth)
-        return AuthService.shared.user?.id.uuidString == profile.id
-        #else
-        return false
-        #endif
-    }
-
-    private var followButton: some View {
-        Button {
-            toggleFollow()
-        } label: {
-            HStack(spacing: 6) {
-                switch followState {
-                case .loading, .pending:
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(followButtonForeground)
-                case .following:
-                    Image(systemName: "checkmark")
-                        .font(.caption.weight(.bold))
-                    Text("Following")
-                        .font(.callout.weight(.heavy))
-                case .notFollowing:
-                    Image(systemName: "plus")
-                        .font(.caption.weight(.bold))
-                    Text("Follow")
-                        .font(.callout.weight(.heavy))
-                }
-            }
-            .foregroundStyle(followButtonForeground)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 10)
-            .background(followButtonBackground)
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .strokeBorder(
-                        followState == .following
-                            ? Color.divider
-                            : Color.clear,
-                        lineWidth: 1
-                    )
-            )
-        }
-        .buttonStyle(.plain)
-        .disabled(followState == .pending || followState == .loading)
-        .animation(
-            .spring(response: 0.4, dampingFraction: 0.85),
-            value: followState
-        )
-    }
-
-    private var followButtonForeground: Color {
-        switch followState {
-        case .following:
-            return Color.textPrimary
-        case .loading, .notFollowing, .pending:
-            return Color.onAccent
-        }
-    }
-
-    private var followButtonBackground: some ShapeStyle {
-        switch followState {
-        case .following:
-            return AnyShapeStyle(Color.surface)
-        case .loading, .notFollowing, .pending:
-            return AnyShapeStyle(
-                LinearGradient(
-                    colors: [Color.accent, Color.accent.opacity(0.85)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-        }
-    }
-
-    private func refreshFollowState() {
-        followState = .loading
-        Task { @MainActor in
-            let following = await FollowService.isFollowing(userID: profile.id)
-            followState = following ? .following : .notFollowing
-        }
-    }
+    // MARK: - Stats / races refresh
 
     private func refreshStats() {
         statsState = .loading
@@ -443,23 +355,4 @@ struct PublicProfileCard: View {
         }
     }
 
-    private func toggleFollow() {
-        let previous = followState
-        let target: FollowState = (previous == .following) ? .notFollowing : .following
-        followState = .pending
-
-        Task { @MainActor in
-            do {
-                if previous == .following {
-                    try await FollowService.unfollow(userID: profile.id)
-                } else {
-                    try await FollowService.follow(userID: profile.id)
-                }
-                followState = target
-            } catch {
-                // Silent revert. Future polish: toast/banner.
-                followState = previous
-            }
-        }
-    }
 }

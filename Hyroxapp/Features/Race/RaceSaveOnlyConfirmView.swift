@@ -150,7 +150,7 @@ struct RaceSaveOnlyConfirmView: View {
 }
 
 // Preview omitted intentionally — the #Preview macro chokes on
-// the combination of in-memory ModelContainer + @Bindable on a
+  // the combination of in-memory ModelContainer + @Bindable on a
 // SwiftData @Model class with "Failed to produce diagnostic for
 // expression." Sidestepping the canvas preview lets the file
 // compile; the view is reachable via its normal call site

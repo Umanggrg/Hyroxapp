@@ -167,8 +167,8 @@ enum ProfileSyncService {
         }
         local.maxHeartRate = remote.maxHeartRate
         // Pull avatar URL from remote. We deliberately do NOT
-        // download the JPEG bytes here — `ProfileHeaderView`
-        // (and any other avatar surface) falls back to
+        // download the JPEG bytes here — `ProfileHero` (and
+        // any other avatar surface) falls back to
         // `AsyncImage(url:)` when `avatarData` is nil, which
         // streams the bytes lazily on render. Saves us a
         // synchronous network hit during sync, and the bytes
