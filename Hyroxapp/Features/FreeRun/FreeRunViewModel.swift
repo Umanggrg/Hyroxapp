@@ -124,6 +124,12 @@ final class FreeRunViewModel {
 
         startDistanceSource(for: locationType)
         startHeartRateObservation()
+        // §11 Free Run cathedral — pair HeadphoneMotionService
+        // with the run lifecycle so the live cadence chip on
+        // FreeRunView publishes spm while running. Safe no-op
+        // when AirPods Pro 1+ / 4 / Max aren't in the audio
+        // route (or non-motion AirPods are connected).
+        HeadphoneMotionService.shared.start()
     }
 
     // Pause the active run. Engine freezes the timer; distance
@@ -161,6 +167,11 @@ final class FreeRunViewModel {
 
         stopDistanceSource()
         stopHeartRateObservation()
+        // §11 Free Run cathedral — tear down the head-motion
+        // subscription alongside HR. Leaving CMHeadphoneMotionManager
+        // active after the run drains AirPods battery without
+        // any UI consuming the values.
+        HeadphoneMotionService.shared.stop()
 
         // Phase 2 hook — flush the HKWorkoutSession to HK, then
         // wait ~8s and re-query each split's HR window (same
@@ -193,6 +204,11 @@ final class FreeRunViewModel {
         currentHeartRateBPM = nil
         stopDistanceSource()
         stopHeartRateObservation()
+        // §11 Free Run cathedral — also unconditionally tear
+        // down head-motion on teardown (covers abandon paths
+        // that don't go through end()). HeadphoneMotionService.
+        // stop() is idempotent.
+        HeadphoneMotionService.shared.stop()
         // Clear the wrist's free-run UI — Watch returns to its
         // idle "Ready" screen, same UX a finished race produces.
         publishWatchClearSnapshot()

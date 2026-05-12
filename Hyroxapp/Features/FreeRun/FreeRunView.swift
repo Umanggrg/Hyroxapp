@@ -31,6 +31,18 @@ struct FreeRunView: View {
     @State private var viewModel = FreeRunViewModel()
     @State private var isShowingEndConfirm = false
 
+    // §11 Free Run cathedral — pull max-HR from the active
+    // profile for zone classification. Falls back to 190 when
+    // bootstrap hasn't completed (matches RaceView's defensive
+    // default). The HR card uses this to compute zone color
+    // tinting + the 5-bar Z1-Z5 visualization.
+    @Query(sort: [SortDescriptor(\UserProfile.createdAt, order: .forward)])
+    private var profiles: [UserProfile]
+
+    private var maxHeartRate: Int {
+        profiles.first?.maxHeartRate ?? 190
+    }
+
     // After end, pushes the summary view as a navigation
     // destination. Set to the just-finished run; cleared on
     // back-nav so the view can dismiss cleanly.
@@ -232,28 +244,139 @@ struct FreeRunView: View {
         )
     }
 
-    // Heart-rate chip — same visual language as RaceView's HR chip.
+    // §11 — Free Run HR + cadence card. Cathedral race-screen
+    // treatment ported over so the visual language matches
+    // across surfaces. Renders:
+    //   • Heart icon (tinted by current zone)
+    //   • Big BPM number (zone-tinted, monospaced for digit
+    //     stability as it ticks)
+    //   • Zone bar — 5 capsules (Z1-Z5), lit up to the
+    //     athlete's current zone in their zone colors. Same
+    //     5-bar visualization the Watch race page uses.
+    //   • HYROX zone label (Easy / Steady / Race / Hard /
+    //     Redline) + numeric Z-tag
+    //   • Source attribution glyph (applewatch / airpodspro /
+    //     fused) — same as the race screen's statCellHR
+    //   • Cadence sub-row when AirPods Pro 1+ are publishing
+    //     spm via HeadphoneMotionService — auto-hides on
+    //     iPhone-only / Watch-only / non-motion AirPods
+    //
+    // Whole card self-hides until the first HR sample lands;
+    // the placeholder "—" pattern from the cramped race-screen
+    // stat-strip isn't needed here because the Free Run layout
+    // has the room to omit the card cleanly.
     @ViewBuilder
     private var hrChip: some View {
         if let bpm = viewModel.currentHeartRateBPM {
-            HStack(spacing: 6) {
+            let zone = HRZone.zone(for: bpm, maxBPM: maxHeartRate)
+            let source = SensorSourceRegistry.shared.lastHRSource
+
+            VStack(spacing: 10) {
+                hrRow(bpm: bpm, zone: zone, source: source)
+
+                if let spm = HeadphoneMotionService.shared.currentCadenceSPM {
+                    cadenceRow(spm: spm)
+                }
+            }
+            .padding(Layout.cardPadding)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                    .fill(Color.surface)
+            )
+        }
+    }
+
+    // The HR row inside the card — heart + BPM on the left,
+    // zone bar + label on the right, source glyph trailing.
+    private func hrRow(
+        bpm: Double,
+        zone: HRZone,
+        source: SensorSourceRegistry.HRSource
+    ) -> some View {
+        HStack(spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: "heart.fill")
-                    .font(.caption.weight(.heavy))
+                    .font(.title3.weight(.heavy))
+                    .foregroundStyle(zone.color)
                 Text("\(Int(bpm.rounded()))")
-                    .font(.callout.weight(.heavy))
+                    .font(.system(size: 30, weight: .heavy, design: .rounded))
                     .monospacedDigit()
+                    .foregroundStyle(zone.color)
                     .contentTransition(.numericText())
                 Text("bpm")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Color.textSecondary)
             }
-            .foregroundStyle(Color.accent)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(
-                Capsule().fill(Color.surface)
-            )
+
+            Spacer(minLength: 8)
+
+            VStack(alignment: .trailing, spacing: 4) {
+                zoneBar(currentZone: zone)
+                Text("Z\(zone.rawValue) · \(zone.hyroxLabel)")
+                    .font(.caption2.weight(.heavy))
+                    .tracking(0.4)
+                    .foregroundStyle(zone.color)
+            }
+
+            // Source attribution glyph — same set used by the
+            // race screen's statCellHR. Hidden before the
+            // first sample's source is classified.
+            if source != .unknown {
+                Image(systemName: source.symbolName)
+                    .font(.caption2.weight(.heavy))
+                    .foregroundStyle(Color.textTertiary)
+                    .accessibilityHidden(true)
+            }
         }
+    }
+
+    // 5-bar Z1-Z5 capsule visualization — lights up zones at
+    // or below the athlete's current zone in their canonical
+    // colors (Z1 blue → Z5 red). Capsules above the current
+    // zone stay dim. Same pattern as WatchRaceMainPage's
+    // zoneBar; ported here so the Free Run + race + Watch
+    // race surfaces all read in the same visual language.
+    private func zoneBar(currentZone: HRZone) -> some View {
+        HStack(spacing: 3) {
+            ForEach(HRZone.allCases, id: \.self) { zone in
+                Capsule()
+                    .fill(zone.rawValue <= currentZone.rawValue
+                          ? zone.color
+                          : Color.divider.opacity(0.4))
+                    .frame(width: 10, height: 10)
+            }
+        }
+    }
+
+    // Cadence sub-row — small caps "CAD" label + spm number
+    // + AirPods glyph indicating where the metric came from.
+    // §19.4 Phase 10H semantics: nil-cadence means AirPods
+    // Pro 1+ aren't in the route OR motion-capable AirPods
+    // aren't publishing fresh steps; the caller handles the
+    // visibility gate.
+    private func cadenceRow(spm: Int) -> some View {
+        HStack(spacing: 6) {
+            Text("CAD")
+                .font(.caption2.weight(.heavy))
+                .tracking(0.6)
+                .foregroundStyle(Color.textTertiary)
+            Text("\(spm)")
+                .font(.callout.weight(.heavy))
+                .monospacedDigit()
+                .foregroundStyle(Color.textPrimary)
+                .contentTransition(.numericText())
+            Text("spm")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.textSecondary)
+            Spacer()
+            Image(systemName: "airpodspro")
+                .font(.caption2.weight(.heavy))
+                .foregroundStyle(Color.textTertiary)
+                .accessibilityHidden(true)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Cadence \(spm) steps per minute from AirPods")
     }
 
     // Splits ribbon — small chip per completed split. Empty until
