@@ -3864,6 +3864,77 @@ enum RaceStats {
         )
     }
 
+    // §11 — Free Run variant of the coaching cue evaluator.
+    // The HYROX `coachingOverlayCue` requires a `currentStation`
+    // (HYROX races are station-structured) and short-circuits to
+    // `.none` when station is nil. Free Run has no stations —
+    // it's always a run — so this variant drops the station
+    // gate while preserving the same five-state coaching palette
+    // (HOLD / SLOW / REDLINE / RECOVER / PUSH).
+    //
+    // Decision order (first match wins):
+    //   1. Redline — HR ≥ maxHR − 5 → .redline
+    //   2. Recovery — priorHR − currentHR ≥ 8 AND zone is Z4 or
+    //      Z5 → .recover (descending HR off a hill / sprint
+    //      surge — coaching wants to acknowledge the recovery
+    //      and let the athlete settle rather than push back up)
+    //   3. Personalized — if the athlete has a race-pace HR band
+    //      (lower/upper), classify against it:
+    //        HR < lower → .push
+    //        HR > upper → .slow
+    //        in band   → .hold
+    //   4. Textbook fallback — classify against Z3:
+    //        Z1, Z2 → .push
+    //        Z3     → .hold
+    //        Z4, Z5 → .slow
+    //
+    // .workout never returns from this path — Free Run has no
+    // workout segments.
+    static func coachingCueForFreeRun(
+        currentHR: Double?,
+        maxHR: Int,
+        priorHR: Double? = nil,
+        personalLowerHR: Double? = nil,
+        personalUpperHR: Double? = nil
+    ) -> CoachingCue {
+        guard let hr = currentHR, hr > 0, maxHR > 0 else { return .none }
+
+        // 1. Redline — same threshold as the race screen.
+        if hr >= Double(maxHR - 5) {
+            return .redline
+        }
+
+        // 2. Recovery — meaningful downward HR trend while
+        //    still in the high-effort zones. Acknowledges the
+        //    descent rather than nudging the athlete back up.
+        if let prior = priorHR,
+           prior > 0,
+           prior - hr >= 8 {
+            let zone = HRZone.zone(for: hr, maxBPM: maxHR)
+            if zone == .z4 || zone == .z5 {
+                return .recover
+            }
+        }
+
+        // 3. Personalized band — same logic as race cue.
+        if let lower = personalLowerHR,
+           let upper = personalUpperHR,
+           lower > 0,
+           upper > lower {
+            if hr < lower { return .push }
+            if hr > upper { return .slow }
+            return .hold
+        }
+
+        // 4. Textbook fallback — same Z3-anchored classification.
+        let zone = HRZone.zone(for: hr, maxBPM: maxHR)
+        switch zone {
+        case .z1, .z2: return .push
+        case .z3:      return .hold
+        case .z4, .z5: return .slow
+        }
+    }
+
     // MARK: - Effort score (snapshot-side, shared with watchOS)
     //
     // Same intensity-weighted-minutes formula as `effortScore(for:Race)`,

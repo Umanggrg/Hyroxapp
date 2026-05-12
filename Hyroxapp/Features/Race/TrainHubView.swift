@@ -73,6 +73,24 @@ struct TrainHubView: View {
     // before they start.
     @State private var isSensorDetailPresented = false
 
+    // §11 Free Run elevation — Free Run used to live two taps
+    // deep inside the Custom Workout Builder. Now it gets a
+    // top-level card on the Train hub. State pair mirrors
+    // RaceStartView's pattern: the start sheet picks
+    // location-type + split-unit, then we transition to the
+    // fullScreenCover via the identifiable pendingFreeRun
+    // payload (avoids the "view not in window hierarchy"
+    // flash if we tried to present FreeRunView while the
+    // sheet is still dismissing).
+    @State private var isFreeRunStartSheetPresented = false
+    @State private var pendingFreeRun: PendingFreeRun?
+
+    private struct PendingFreeRun: Identifiable {
+        let id = UUID()
+        let locationType: FreeRunLocationType
+        let splitUnit: FreeRunSplitUnit
+    }
+
     enum RaceStartIntent: Hashable, Identifiable {
         case race
         case simulation
@@ -105,6 +123,8 @@ struct TrainHubView: View {
                     sensorStatusRow
 
                     actionGrid
+
+                    freeRunCard
 
                     RecommendedWorkoutCard(races: allRaces)
 
@@ -149,6 +169,35 @@ struct TrainHubView: View {
                 SensorDetailSheet()
                     .presentationDetents([.medium])
                     .presentationDragIndicator(.visible)
+            }
+            // §11 — Free Run start sheet. Same picker used
+            // inside CustomWorkoutBuilderView; pulled up here
+            // so Free Run is one tap from the Train hub.
+            .sheet(isPresented: $isFreeRunStartSheetPresented) {
+                FreeRunStartSheet { locationType, splitUnit in
+                    // Don't present FreeRunView while the
+                    // start sheet is still dismissing — that
+                    // produces the "view not in window
+                    // hierarchy" flash. Stash the pick and
+                    // let SwiftUI render the fullScreenCover
+                    // on the next cycle.
+                    isFreeRunStartSheetPresented = false
+                    pendingFreeRun = PendingFreeRun(
+                        locationType: locationType,
+                        splitUnit: splitUnit
+                    )
+                }
+            }
+            // FullScreenCover for the actual Free Run live
+            // surface — pushed once the start-sheet dismiss
+            // completes. Mirrors RaceStartView's pattern.
+            .fullScreenCover(item: $pendingFreeRun) { pending in
+                NavigationStack {
+                    FreeRunView(
+                        locationType: pending.locationType,
+                        splitUnit: pending.splitUnit
+                    )
+                }
             }
             #endif
             .onAppear {
@@ -330,6 +379,64 @@ struct TrainHubView: View {
                 isHero: false,
                 action: { builderIntent = .compromised }
             )
+        }
+    }
+
+    // §11 — Free Run card. Sits below the HYROX-format 2×2
+    // grid as a single full-width row. Distinct shape +
+    // section caps label signal "this is a different kind
+    // of workout" — per CLAUDE.md §1 non-goals, Free Run is
+    // intentionally outside the HYROX format (no stations,
+    // no map, no kudos), just an outdoor / treadmill running
+    // surface for the easy-run days the athlete also tracks.
+    //
+    // Wider single-row visual breaks the grid pattern above,
+    // so the eye reads "actions above; running tools below"
+    // rather than "five equal cards." Tap → FreeRunStartSheet
+    // for location-type + split-unit picker, then full-screen
+    // cover to FreeRunView.
+    private var freeRunCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("RUNNING").capsLabelStyle()
+                .padding(.horizontal, 4)
+
+            Button {
+                isFreeRunStartSheetPresented = true
+            } label: {
+                HStack(spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.accent.opacity(0.12))
+                            .frame(width: 44, height: 44)
+                        Image(systemName: "figure.run")
+                            .font(.system(size: 20, weight: .heavy))
+                            .foregroundStyle(Color.accent)
+                    }
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Free Run")
+                            .font(.system(size: 15, weight: .heavy, design: .rounded))
+                            .foregroundStyle(Color.textPrimary)
+                        Text("Outdoor or treadmill · no stations, no targets")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color.textSecondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .heavy))
+                        .foregroundStyle(Color.textTertiary)
+                }
+                .padding(Layout.cardPadding)
+                .background(
+                    RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                        .fill(Color.surface)
+                )
+            }
+            .buttonStyle(.pressableCard)
         }
     }
 

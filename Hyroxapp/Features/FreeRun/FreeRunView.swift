@@ -43,6 +43,26 @@ struct FreeRunView: View {
         profiles.first?.maxHeartRate ?? 190
     }
 
+    // §11 — coaching cue banner state. Same overlay machinery
+    // RaceView uses for the cathedral race screen, ported here
+    // with a Free-Run-specific HR evaluator
+    // (RaceStats.coachingCueForFreeRun) that drops the
+    // station-context gate.
+    //
+    // Lifecycle:
+    //   • onChange of currentHeartRateBPM → evaluateCoachingBanner
+    //   • Fires when cue changes AND ≥ 10s since last fire
+    //   • 2.5s auto-dismiss; tap dismisses early
+    //   • Respects the same `coachingOverlaysEnabled` profile
+    //     setting that gates the race screen banner
+    @State private var activeCoachingCue: RaceStats.CoachingCue?
+    @State private var coachingBannerDismissTask: Task<Void, Never>?
+    @State private var lastBannerFiredCue: RaceStats.CoachingCue?
+    @State private var lastBannerFiredAt: Date?
+    @State private var lastHRSampleForCue: Double?
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     // After end, pushes the summary view as a navigation
     // destination. Set to the just-finished run; cleared on
     // back-nav so the view can dismiss cleanly.
@@ -55,6 +75,17 @@ struct FreeRunView: View {
             TimelineView(.periodic(from: .now, by: 0.1)) { context in
                 content(now: context.date)
             }
+
+            // §11 — coaching cue overlay. Same banner SwiftUI
+            // component RaceView uses; positioned at the top of
+            // the screen with a top-edge transition. Suppressed
+            // by `coachingOverlaysEnabled` setting in
+            // evaluateCoachingBanner; this overlay always renders
+            // when activeCoachingCue is non-nil.
+            coachingBannerOverlay
+        }
+        .onChange(of: viewModel.currentHeartRateBPM) { _, newBpm in
+            evaluateCoachingBanner(newHR: newBpm)
         }
         .navigationTitle("Free Run")
         .navigationBarTitleDisplayMode(.inline)
@@ -503,6 +534,102 @@ struct FreeRunView: View {
         let mins = total / 60
         let secs = total % 60
         return String(format: "%d:%02d", mins, secs)
+    }
+
+    // MARK: - Coaching cue banner (§11)
+
+    // Top-edge overlay rendering the active CoachingCue (if any).
+    // Same SwiftUI component RaceView uses — keeps the visual
+    // language identical across the race + Free Run surfaces.
+    // Tap to dismiss early.
+    @ViewBuilder
+    private var coachingBannerOverlay: some View {
+        if let cue = activeCoachingCue {
+            VStack {
+                CoachingBanner(
+                    cue: cue,
+                    currentHR: viewModel.currentHeartRateBPM
+                )
+                .padding(.horizontal, 8)
+                .padding(.top, 4)
+                .onTapGesture {
+                    coachingBannerDismissTask?.cancel()
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
+                        activeCoachingCue = nil
+                    }
+                }
+                Spacer()
+            }
+            .transition(
+                reduceMotion
+                    ? .opacity
+                    : .move(edge: .top).combined(with: .opacity)
+            )
+            .zIndex(10)
+        }
+    }
+
+    // Fires on every fresh HR sample. Mirrors RaceView's
+    // evaluator with three Free-Run-specific differences:
+    //   • No station context — uses coachingCueForFreeRun (which
+    //     drops the station gate but preserves the five-state
+    //     palette).
+    //   • No segment progression — the "PUSH on the final
+    //     segment" branch doesn't apply; PUSH only fires when
+    //     HR is below Z3 per the textbook fallback.
+    //   • No personal HR baseline yet — Free Run uses the
+    //     textbook Z3-anchored classification. Future v2:
+    //     thread the same personalHRBaseline race uses.
+    //
+    // Same `coachingOverlaysEnabled` setting gates the banner
+    // — turning that off in Settings clears any in-flight
+    // banner and suppresses future fires until re-enabled.
+    private func evaluateCoachingBanner(newHR: Double?) {
+        guard profiles.first?.coachingOverlaysEnabled ?? true else {
+            if activeCoachingCue != nil {
+                coachingBannerDismissTask?.cancel()
+                activeCoachingCue = nil
+            }
+            return
+        }
+
+        // Gate on an active running session — no coaching during
+        // pre-run / post-run / paused states. `hasActiveSession`
+        // is the FreeRunViewModel flag that turns true on start,
+        // false on end / abandon.
+        guard viewModel.hasActiveSession else { return }
+
+        let cue = RaceStats.coachingCueForFreeRun(
+            currentHR: newHR,
+            maxHR: maxHeartRate,
+            priorHR: lastHRSampleForCue
+        )
+
+        defer { lastHRSampleForCue = newHR }
+
+        guard cue.firesBanner else { return }
+        if cue == lastBannerFiredCue { return }
+        if let lastFiredAt = lastBannerFiredAt,
+           Date().timeIntervalSince(lastFiredAt) < 10 {
+            return
+        }
+
+        coachingBannerDismissTask?.cancel()
+        withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8)) {
+            activeCoachingCue = cue
+        }
+        lastBannerFiredCue = cue
+        lastBannerFiredAt = Date()
+
+        Haptics.coachingCue(cue)
+
+        coachingBannerDismissTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            if Task.isCancelled { return }
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) {
+                activeCoachingCue = nil
+            }
+        }
     }
 }
 
