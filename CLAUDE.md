@@ -1509,8 +1509,8 @@ Phased rollout. Each phase ships independently and stays useful in isolation.
 | **10 F** | Mid-race HR-source fallover banner. | ~1 day | ⚪ |
 | **10 G** | Verify build across all four DeviceProfile scenarios. | ~½ day | ⚪ |
 | **10 H** | Live cadence (spm) from `CMHeadphoneMotionManager`. Band-pass filter Z-axis impact, peak detect, publish to RaceViewModel.currentCadenceSPM. Render alongside HR chip. | ~3 days | ⚪ |
-| **10 I** | Vertical oscillation as post-race running-economy metric. Z-axis displacement math, new "Running Economy" section on Race detail Runs tab. | ~3 days | ⚪ |
-| **10 J** | Posture drift fatigue insight. Read `attitude.pitch` through race, compute first-half vs second-half delta, surface as narrative insight. | ~2 days | ⚪ |
+| **10 I** | Vertical oscillation as post-race running-economy metric. Z-axis displacement math, new "Running Economy" section on Race detail Runs tab. | ~3 days | 🟢 shipped |
+| **10 J** | Posture drift fatigue insight. Read `attitude.pitch` through race, compute first-half vs second-half delta, surface as narrative insight. | ~2 days | 🟢 shipped |
 | **10 K** | Ground contact time (running-economy completer). | ~1-2 weeks | ⚪ |
 | **10 L** | Multi-sensor rep count fusion — combine Watch IMU (§13.8 Tier 2) + AirPods head motion + confidence scoring. Gated on Tier 2 shipping first. | ~1 week | ⚪ |
 

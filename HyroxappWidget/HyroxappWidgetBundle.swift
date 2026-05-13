@@ -17,5 +17,10 @@ import WidgetKit
 struct HyroxappWidgetBundle: WidgetBundle {
     var body: some Widget {
         RaceLiveActivity()
+        // §12C — Free Run Live Activity. Distinct
+        // ActivityAttributes type from RaceLiveActivity; the
+        // bundle declares both so iOS can route incoming
+        // start requests to the right renderer.
+        FreeRunLiveActivity()
     }
 }

@@ -130,6 +130,22 @@ final class FreeRunViewModel {
         // when AirPods Pro 1+ / 4 / Max aren't in the audio
         // route (or non-motion AirPods are connected).
         HeadphoneMotionService.shared.start()
+
+        // §12C — start the Free Run Live Activity. Lock screen
+        // banner + Dynamic Island timer mirror the race
+        // activity pattern. Bails silently when LA isn't
+        // authorized or the budget is exhausted.
+        #if canImport(ActivityKit)
+        if let state = currentFreeRunActivityState() {
+            let attributes = FreeRunActivityAttributes(
+                locationLabel: "\(locationType.displayName) Run"
+            )
+            LiveActivityService.shared.startFreeRun(
+                attributes: attributes,
+                contentState: state
+            )
+        }
+        #endif
     }
 
     // Pause the active run. Engine freezes the timer; distance
@@ -173,6 +189,17 @@ final class FreeRunViewModel {
         // any UI consuming the values.
         HeadphoneMotionService.shared.stop()
 
+        // §12C — end the Live Activity with a final
+        // .finished state. iOS keeps the FINISHED ribbon on
+        // the lock screen for ~4h so the athlete can glance
+        // at their total time + distance without unlocking
+        // (matches the race finish path's .default dismissal
+        // policy).
+        #if canImport(ActivityKit)
+        let finalState = currentFreeRunActivityState()
+        LiveActivityService.shared.endFreeRun(finalState: finalState)
+        #endif
+
         // Phase 2 hook — flush the HKWorkoutSession to HK, then
         // wait ~8s and re-query each split's HR window (same
         // rehydrate pattern that fixed race-level physiology).
@@ -209,6 +236,12 @@ final class FreeRunViewModel {
         // that don't go through end()). HeadphoneMotionService.
         // stop() is idempotent.
         HeadphoneMotionService.shared.stop()
+        // §12C — kill any stray Live Activity. Symmetric with
+        // RaceViewModel.abandon's immediate end. Safe to call
+        // even when no activity is running (no-op in that case).
+        #if canImport(ActivityKit)
+        LiveActivityService.shared.endFreeRun(finalState: nil)
+        #endif
         // Clear the wrist's free-run UI — Watch returns to its
         // idle "Ready" screen, same UX a finished race produces.
         publishWatchClearSnapshot()
@@ -253,7 +286,93 @@ final class FreeRunViewModel {
         // Watch sees fresh distance + phase within ~0.5s of the
         // iPhone-side change.
         publishWatchSnapshot()
+        // §12C — also push to the Live Activity. ActivityKit
+        // budget caps updates per app per hour; persistActiveRun
+        // is the canonical "real state change happened" hook
+        // (distance milestone, pause, resume, end) so all such
+        // events land on the lock screen.
+        #if canImport(ActivityKit)
+        pushFreeRunActivityUpdate()
+        #endif
     }
+
+    // §12C — Free Run Live Activity ContentState builder.
+    // Translates the engine + active run's current state into
+    // the ContentState shape the widget renders. Nil only when
+    // there's no active engine / run (defensive against being
+    // called outside a session).
+    #if canImport(ActivityKit)
+    private func currentFreeRunActivityState() -> FreeRunActivityAttributes.ContentState? {
+        guard let engine, let run = activeRun else { return nil }
+
+        let phase: FreeRunActivityAttributes.ContentState.Phase
+        let timerStart: Date
+        var frozenElapsed: TimeInterval? = nil
+
+        switch engine.phase {
+        case .notStarted:
+            return nil
+        case .inProgress(let startedAt):
+            phase = .running
+            timerStart = startedAt
+        case .paused(let startedAt, let pausedAt):
+            phase = .paused
+            timerStart = startedAt
+            frozenElapsed = pausedAt.timeIntervalSince(startedAt)
+        case .finished(let startedAt, let endedAt):
+            phase = .finished
+            timerStart = startedAt
+            frozenElapsed = endedAt.timeIntervalSince(startedAt)
+        }
+
+        let splitUnit = run.splitUnit
+        let metres = engine.distanceMetres
+
+        // Avg pace — total elapsed ÷ distance-in-unit. Nil
+        // until distance is meaningful (>~10m) so the lock
+        // screen doesn't show a nonsense pace during the
+        // first few seconds.
+        let avgPace: TimeInterval? = {
+            guard metres > 10 else { return nil }
+            let elapsed: TimeInterval = {
+                switch engine.phase {
+                case .notStarted: return 0
+                case .inProgress(let startedAt):
+                    return Date().timeIntervalSince(startedAt)
+                case .paused(let startedAt, let pausedAt):
+                    return pausedAt.timeIntervalSince(startedAt)
+                case .finished(let startedAt, let endedAt):
+                    return endedAt.timeIntervalSince(startedAt)
+                }
+            }()
+            guard elapsed > 0 else { return nil }
+            let units = metres / splitUnit.metresPerUnit
+            return elapsed / units
+        }()
+
+        let hr: Int? = currentHeartRateBPM.map { Int($0.rounded()) }
+        let hrZone: Int? = currentHeartRateBPM.map {
+            HRZone.zone(for: $0, maxBPM: 190).rawValue
+        }
+
+        return FreeRunActivityAttributes.ContentState(
+            phase: phase,
+            timerStart: timerStart,
+            frozenElapsed: frozenElapsed,
+            distanceMeters: metres,
+            splitUnitMetres: splitUnit.metresPerUnit,
+            splitUnitLabel: splitUnit.shortLabel,
+            avgPaceSecondsPerUnit: avgPace,
+            currentHR: hr,
+            currentHRZone: hrZone
+        )
+    }
+
+    private func pushFreeRunActivityUpdate() {
+        guard let state = currentFreeRunActivityState() else { return }
+        LiveActivityService.shared.updateFreeRun(state)
+    }
+    #endif
 
     private func saveContextSilently() {
         try? modelContext?.save()

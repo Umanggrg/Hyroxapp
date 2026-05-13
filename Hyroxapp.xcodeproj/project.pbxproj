@@ -91,6 +91,7 @@
 		5F2596182FA28A3E00516723 /* Exceptions for "Hyroxapp" folder in "HyroxappWidgetExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				Shared/FreeRunActivityAttributes.swift,
 				Shared/RaceActivityAttributes.swift,
 				Shared/Theme.swift,
 			);

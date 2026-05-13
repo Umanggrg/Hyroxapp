@@ -147,6 +147,16 @@ enum InsightGenerator {
            let hardest = hardestStationInsight(for: race, maxHR: maxHR) {
             out.append(hardest)
         }
+        // Posture drift — AirPods-only insight. Fires when the
+        // athlete's head pitched ≥5° further forward in the
+        // second half vs the first. Sits adjacent to the other
+        // fatigue-signal insights (run-fatigue, fatigue
+        // inflection, drift) — they catch fatigue via HR + pace;
+        // this one catches it via body position, which is a
+        // different signal entirely and worth its own callout.
+        if let posture = postureDriftInsight(for: race) {
+            out.append(posture)
+        }
         // Efficiency-worst-station — names the workout station
         // where the athlete spent the most HR cost for the
         // smallest pace return. Coaching-meaningful: this is the
@@ -947,5 +957,57 @@ enum InsightGenerator {
             symbol: "flame.fill",
             color: .warning
         )
+    }
+
+    // MARK: - Posture drift (§19.4 Phase 10J)
+
+    // AirPods-only fatigue signal: did the athlete's head tilt
+    // further forward in the second half of the race vs the
+    // first? Surfaces ONLY on forward drift ≥ 5° — that's the
+    // threshold where running form has visibly broken down to
+    // a coach watching. Smaller drifts get persisted on
+    // `Race.posturePitchDriftDegrees` for future trend charts
+    // but are silent in the per-race insight pane.
+    //
+    // Returns nil when:
+    //   • No AirPods motion data was captured (athlete raced
+    //     with no motion-capable AirPods paired — the field is
+    //     nil on the race row, same as a Watch-only race).
+    //   • Drift was < 5° in absolute value (typical / healthy).
+    //   • Drift was negative (head went UP across the race) —
+    //     that's uncommon but real, and not a fatigue signal.
+    //     Future v2 could flag a strongly-negative drift as a
+    //     pacing call-out ("you ran tall fresh, overcompensated
+    //     when tired"), but v1 stays focused on the forward-
+    //     drift fatigue case.
+    //
+    // Bands above the 5° gate:
+    //   • 5° ≤ drift < 10° — "Moderate forward head drift."
+    //     Coaching cue: core endurance + posture cues during
+    //     long runs.
+    //   • drift ≥ 10° — "Severe forward head drift." Coaching
+    //     cue: targeted neck/upper-back conditioning is the
+    //     fix. Beyond 10° the athlete is running with
+    //     measurably compromised form, which costs both
+    //     efficiency AND injury exposure.
+    private static func postureDriftInsight(for race: Race) -> RaceInsight? {
+        guard let drift = race.posturePitchDriftDegrees else { return nil }
+        guard drift >= 5.0 else { return nil }
+
+        let rounded = Int(drift.rounded())
+
+        if drift >= 10.0 {
+            return RaceInsight(
+                text: "Head dropped \(rounded)° forward by race end — significant posture fatigue. Train neck + upper-back endurance.",
+                symbol: "figure.run",
+                color: .accent
+            )
+        } else {
+            return RaceInsight(
+                text: "Head pitched \(rounded)° forward in the back half — moderate posture drift. Add core endurance work.",
+                symbol: "figure.run",
+                color: .warning
+            )
+        }
     }
 }

@@ -257,7 +257,11 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
         lowestSpO2: Double? = nil,
         activeCalories: Double?
     ) -> Split {
-        let newSplit = Split(
+        // `var` (vs let) because Split is a value type — we
+        // need a mutable local copy to set `verticalOscCmAvg`
+        // (§19 10I) after init since the struct's init
+        // doesn't take that field as a parameter.
+        var newSplit = Split(
             station: station,
             startedAt: startedAt,
             endedAt: endedAt,
@@ -297,7 +301,7 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
         heartRateRecovery30s: Double?,
         heartRateRecovery60s: Double?
     ) -> Split {
-        let newSplit = Split(
+        var newSplit = Split(
             station: station,
             startedAt: startedAt,
             endedAt: endedAt,
@@ -332,7 +336,7 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
         repsCompleted newReps: Int?? = nil,
         rpe newRPE: Int?? = nil
     ) -> Split {
-        let newSplit = Split(
+        var newSplit = Split(
             station: station,
             startedAt: startedAt,
             endedAt: endedAt,
@@ -358,7 +362,7 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
     // transition time spent before this segment's work began.
     // Other fields preserved.
     func withRoxzone(seconds: TimeInterval) -> Split {
-        let newSplit = Split(
+        var newSplit = Split(
             station: station,
             startedAt: startedAt,
             endedAt: endedAt,

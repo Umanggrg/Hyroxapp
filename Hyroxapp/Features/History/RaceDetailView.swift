@@ -869,19 +869,33 @@ struct RaceDetailView: View {
         .padding(.vertical, 16)
     }
 
-    // RUNS tab — the 8 runs deep. Currently surfaces the
-    // Compromised Running view (which IS the run degradation
-    // analysis); future phase 2.5 work could break out
-    // individual run cards with HR arc + post-station context
-    // per the §16 spec.
+    // RUNS tab — the 8 runs deep. Surfaces (when applicable):
+    //   1. Compromised Running analysis (run-degradation
+    //      across post-station runs)
+    //   2. §19 Running Economy (per-run vertical oscillation
+    //      from AirPods Pro head motion)
+    //
+    // Each section self-hides when its underlying data isn't
+    // present, so a Watch-only race shows only Compromised
+    // Running, an AirPods-only race shows only Running
+    // Economy, and a race with neither falls back to the
+    // empty-state placeholder.
     @ViewBuilder
     private var runsTabContent: some View {
+        let hasCompromised = CompromisedRunningView.hasData(in: race)
+        let hasRunningEconomy = RunningEconomySection.hasData(in: race)
+
         VStack(spacing: 16) {
-            if CompromisedRunningView.hasData(in: race) {
+            if hasCompromised {
                 compromisedRunningSection
                     .padding(.horizontal, Layout.screenMargin)
-            } else {
-                emptyTabState(message: "Run analysis appears once 8 runs have HR or pace data.")
+            }
+            if hasRunningEconomy {
+                RunningEconomySection(race: race)
+                    .padding(.horizontal, Layout.screenMargin)
+            }
+            if !hasCompromised && !hasRunningEconomy {
+                emptyTabState(message: "Run analysis appears once 8 runs have HR or pace data, or once AirPods Pro head motion is captured during a race.")
             }
         }
         .padding(.vertical, 16)

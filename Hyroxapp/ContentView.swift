@@ -585,14 +585,21 @@ struct ContentView: View {
     }
 
     // Route a Trakrr deep-link URL. URL host == path determines
-    // destination. Currently only `trakr://race` exists (used by
-    // the Live Activity widgetURL). The host == nil branch covers
-    // both `trakr:race` and `trakr://race` because URLComponents
-    // resolves the latter with `host = "race"`.
+    // destination. Two routes today: `trakr://race` (race Live
+    // Activity widgetURL) and `trakr://freerun` (§12C Free Run
+    // Live Activity widgetURL). Both currently route into the
+    // Race tab since that's the host for both the Train hub and
+    // Free Run start path; future v2 could thread through an
+    // additional pendingFreeRun-style state if we want to also
+    // auto-resume the in-progress run on tap.
+    //
+    // The host == nil branch covers both `trakr:race` and
+    // `trakr://race` because URLComponents resolves the latter
+    // with `host = "race"`.
     private func handleDeepLink(_ url: URL) {
         let route = url.host ?? url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         switch route {
-        case "race":
+        case "race", "freerun":
             selectedTab = .race
         default:
             // Unknown deep-link route — degrade gracefully to

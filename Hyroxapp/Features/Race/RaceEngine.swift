@@ -683,6 +683,57 @@ struct RaceEngine: Sendable {
             )
         }
     }
+
+    // §19 Phase 10I — stamp the vertical-oscillation rolling
+    // avg onto the just-ended split. Called synchronously
+    // from RaceViewModel.attachSegmentStats at segment-end
+    // on run-kind splits, before the async HR Task starts.
+    // State-symmetric with setSegmentStats so the patch can
+    // land in any race state. Split is a value type so we
+    // mutate via the local var splits copy then reassign
+    // state — same pattern setSegmentStats uses.
+    mutating func setVerticalOscillation(
+        _ verticalOscCm: Double,
+        atSplitIndex index: Int
+    ) {
+        switch state {
+        case .notStarted:
+            return
+        case .inProgress(let startedAt, let segmentStart, var splits):
+            guard splits.indices.contains(index) else { return }
+            splits[index].verticalOscCmAvg = verticalOscCm
+            state = .inProgress(
+                startedAt: startedAt,
+                currentSegmentStartedAt: segmentStart,
+                splits: splits
+            )
+        case .paused(let startedAt, let segmentStart, var splits, let pausedAt):
+            guard splits.indices.contains(index) else { return }
+            splits[index].verticalOscCmAvg = verticalOscCm
+            state = .paused(
+                startedAt: startedAt,
+                currentSegmentStartedAt: segmentStart,
+                splits: splits,
+                pausedAt: pausedAt
+            )
+        case .inRoxzone(let startedAt, var splits, let roxzoneStart):
+            guard splits.indices.contains(index) else { return }
+            splits[index].verticalOscCmAvg = verticalOscCm
+            state = .inRoxzone(
+                startedAt: startedAt,
+                splits: splits,
+                roxzoneStartedAt: roxzoneStart
+            )
+        case .finished(let startedAt, let endedAt, var splits):
+            guard splits.indices.contains(index) else { return }
+            splits[index].verticalOscCmAvg = verticalOscCm
+            state = .finished(
+                startedAt: startedAt,
+                endedAt: endedAt,
+                splits: splits
+            )
+        }
+    }
 }
 
 // MARK: - Helpers

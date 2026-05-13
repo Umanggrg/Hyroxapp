@@ -86,7 +86,10 @@ struct SerializedSplit: Codable, Sendable, Equatable {
     // gaps.
     func toSplit() -> Split? {
         guard let station = Station(rawValue: stationRaw) else { return nil }
-        let split = Split(
+        // `var` (vs let) — Split is a value type; we need a
+        // mutable local to assign the §19 10I verticalOscCmAvg
+        // field after init.
+        var split = Split(
             station: station,
             startedAt: startedAt,
             endedAt: endedAt,

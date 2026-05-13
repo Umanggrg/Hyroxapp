@@ -147,6 +147,86 @@ final class LiveActivityService {
             }
         }
     }
+
+    // MARK: - Free Run (§12C)
+
+    // Symmetric Free Run lifecycle. Free Run has its own
+    // ActivityAttributes type (FreeRunActivityAttributes) so
+    // we hold its activity in a separate handle. iOS treats
+    // them as distinct activity types — both can coexist,
+    // though in practice the athlete will only be doing one
+    // or the other at a time. Defensive: each lifecycle path
+    // ends leftovers of its OWN type, so a stale race
+    // activity doesn't get swept when a Free Run starts.
+    private var activeFreeRunActivity: Activity<FreeRunActivityAttributes>?
+
+    func startFreeRun(
+        attributes: FreeRunActivityAttributes,
+        contentState: FreeRunActivityAttributes.ContentState
+    ) {
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+
+        endLeftoverFreeRunActivities()
+
+        do {
+            let content = ActivityContent(
+                state: contentState,
+                staleDate: Date().addingTimeInterval(60 * 60 * 4)  // 4h staleness fallback
+            )
+            activeFreeRunActivity = try Activity.request(
+                attributes: attributes,
+                content: content,
+                pushType: nil
+            )
+        } catch {
+            activeFreeRunActivity = nil
+        }
+    }
+
+    func updateFreeRun(_ contentState: FreeRunActivityAttributes.ContentState) {
+        guard let activity = activeFreeRunActivity else { return }
+
+        let content = ActivityContent(
+            state: contentState,
+            staleDate: Date().addingTimeInterval(60 * 60 * 4)
+        )
+
+        Task {
+            await activity.update(content)
+        }
+    }
+
+    func endFreeRun(
+        finalState: FreeRunActivityAttributes.ContentState? = nil
+    ) {
+        guard let activity = activeFreeRunActivity else { return }
+        activeFreeRunActivity = nil
+
+        let content: ActivityContent<FreeRunActivityAttributes.ContentState>?
+        let dismissalPolicy: ActivityUIDismissalPolicy
+        if let finalState {
+            content = ActivityContent(
+                state: finalState,
+                staleDate: nil
+            )
+            dismissalPolicy = .default
+        } else {
+            content = nil
+            dismissalPolicy = .immediate
+        }
+
+        Task {
+            await activity.end(content, dismissalPolicy: dismissalPolicy)
+        }
+    }
+
+    private func endLeftoverFreeRunActivities() {
+        for activity in Activity<FreeRunActivityAttributes>.activities {
+            Task {
+                await activity.end(nil, dismissalPolicy: .immediate)
+            }
+        }
+    }
 }
 
 #endif

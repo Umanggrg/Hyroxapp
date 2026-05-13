@@ -223,6 +223,36 @@ final class Race {
     // mid-race) rather than just the last one.
     var hrSourcePrimary: String?
 
+    // §19.4 Phase 10J — posture drift across the race, in
+    // degrees of forward head pitch. Positive = head tilted
+    // further forward in the second half vs the first half
+    // (the direction fatigued runners' heads drift); negative
+    // = head went UP (uncommon but real for athletes who run
+    // tall when fresh and overcompensate as they tire).
+    //
+    // Captured from AirPods Pro 1+ / 4 / Max head motion via
+    // `HeadphoneMotionService`'s 1Hz pitch sample buffer,
+    // computed at race finish as
+    // `mean(secondHalfPitch) - mean(firstHalfPitch)` and
+    // converted to degrees.
+    //
+    // Nil when:
+    //   • No AirPods (or non-motion AirPods) were paired during
+    //     the race — the buffer was empty.
+    //   • The race was too short to split into halves (< 60s
+    //     of pitch samples — defensive lower bound).
+    //
+    // Surface: `InsightGenerator.postureDriftInsight` fires a
+    // narrative callout when forward drift ≥ 5°. Lower-magnitude
+    // values are persisted but silent — the field exists for
+    // future profile-level trend charts (am I learning to hold
+    // posture under fatigue?) even when no insight fires on a
+    // given race.
+    //
+    // Migration-safe additive nil default — pre-existing rows
+    // decode cleanly, same SwiftData pattern as `hrSourcePrimary`.
+    var posturePitchDriftDegrees: Double?
+
     // Athlete-defined organizing tags. Free-form lowercase strings
     // ("zone2", "race-sim", "morning", "brick", "strength-focus")
     // — the athlete picks their own taxonomy. Stored as a single

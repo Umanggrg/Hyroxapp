@@ -881,6 +881,70 @@ enum RaceStats {
         )
     }
 
+    // MARK: - Posture drift (AirPods head pitch, §19.4 10J)
+
+    /// First-half vs second-half mean head-pitch delta across a
+    /// race, in **degrees**. Computed from
+    /// `HeadphoneMotionService.flushPitchSamples()` — a 1Hz
+    /// stream of `(timestamp, pitch-in-radians)` tuples captured
+    /// while the athlete is wearing motion-capable AirPods.
+    ///
+    /// Positive delta = head tilted further forward in the
+    /// second half (the fatigue-drift direction). Negative =
+    /// head went UP (uncommon but real for athletes who run
+    /// tall fresh and overcompensate as they tire).
+    ///
+    /// The split is **temporal**, not sample-count: we anchor
+    /// the midpoint at `firstTimestamp + (lastTimestamp -
+    /// firstTimestamp) / 2`. That way a race with sparse early
+    /// samples (AirPods inserted late, e.g.) doesn't get its
+    /// "first half" dominated by a brief window — the boundary
+    /// follows wall-clock, not buffer index. Each half's mean
+    /// pitch is the simple average of the radians samples
+    /// inside it.
+    ///
+    /// Returns nil when:
+    ///   • Fewer than 60 samples total (insufficient buffer —
+    ///     first-half/second-half means become unreliable below
+    ///     ~30 samples per half).
+    ///   • Span between first and last timestamp is < 60s
+    ///     (race was too short to meaningfully split).
+    ///   • Either half ends up with zero samples (degenerate;
+    ///     shouldn't happen with the 60-sample gate, but
+    ///     defensive).
+    ///
+    /// Pure function — no SwiftData / HealthKit dependencies.
+    /// RaceViewModel calls this at race-finish with the buffer
+    /// from `HeadphoneMotionService.shared.flushPitchSamples()`
+    /// and persists the result on `Race.posturePitchDriftDegrees`.
+    static func posturePitchDriftDegrees(
+        forPitchSamples samples: [(timestamp: Date, pitch: Double)]
+    ) -> Double? {
+        guard samples.count >= 60 else { return nil }
+        guard let first = samples.first?.timestamp,
+              let last = samples.last?.timestamp else { return nil }
+
+        let span = last.timeIntervalSince(first)
+        guard span >= 60 else { return nil }
+
+        // Temporal midpoint — clock-based, not index-based, so
+        // sparse early samples don't bias the boundary.
+        let midpoint = first.addingTimeInterval(span / 2)
+
+        let firstHalf = samples.filter { $0.timestamp < midpoint }
+        let secondHalf = samples.filter { $0.timestamp >= midpoint }
+        guard !firstHalf.isEmpty, !secondHalf.isEmpty else { return nil }
+
+        let firstMeanRad = firstHalf.map(\.pitch).reduce(0, +) / Double(firstHalf.count)
+        let secondMeanRad = secondHalf.map(\.pitch).reduce(0, +) / Double(secondHalf.count)
+        let deltaRad = secondMeanRad - firstMeanRad
+
+        // Convert to degrees for downstream consumers
+        // (insight string + future trend charts).
+        let degrees = deltaRad * 180.0 / .pi
+        return degrees
+    }
+
     // MARK: - Cardiac drift across the 8 runs
 
     // Cardiac drift = how much average HR climbs across the race at

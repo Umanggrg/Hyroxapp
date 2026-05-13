@@ -818,10 +818,15 @@ final class RaceViewModel {
         // HR-stats builders (withSegmentStats, withRecovery
         // Stats, etc.) preserve verticalOscCmAvg through
         // subsequent patches.
+        //
+        // Routes through `engine.setVerticalOscillation` (not
+        // direct array mutation) because Split is a value
+        // type — engine.splits returns a copy, so mutating it
+        // wouldn't reach the engine's internal state.
         if engine.splits.indices.contains(index),
            engine.splits[index].station.kind == .run,
            let osc = HeadphoneMotionService.shared.currentVerticalOscillationCm {
-            engine.splits[index].verticalOscCmAvg = osc
+            engine.setVerticalOscillation(osc, atSplitIndex: index)
         }
 
         #if canImport(HealthKit)
@@ -1180,6 +1185,33 @@ final class RaceViewModel {
                 let source = SensorSourceRegistry.shared.lastHRSource
                 if source != .unknown {
                     race.hrSourcePrimary = source.shortLabel
+                }
+            }
+
+            // §19.4 Phase 10J — drain the AirPods head-pitch
+            // sample buffer and compute first-half vs second-
+            // half posture drift in degrees. Stamped here (in
+            // the `.finished` branch) so it runs once per race
+            // finish, alongside the HR source attribution above.
+            //
+            // Idempotency gate: only stamp when the race has no
+            // drift value yet. persistActiveRace can fire again
+            // after `attachSegmentStats` (HK queries patching
+            // splits async), and `flushPitchSamples()` clears
+            // its buffer on read — without the nil-gate, the
+            // second call would overwrite the real drift with
+            // nil because the buffer is now empty.
+            //
+            // Same gate works for re-finish edge cases (e.g.
+            // endEarlyAndSave on an already-finished race —
+            // shouldn't happen given the guard at the top of
+            // endEarlyAndSave, but defensive).
+            if race.posturePitchDriftDegrees == nil {
+                let pitchSamples = HeadphoneMotionService.shared.flushPitchSamples()
+                if let drift = RaceStats.posturePitchDriftDegrees(
+                    forPitchSamples: pitchSamples
+                ) {
+                    race.posturePitchDriftDegrees = drift
                 }
             }
         }
