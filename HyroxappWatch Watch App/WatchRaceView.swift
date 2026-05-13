@@ -1128,6 +1128,11 @@ struct WatchRaceView: View {
     private var currentRepStationRaw: Int? {
         guard let snapshot = client.snapshot,
               snapshot.phase == .inProgress,
+              // §13.8 Tier 2 — gate on the user's Settings toggle.
+              // nil snapshot field (legacy phone build) decodes as
+              // "off" — conservative default that matches the
+              // iPhone's UserProfile.wristRepCountingEnabled = false.
+              snapshot.wristRepCountingEnabled == true,
               let station = snapshot.currentStation,
               Self.isRepCountable(station)
         else { return nil }

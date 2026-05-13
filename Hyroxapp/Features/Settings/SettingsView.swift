@@ -72,6 +72,7 @@ struct SettingsView: View {
                 hyroxSection
                 inRaceDisplaysSection
                 audioCuesSection
+                sensorsSection
                 notificationsSection
                 privacySection
                 dataSection
@@ -375,6 +376,41 @@ struct SettingsView: View {
             .listRowBackground(Color.surface)
         } header: {
             Text("In-race displays")
+        }
+    }
+
+    // §13.8 Tier 2 + §19.4 10I/10J — experimental sensor features
+    // toggled off by default. The detection algorithms are
+    // signal-processing v1 with heuristic thresholds (Z-axis peak
+    // for wall ball reps, 8x g-to-cm scaling for vertical osc,
+    // ≥5° forward pitch for posture drift). All are research-
+    // grounded but unvalidated against the athlete's own gait —
+    // shipping them opt-in protects first impressions while
+    // letting interested users dial them in.
+    //
+    // Cadence stays on a separate path (always on when AirPods
+    // motion is available) because it's a more-validated metric
+    // on its own merit. Only the experimental v1 metrics get
+    // gated here.
+    private var sensorsSection: some View {
+        Section {
+            Toggle("Auto-count reps on Watch", isOn: $profile.wristRepCountingEnabled)
+                .listRowBackground(Color.surface)
+
+            footnote(
+                "Apple Watch's motion sensors detect wall ball reps during the rep-counting station and auto-fill the count post-race. Experimental v1 — accuracy depends on your form. Off → enter reps manually on the post-race summary. Other rep stations (burpees, sandbag lunges, farmers carry) ship in a follow-up."
+            )
+            .listRowBackground(Color.surface)
+
+            Toggle("AirPods running economy", isOn: $profile.airPodsRunningEconomyEnabled)
+                .listRowBackground(Color.surface)
+
+            footnote(
+                "Captures vertical oscillation (cm/step) per run and posture drift (degrees) across the race from AirPods Pro 1+ / 4 / Max head motion. Surfaces as a Running Economy section on Race Detail and as a fatigue insight when posture pitches forward 5°+. Cadence stays on regardless of this toggle."
+            )
+            .listRowBackground(Color.surface)
+        } header: {
+            Text("Sensors (experimental)")
         }
     }
 

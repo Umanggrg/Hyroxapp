@@ -156,6 +156,15 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
     // pre-toggle behavior is preserved exactly.
     let coachingCuesEnabled: Bool?
 
+    // §13.8 Tier 2 — gate for the Watch's wrist IMU rep counter.
+    // When `false` (or nil for legacy snapshots), WatchRaceView
+    // skips starting WatchRepCountingService even on
+    // rep-counting stations. Pushed from UserProfile.wristRep
+    // CountingEnabled. Optional so older watch builds reading a
+    // newer snapshot decode cleanly as nil → off (the
+    // conservative default).
+    let wristRepCountingEnabled: Bool?
+
     // 0-based index into `Station.raceSequence`. The watch resolves this
     // to a `Station` case and uses `station.displayName` /
     // `station.target(for: division)` for the header + subtitle.
@@ -201,7 +210,8 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         targetDuration: TimeInterval? = nil,
         segmentHRApproachThreshold: Double? = nil,
         segmentHRCeiling: Double? = nil,
-        coachingCuesEnabled: Bool? = nil
+        coachingCuesEnabled: Bool? = nil,
+        wristRepCountingEnabled: Bool? = nil
     ) {
         self.phase = phase
         self.startedAt = startedAt
@@ -221,6 +231,7 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         self.segmentHRApproachThreshold = segmentHRApproachThreshold
         self.segmentHRCeiling = segmentHRCeiling
         self.coachingCuesEnabled = coachingCuesEnabled
+        self.wristRepCountingEnabled = wristRepCountingEnabled
     }
 
     // MARK: - Dictionary encoding (WCSession transport)
@@ -246,6 +257,7 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         static let segmentHRApproachThreshold = "segmentHRApproachThreshold"
         static let segmentHRCeiling = "segmentHRCeiling"
         static let coachingCuesEnabled = "coachingCuesEnabled"
+        static let wristRepCountingEnabled = "wristRepCountingEnabled"
     }
 
     // Build a plist-compatible dictionary suitable for
@@ -295,6 +307,9 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         // other forward-compat fields above. Older Watches that
         // pre-date this field default to true via the helper; new
         // Watches see explicit true / false from the host.
+        if let wristRepCountingEnabled {
+            dict[Key.wristRepCountingEnabled] = wristRepCountingEnabled
+        }
         if let coachingCuesEnabled {
             dict[Key.coachingCuesEnabled] = coachingCuesEnabled
         }
@@ -379,6 +394,7 @@ struct RaceStateSnapshot: Equatable, Sendable, Codable {
         // key → nil, helper coalesces to `true` so pre-toggle
         // behavior is preserved for version-skewed receivers.
         self.coachingCuesEnabled = dictionary[Key.coachingCuesEnabled] as? Bool
+        self.wristRepCountingEnabled = dictionary[Key.wristRepCountingEnabled] as? Bool
 
         // Splits aren't carried over the WCSession dictionary path.
         // The watch doesn't render per-split detail; the duo/Codable

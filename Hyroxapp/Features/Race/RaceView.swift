@@ -459,6 +459,11 @@ struct RaceView: View {
         // assignment target). The explicit `self.` disambiguates
         // the two same-named properties for the type-checker.
         viewModel.maxHeartRate = self.maxHeartRate
+        // §19.4 10I/10J — mirror the AirPods running-economy opt-in
+        // from UserProfile into the viewModel so the stamping
+        // paths can gate without re-querying SwiftData mid-race.
+        viewModel.airPodsRunningEconomyEnabled =
+            profiles.first?.airPodsRunningEconomyEnabled ?? false
     }
 
     private func handleRaceViewDisappear() {
@@ -3074,7 +3079,12 @@ struct RaceView: View {
             maxHR: maxHeartRate,
             personalHRBaseline: personalHRBaseline,
             guardrailHistory: allRaces,
-            coachingCuesEnabled: profiles.first?.coachingCuesEnabled ?? true
+            coachingCuesEnabled: profiles.first?.coachingCuesEnabled ?? true,
+            // §13.8 Tier 2 — Watch reads this from the snapshot
+            // to decide whether to spin up WatchRepCountingService
+            // when entering a rep-counting station. nil → off (the
+            // conservative legacy default).
+            wristRepCountingEnabled: profiles.first?.wristRepCountingEnabled ?? false
         ) {
             WatchCompanionService.shared.publish(snapshot)
         } else {

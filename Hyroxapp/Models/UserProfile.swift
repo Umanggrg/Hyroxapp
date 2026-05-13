@@ -137,6 +137,38 @@ final class UserProfile {
     // No other fitness app surfaces this.
     var roxzoneEnabled: Bool = false
 
+    // §13.8 Tier 2 — wrist IMU rep counting. When ON, the Apple
+    // Watch's CMBatchedSensorManager (Series 8+) or CMMotionManager
+    // (older hardware) detects reps during rep-counting stations
+    // (Phase 1 = wall balls) and auto-fills Split.repsCompleted
+    // at advance time. Off by default because the detection is
+    // signal-processing v1 — thresholds tuned in code but
+    // unvalidated against real-world race data. Athletes who want
+    // the headline feature opt-in via Settings; everyone else
+    // continues with the existing manual rep entry flow on
+    // StationStatsSheet.
+    //
+    // Routed to the watch via RaceStateSnapshot.wristRepCounting
+    // Enabled so WatchRaceView can gate the WatchRepCounting
+    // Service's start/stop lifecycle without a separate WCSession
+    // setting push.
+    var wristRepCountingEnabled: Bool = false
+
+    // §19.4 Phase 10I/10J — AirPods Pro 1+ / 4 / Max running
+    // economy metrics: per-run vertical oscillation (cm/step)
+    // and per-race posture pitch drift (degrees). Off by default
+    // for the same reason as rep counting — both are signal-
+    // processing v1 with heuristic constants (8x g-units-to-cm
+    // scaling, ≥5° drift threshold) that are research-grounded
+    // but not validated on the athlete's own gait yet.
+    //
+    // Specifically gates the STORAGE of these metrics onto Split
+    // .verticalOscCmAvg and Race.posturePitchDriftDegrees. The
+    // underlying HeadphoneMotionService keeps running so cadence
+    // (a more-validated metric on its own toggle path) stays
+    // available — only the experimental metrics get suppressed.
+    var airPodsRunningEconomyEnabled: Bool = false
+
     // Maximum heart rate (bpm) used to classify HR zones on race
     // detail. Default 190 is a reasonable starting point for most
     // HYROX-age athletes; the "220 minus age" rule-of-thumb gives

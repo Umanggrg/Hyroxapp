@@ -71,6 +71,19 @@ final class RaceViewModel {
     // 30-40 — until the profile loads.
     var maxHeartRate: Int = 190
 
+    // §19.4 Phase 10I/10J — opt-in gate for AirPods-derived
+    // running-economy metrics (per-run vertical oscillation +
+    // race-finish posture pitch drift). Mirrored from
+    // `UserProfile.airPodsRunningEconomyEnabled` by RaceView on
+    // .onAppear / .onChange so the VM doesn't need to query
+    // SwiftData directly during in-race code paths. When false,
+    // the underlying HeadphoneMotionService is still running
+    // (for cadence, a more-validated metric that stays
+    // on independently), but the experimental metrics get
+    // suppressed at the stamping layer — neither lands on
+    // Split.verticalOscCmAvg nor Race.posturePitchDriftDegrees.
+    var airPodsRunningEconomyEnabled: Bool = false
+
     // Pre-race countdown state — used to render a 3-2-1-GO overlay
     // on RaceView between the user tapping "Start Race" and the
     // engine timer actually beginning. `countdownValue` is the
@@ -249,7 +262,8 @@ final class RaceViewModel {
         personalHRBaseline: RaceStats.PersonalHRBaseline? = nil,
         targetDuration: TimeInterval? = nil,
         guardrailHistory: [Race] = [],
-        coachingCuesEnabled: Bool? = nil
+        coachingCuesEnabled: Bool? = nil,
+        wristRepCountingEnabled: Bool? = nil
     ) -> RaceStateSnapshot? {
         let phase: RaceStateSnapshot.Phase
         let startedAt: Date?
@@ -333,7 +347,8 @@ final class RaceViewModel {
             targetDuration: targetDuration ?? activeRace?.targetDuration,
             segmentHRApproachThreshold: guardrail?.approachThreshold,
             segmentHRCeiling: guardrail?.ceiling,
-            coachingCuesEnabled: coachingCuesEnabled
+            coachingCuesEnabled: coachingCuesEnabled,
+            wristRepCountingEnabled: wristRepCountingEnabled
         )
     }
 
@@ -874,7 +889,8 @@ final class RaceViewModel {
         // direct array mutation) because Split is a value
         // type — engine.splits returns a copy, so mutating it
         // wouldn't reach the engine's internal state.
-        if engine.splits.indices.contains(index),
+        if airPodsRunningEconomyEnabled,
+           engine.splits.indices.contains(index),
            engine.splits[index].station.kind == .run,
            let osc = HeadphoneMotionService.shared.currentVerticalOscillationCm {
             engine.setVerticalOscillation(osc, atSplitIndex: index)
@@ -1262,7 +1278,10 @@ final class RaceViewModel {
             // endEarlyAndSave on an already-finished race —
             // shouldn't happen given the guard at the top of
             // endEarlyAndSave, but defensive).
-            if race.posturePitchDriftDegrees == nil {
+            // Settings gate (§19.4 10I/10J) — opt-in only. When
+            // off, drain the pitch buffer so it doesn't leak into
+            // the next race, but skip computation + storage.
+            if airPodsRunningEconomyEnabled, race.posturePitchDriftDegrees == nil {
                 let pitchSamples = HeadphoneMotionService.shared.flushPitchSamples()
                 if let drift = RaceStats.posturePitchDriftDegrees(
                     forPitchSamples: pitchSamples
