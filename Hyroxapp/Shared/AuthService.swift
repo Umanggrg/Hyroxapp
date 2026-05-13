@@ -171,6 +171,69 @@ final class AuthService: NSObject {
         }
     }
 
+    // MARK: - Account deletion (§15A/B)
+
+    // Self-service account deletion via the Supabase
+    // `delete_user_account` RPC. The RPC cascades through
+    // follows / duo_races / races / race-photos / avatars /
+    // profile / auth.users — see docs/supabase/delete_user_account.sql
+    // for the full SQL definition.
+    //
+    // App Store Guideline 5.1.1(v) requires apps with account
+    // creation to support in-app deletion. This is the direct
+    // one-tap path; the previous mailto: flow on
+    // SettingsView.requestAccountDeletion remains as a v0
+    // fallback for any case where the RPC errors.
+    //
+    // After the RPC succeeds, we sign out locally so the auth
+    // gate flips back to the sign-in screen. The session token
+    // is invalidated server-side by the auth.users delete, so
+    // future requests with the old token would fail anyway —
+    // calling signOut() is belt-and-suspenders for clean state.
+    //
+    // Throws on RPC failure (network, RLS rejection, missing
+    // function, etc.) so the caller can surface an error. Does
+    // NOT swallow errors — partial-success on the server is
+    // worse than a clear failure the user can retry.
+    @discardableResult
+    func deleteAccount() async throws -> Bool {
+        // Belt-and-suspenders: refuse when not signed in. The
+        // server-side RPC would reject too (auth.uid() IS NULL
+        // → exception) but failing fast here gives a clearer
+        // error message.
+        guard user != nil else {
+            throw NSError(
+                domain: "AuthService",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey:
+                    "Sign in before deleting your account."]
+            )
+        }
+
+        // Invoke the RPC. supabase-swift's .rpc(name) returns
+        // a query builder; .execute() runs it and surfaces any
+        // server-side error as a thrown PostgrestError.
+        try await SupabaseService.shared
+            .rpc("delete_user_account")
+            .execute()
+
+        // RPC succeeded — the user is server-side-deleted.
+        // Tear down local auth state on the main actor. signOut()
+        // already hops to MainActor internally; await ensures we
+        // don't return before local state is cleared.
+        await MainActor.run {
+            self.user = nil
+        }
+        // Best-effort server-side sign out — the session token
+        // is already dead (auth.users row is gone) but calling
+        // signOut() cleanly clears any cached Supabase state on
+        // the client. Errors swallowed because the account is
+        // gone either way.
+        try? await SupabaseService.shared.auth.signOut()
+
+        return true
+    }
+
     // MARK: - Nonce helpers
 
     // Apple's recommended random nonce: 32 chars from a fixed

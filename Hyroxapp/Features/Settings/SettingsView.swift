@@ -48,6 +48,16 @@ struct SettingsView: View {
     @State private var isShowingSignOutConfirm = false
     @State private var isShowingDeleteAccountConfirm = false
 
+    // §15B — drives the spinner overlay + error alert during
+    // self-service account deletion via the
+    // `delete_user_account` RPC. isDeletingAccount masks the
+    // entire form while the RPC is in flight (~1-3s typical)
+    // so the user can't double-tap; deleteAccountError surfaces
+    // any thrown error in a follow-up alert with a Retry
+    // affordance and a fallback to the mailto: flow.
+    @State private var isDeletingAccount = false
+    @State private var deleteAccountError: String?
+
     // Drives the Edit Profile sheet pushed from the profile row
     // at the top of Settings. Keeps the editor near where the
     // athlete reads their identity — they don't have to back out
@@ -88,6 +98,39 @@ struct SettingsView: View {
         .sheet(isPresented: $isEditingProfile) {
             EditProfileView(profile: profile)
         }
+        // §15B — full-screen progress overlay during the RPC
+        // call. Covers the entire Settings sheet so the user
+        // can't double-tap or navigate away while the deletion
+        // is in flight (typically 1-3s). The spinner + label
+        // sit on a darkened backdrop matching the brand's
+        // surface treatment elsewhere.
+        .overlay {
+            if isDeletingAccount {
+                ZStack {
+                    Color.black.opacity(0.6)
+                        .ignoresSafeArea()
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .tint(Color.accent)
+                            .scaleEffect(1.4)
+                        Text("Deleting your account…")
+                            .font(.headline)
+                            .foregroundStyle(Color.textPrimary)
+                        Text("This may take a few seconds.")
+                            .font(.footnote)
+                            .foregroundStyle(Color.textSecondary)
+                    }
+                    .padding(24)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(Color.surfaceElevated)
+                    )
+                }
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: isDeletingAccount)
     }
 
     // MARK: - Sections
@@ -644,11 +687,36 @@ struct SettingsView: View {
                 isPresented: $isShowingDeleteAccountConfirm
             ) {
                 Button("Cancel", role: .cancel) { }
-                Button("Email request", role: .destructive) {
-                    requestAccountDeletion()
+                Button("Delete permanently", role: .destructive) {
+                    performAccountDeletion()
                 }
             } message: {
-                Text("We'll open a pre-filled email to support@trakrr.app. We process deletion requests within 30 days. This permanently removes your profile, races, photos, and follow graph from our servers.")
+                Text("This permanently removes your profile, races, photos, and follow graph from our servers. The action cannot be undone.")
+            }
+            // §15B — error alert surfaced when the RPC fails.
+            // Two paths: Retry kicks off another deletion call,
+            // Email Support falls back to the mailto: flow so
+            // the user isn't stranded if the RPC keeps failing.
+            .alert(
+                "Couldn't delete your account",
+                isPresented: Binding(
+                    get: { deleteAccountError != nil },
+                    set: { if !$0 { deleteAccountError = nil } }
+                )
+            ) {
+                Button("Email support") {
+                    requestAccountDeletion()
+                    deleteAccountError = nil
+                }
+                Button("Retry") {
+                    deleteAccountError = nil
+                    performAccountDeletion()
+                }
+                Button("Cancel", role: .cancel) {
+                    deleteAccountError = nil
+                }
+            } message: {
+                Text(deleteAccountError ?? "An unknown error occurred. You can email support to delete manually.")
             }
         }
     }
@@ -677,6 +745,50 @@ struct SettingsView: View {
         dismiss()
     }
 
+    // §15B — primary self-service account deletion path. Calls
+    // the `delete_user_account` RPC via AuthService. On success:
+    // signs out + dismisses the Settings sheet (auth gate flips
+    // back to the sign-in splash). On failure: surfaces the
+    // error in an alert with Retry + Email Support affordances.
+    //
+    // The mailto: flow (`requestAccountDeletion` below) remains
+    // as a fallback for that error alert — if the RPC keeps
+    // failing, the user isn't stranded; support can still
+    // process manually within 30 days per App Store Guideline
+    // 5.1.1(v).
+    private func performAccountDeletion() {
+        guard !isDeletingAccount else { return }
+        isDeletingAccount = true
+
+        Task {
+            #if canImport(Auth)
+            do {
+                try await AuthService.shared.deleteAccount()
+                // Success — auth state cleared on the service.
+                // Dismiss the Settings sheet so the auth gate
+                // returns to splash on the next render cycle.
+                await MainActor.run {
+                    isDeletingAccount = false
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    isDeletingAccount = false
+                    deleteAccountError = error.localizedDescription
+                }
+            }
+            #else
+            // No Auth module in this build — should not happen
+            // because the section is gated on isSignedIn, but
+            // defensive nonetheless.
+            await MainActor.run {
+                isDeletingAccount = false
+                deleteAccountError = "Account deletion isn't available in this build."
+            }
+            #endif
+        }
+    }
+
     // Open a pre-filled support email. The mailto: URL carries
     // subject + body so the user only has to tap Send. iOS
     // routes to whichever mail client they've set up — we
@@ -688,6 +800,11 @@ struct SettingsView: View {
     // handle it. If the user has no mail client configured,
     // iOS surfaces its own "no mail app" alert — graceful
     // degradation.
+    //
+    // Kept as a fallback for the RPC-error path in
+    // `performAccountDeletion` — if the server-side delete
+    // keeps failing, the user can request manual processing
+    // via support@trakrr.app within the 30-day SLA.
     private func requestAccountDeletion() {
         let userID = currentUserIDForSupport
         let subject = "Trakrr account deletion request"
