@@ -105,10 +105,17 @@ struct TrainHubView: View {
     enum BuilderIntent: Hashable, Identifiable {
         case quickStation
         case compromised
+        // §11 — direct entry from the top-level "Custom Workout"
+        // card in the MORE section. Same destination as the
+        // other two but distinguishable for future intent-
+        // specific presets (e.g. starting from a saved template
+        // by default).
+        case custom
         var id: String {
             switch self {
             case .quickStation: return "quickStation"
             case .compromised: return "compromised"
+            case .custom: return "custom"
             }
         }
     }
@@ -124,7 +131,7 @@ struct TrainHubView: View {
 
                     actionGrid
 
-                    freeRunCard
+                    moreSection
 
                     RecommendedWorkoutCard(races: allRaces)
 
@@ -382,62 +389,89 @@ struct TrainHubView: View {
         }
     }
 
-    // §11 — Free Run card. Sits below the HYROX-format 2×2
-    // grid as a single full-width row. Distinct shape +
-    // section caps label signal "this is a different kind
-    // of workout" — per CLAUDE.md §1 non-goals, Free Run is
-    // intentionally outside the HYROX format (no stations,
-    // no map, no kudos), just an outdoor / treadmill running
-    // surface for the easy-run days the athlete also tracks.
+    // §11 — "MORE" section. Hosts the two open-format
+    // entry points that sit outside the HYROX 2×2 grid:
+    // Free Run (unstructured running) and Custom Workout
+    // (athlete-built station sequence). Each is its own
+    // tappable row below a shared caps section label.
     //
-    // Wider single-row visual breaks the grid pattern above,
-    // so the eye reads "actions above; running tools below"
-    // rather than "five equal cards." Tap → FreeRunStartSheet
-    // for location-type + split-unit picker, then full-screen
-    // cover to FreeRunView.
-    private var freeRunCard: some View {
+    // Why a separate section vs slotting these into the grid
+    // above: the grid is for HYROX-format intent (Race / Sim /
+    // Quick Station / Compromised). Free Run and Custom
+    // Workout are open canvases — different shape, different
+    // commitment. Stacking them as wide single-row cards
+    // visually communicates that distinction.
+    //
+    // Both cards reuse the same row-level layout via
+    // `moreRow(icon:title:subtitle:action:)` for consistency.
+    private var moreSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("RUNNING").capsLabelStyle()
+            Text("MORE").capsLabelStyle()
                 .padding(.horizontal, 4)
 
-            Button {
-                isFreeRunStartSheetPresented = true
-            } label: {
-                HStack(spacing: 14) {
-                    ZStack {
-                        Circle()
-                            .fill(Color.accent.opacity(0.12))
-                            .frame(width: 44, height: 44)
-                        Image(systemName: "figure.run")
-                            .font(.system(size: 20, weight: .heavy))
-                            .foregroundStyle(Color.accent)
-                    }
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Free Run")
-                            .font(.system(size: 15, weight: .heavy, design: .rounded))
-                            .foregroundStyle(Color.textPrimary)
-                        Text("Outdoor or treadmill · no stations, no targets")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Color.textSecondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                    }
-
-                    Spacer()
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .heavy))
-                        .foregroundStyle(Color.textTertiary)
-                }
-                .padding(Layout.cardPadding)
-                .background(
-                    RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
-                        .fill(Color.surface)
+            VStack(spacing: 8) {
+                moreRow(
+                    icon: "figure.run",
+                    title: "Free Run",
+                    subtitle: "Outdoor or treadmill · no stations, no targets",
+                    action: { isFreeRunStartSheetPresented = true }
+                )
+                moreRow(
+                    icon: "dumbbell.fill",
+                    title: "Custom Workout",
+                    subtitle: "Build your own station sequence",
+                    action: { builderIntent = .custom }
                 )
             }
-            .buttonStyle(.pressableCard)
         }
+    }
+
+    // Reusable row-level card for the MORE section. Single
+    // horizontal layout — icon in a 44pt halo on the left,
+    // title + subtitle in the middle, trailing chevron.
+    // pressableCard button style gives the same press feedback
+    // the action-grid cards above use.
+    private func moreRow(
+        icon: String,
+        title: String,
+        subtitle: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(Color.accent.opacity(0.12))
+                        .frame(width: 44, height: 44)
+                    Image(systemName: icon)
+                        .font(.system(size: 20, weight: .heavy))
+                        .foregroundStyle(Color.accent)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 15, weight: .heavy, design: .rounded))
+                        .foregroundStyle(Color.textPrimary)
+                    Text(subtitle)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.textSecondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .heavy))
+                    .foregroundStyle(Color.textTertiary)
+            }
+            .padding(Layout.cardPadding)
+            .background(
+                RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
+                    .fill(Color.surface)
+            )
+        }
+        .buttonStyle(.pressableCard)
     }
 
     private func actionCard(

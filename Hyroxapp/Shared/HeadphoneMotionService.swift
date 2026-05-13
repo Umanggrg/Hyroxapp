@@ -63,6 +63,24 @@ final class HeadphoneMotionService {
     /// don't have motion sensors (AirPods 2/3 non-Pro).
     private(set) var isStreaming: Bool = false
 
+    /// §19 Phase 10I — live vertical oscillation in
+    /// centimeters per step, rolling-averaged over the last 8
+    /// steps. Computed from peak-to-trough Z-axis
+    /// acceleration amplitude during each step cycle. Stryd /
+    /// Garmin Forerunner expose this as a "running economy"
+    /// metric — lower is more efficient (elite runners ~6-8
+    /// cm; recreational 10-14 cm). Nil while the rolling
+    /// buffer fills (first ~4 steps) or when no steps in the
+    /// last 3s.
+    ///
+    /// v1 approximation: scales peak-to-trough Z accel
+    /// (in g-units) by an 8x heuristic constant clamped 3-20cm.
+    /// True bounce-height integration would require flight-
+    /// time detection (ground contact time); shipping the
+    /// proxy first and tightening the math when GCT lands
+    /// (10K).
+    private(set) var currentVerticalOscillationCm: Double?
+
     // MARK: - Internal state
 
     #if canImport(CoreMotion)
@@ -76,6 +94,27 @@ final class HeadphoneMotionService {
     private var stepTimestamps: [Date] = []
     private var lastZ: Double = 0
     private var crossedNegative: Bool = false
+
+    /// §19 Phase 10I — per-step peak-to-trough Z amplitudes in
+    /// g-units, captured during each step cycle. Trailing
+    /// 8 used for currentVerticalOscillationCm rolling avg.
+    private var stepAmplitudes: [Double] = []
+
+    /// Running min/max Z during the current step cycle (between
+    /// negative-cross and positive-cross). Reset on each step
+    /// registration so the next cycle's amplitude is measured
+    /// independently.
+    private var currentCycleZMin: Double = 0
+    private var currentCycleZMax: Double = 0
+
+    /// §19 Phase 10J — periodic snapshots of head pitch (in
+    /// radians) recorded during a race. Used after-the-fact
+    /// to compute first-half vs second-half mean pitch delta
+    /// → posture drift fatigue insight. One sample per second
+    /// is plenty (head pitch changes over minutes, not Hz).
+    private var pitchSamples: [(timestamp: Date, pitch: Double)] = []
+    private var lastPitchSampleAt: Date = .distantPast
+    private static let pitchSampleInterval: TimeInterval = 1.0
 
     /// Per-step minimum interval — caps the cadence at 240
     /// spm, which is 60 / (250ms). Anything faster is signal
@@ -128,9 +167,15 @@ final class HeadphoneMotionService {
         }
 
         stepTimestamps.removeAll()
+        stepAmplitudes.removeAll()
+        pitchSamples.removeAll()
+        currentCycleZMin = 0
+        currentCycleZMax = 0
+        lastPitchSampleAt = .distantPast
         lastZ = 0
         crossedNegative = false
         currentCadenceSPM = nil
+        currentVerticalOscillationCm = nil
 
         manager.startDeviceMotionUpdates(to: .main) { [weak self] motion, error in
             guard let self else { return }
@@ -162,6 +207,11 @@ final class HeadphoneMotionService {
 
     /// Tear down the head-motion subscription and clear any
     /// derived state. Safe to call when not streaming.
+    ///
+    /// NB: `pitchSamples` is intentionally NOT cleared here —
+    /// consumers (RaceViewModel on race finish) need to query
+    /// it AFTER stop() runs. Call `flushPitchSamples()`
+    /// explicitly when the consumer is done reading.
     func stop() {
         #if canImport(CoreMotion)
         if manager.isDeviceMotionActive {
@@ -170,11 +220,38 @@ final class HeadphoneMotionService {
         #endif
         isStreaming = false
         stepTimestamps.removeAll()
+        stepAmplitudes.removeAll()
+        currentCycleZMin = 0
+        currentCycleZMax = 0
         currentCadenceSPM = nil
+        currentVerticalOscillationCm = nil
         crossedNegative = false
         lastZ = 0
         staleCheckTask?.cancel()
         staleCheckTask = nil
+    }
+
+    /// §19 Phase 10J — consume + clear the pitch sample
+    /// buffer. Called by RaceViewModel after computing the
+    /// race's posture drift; subsequent races start with a
+    /// fresh buffer. Returns the samples in their captured
+    /// order; consumers handle the first-half / second-half
+    /// split themselves.
+    func flushPitchSamples() -> [(timestamp: Date, pitch: Double)] {
+        let captured = pitchSamples
+        pitchSamples.removeAll()
+        lastPitchSampleAt = .distantPast
+        return captured
+    }
+
+    /// §19 Phase 10J — read the pitch samples without
+    /// clearing the buffer. Useful for mid-race diagnostics
+    /// or alternate consumers that don't own the buffer's
+    /// lifecycle. RaceViewModel uses `flushPitchSamples()`
+    /// instead so a finished race's data doesn't bleed into
+    /// the next one.
+    func peekPitchSamples() -> [(timestamp: Date, pitch: Double)] {
+        pitchSamples
     }
 
     // MARK: - Signal processing
@@ -188,6 +265,15 @@ final class HeadphoneMotionService {
         let z = motion.userAcceleration.z
         let now = Date()
 
+        // §19 Phase 10I — track running min/max Z continuously
+        // so the amplitude on each step represents the FULL
+        // peak-to-trough range over that step's cycle. min/max
+        // are reset at step-registration time (inside
+        // registerStep), so each new cycle measures
+        // independently.
+        currentCycleZMin = min(currentCycleZMin, z)
+        currentCycleZMax = max(currentCycleZMax, z)
+
         // Latch the "below negative threshold" state so we
         // only register a step on the up-stroke. Without the
         // latch, a slow walk could trigger spurious steps from
@@ -196,13 +282,36 @@ final class HeadphoneMotionService {
             crossedNegative = true
         } else if crossedNegative && z > Self.zPositiveThreshold {
             crossedNegative = false
-            registerStep(at: now)
+            // Cycle complete — pass the captured amplitude
+            // (max − min) to registerStep, which uses it to
+            // update the vertical-oscillation rolling avg
+            // AND resets the cycle's min/max for the next step.
+            let amplitude = currentCycleZMax - currentCycleZMin
+            registerStep(at: now, amplitudeG: amplitude)
         }
         lastZ = z
+
+        // §19 Phase 10J — sample head pitch at ~1Hz so we have
+        // a timeline to slice for first-half / second-half
+        // posture drift analysis at race finish. Storing the
+        // raw radians value; consumers convert to degrees in
+        // the analysis path. Pitch axis convention: positive =
+        // head tilted forward (chin to chest), which is the
+        // direction fatigued runners' heads drift.
+        if now.timeIntervalSince(lastPitchSampleAt) >= Self.pitchSampleInterval {
+            lastPitchSampleAt = now
+            pitchSamples.append((now, motion.attitude.pitch))
+            // Cap the buffer at 10,000 samples (≈ 2.7 hours at
+            // 1 sample/sec). HYROX races top out around 1.5h,
+            // so this is well above the worst-case race length.
+            if pitchSamples.count > 10_000 {
+                pitchSamples.removeFirst(pitchSamples.count - 10_000)
+            }
+        }
     }
     #endif
 
-    private func registerStep(at timestamp: Date) {
+    private func registerStep(at timestamp: Date, amplitudeG: Double = 0) {
         // Enforce minimum step interval to suppress double-
         // detects on the same impact's recovery curve.
         if let last = stepTimestamps.last,
@@ -217,7 +326,50 @@ final class HeadphoneMotionService {
             stepTimestamps.removeFirst(stepTimestamps.count - 16)
         }
 
+        // §19 Phase 10I — record the step's peak-to-trough
+        // Z amplitude. Same trailing 16 buffer cap;
+        // currentVerticalOscillationCm reads from the latest 8.
+        if amplitudeG > 0 {
+            stepAmplitudes.append(amplitudeG)
+            if stepAmplitudes.count > 16 {
+                stepAmplitudes.removeFirst(stepAmplitudes.count - 16)
+            }
+        }
+
+        // Reset the cycle's min/max so the next step measures
+        // its full peak-to-trough range without bleeding in
+        // values from the previous cycle. lastZ is the most
+        // recent sample, so seed both to it — the next
+        // processMotion call will widen the range from there.
+        currentCycleZMin = lastZ
+        currentCycleZMax = lastZ
+
         updateCadenceFromBuffer()
+        updateVerticalOscillationFromBuffer()
+    }
+
+    // §19 Phase 10I — convert step amplitude (g-units) to
+    // approximate vertical oscillation (cm). Heuristic v1:
+    // multiply by 8 (so a 1g amplitude reads as ~8cm), clamp
+    // to the plausible runner band (3-20cm). Future v2:
+    // proper integration once ground-contact-time (10K) lands
+    // so flight phase can be isolated.
+    private static let amplitudeToCm: Double = 8.0
+    private static let minOscillationCm: Double = 3.0
+    private static let maxOscillationCm: Double = 20.0
+
+    private func updateVerticalOscillationFromBuffer() {
+        // Need at least 4 amplitude samples before publishing
+        // — matches the cadence buffer's warmup gate.
+        guard stepAmplitudes.count >= 4 else {
+            currentVerticalOscillationCm = nil
+            return
+        }
+        let window = stepAmplitudes.suffix(8)
+        let avg = window.reduce(0, +) / Double(window.count)
+        let cm = avg * Self.amplitudeToCm
+        let clamped = max(Self.minOscillationCm, min(Self.maxOscillationCm, cm))
+        currentVerticalOscillationCm = clamped
     }
 
     private func updateCadenceFromBuffer() {
@@ -255,6 +407,10 @@ final class HeadphoneMotionService {
         let age = Date().timeIntervalSince(last)
         if age > Self.staleStepThreshold {
             currentCadenceSPM = nil
+            // §19 Phase 10I — also clear oscillation; same
+            // semantics ("no fresh steps" → no published
+            // metric).
+            currentVerticalOscillationCm = nil
         }
     }
 }

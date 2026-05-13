@@ -55,6 +55,13 @@ struct SerializedSplit: Codable, Sendable, Equatable {
     // Transition (roxzone) seconds attributed to this segment.
     let roxzoneSeconds: TimeInterval?
 
+    // §19 Phase 10I — per-segment average vertical oscillation
+    // (cm/step) from AirPods Pro 1+ head motion. Runs only;
+    // workout splits leave this nil. Sent across the duo wire
+    // so the guest's RaceDetail Running Economy section reads
+    // the same per-segment number as the host's.
+    let verticalOscCmAvg: Double?
+
     init(from split: Split) {
         self.stationRaw = split.station.rawValue
         self.startedAt = split.startedAt
@@ -68,6 +75,7 @@ struct SerializedSplit: Codable, Sendable, Equatable {
         self.repsCompleted = split.repsCompleted
         self.rpe = split.rpe
         self.roxzoneSeconds = split.roxzoneSeconds
+        self.verticalOscCmAvg = split.verticalOscCmAvg
     }
 
     // Round-trip back to a `Split`. Returns nil for an unknown
@@ -78,7 +86,7 @@ struct SerializedSplit: Codable, Sendable, Equatable {
     // gaps.
     func toSplit() -> Split? {
         guard let station = Station(rawValue: stationRaw) else { return nil }
-        return Split(
+        let split = Split(
             station: station,
             startedAt: startedAt,
             endedAt: endedAt,
@@ -92,5 +100,11 @@ struct SerializedSplit: Codable, Sendable, Equatable {
             rpe: rpe,
             roxzoneSeconds: roxzoneSeconds
         )
+        // §19 Phase 10I — verticalOscCmAvg is the only mutable
+        // field on Split (declared `var` for direct stamping
+        // from RaceViewModel); reinstating it post-init is the
+        // same pattern.
+        split.verticalOscCmAvg = verticalOscCmAvg
+        return split
     }
 }

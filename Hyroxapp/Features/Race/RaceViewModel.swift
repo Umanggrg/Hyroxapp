@@ -809,6 +809,21 @@ final class RaceViewModel {
     // Guarded `#if canImport(HealthKit)` so macOS builds — which lack
     // HealthKit — compile without the query path at all.
     private func attachSegmentStats(to index: Int) {
+        // §19 Phase 10I — synchronously stamp the current
+        // vertical-oscillation rolling avg onto the just-ended
+        // split when it's a run segment. Done BEFORE the
+        // async HK task below so the snapshot is taken at
+        // segment-end time, before the rolling avg drifts
+        // into the next segment's motion pattern. Split's
+        // HR-stats builders (withSegmentStats, withRecovery
+        // Stats, etc.) preserve verticalOscCmAvg through
+        // subsequent patches.
+        if engine.splits.indices.contains(index),
+           engine.splits[index].station.kind == .run,
+           let osc = HeadphoneMotionService.shared.currentVerticalOscillationCm {
+            engine.splits[index].verticalOscCmAvg = osc
+        }
+
         #if canImport(HealthKit)
         // Read the segment bounds on the current actor before hopping
         // into the async Task — avoids capturing mutable engine state

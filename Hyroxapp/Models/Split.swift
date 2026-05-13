@@ -97,6 +97,29 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
     // missing key gracefully).
     let activeCaloriesKcal: Double?
 
+    // §19 Phase 10I — average vertical oscillation (cm/step)
+    // captured during this segment, derived from AirPods Pro
+    // 1+ head motion via HeadphoneMotionService. Running-
+    // economy metric: lower = more efficient (elite ~6-8cm,
+    // recreational 10-14cm). Only meaningful on run-kind
+    // splits — workout-kind splits leave this nil because
+    // the head motion during sled push / wall balls /
+    // burpees has no cadence structure to derive osc from.
+    //
+    // Optional because:
+    //   • AirPods Pro 1+ / 4 / Max not in route (most users)
+    //   • Workout-kind split — N/A
+    //   • Older races persisted before this field existed
+    //     (Codable lightweight migration → nil)
+    //
+    // Marked `var` (vs the surrounding `let`) so RaceViewModel
+    // can stamp it on segment advance without threading a new
+    // parameter through every Split builder (withSegmentStats,
+    // withRecoveryStats, withStationStats, withRoxzone). Single
+    // mutation point keeps the diff small; future v2 could
+    // formalize via a withRunningEconomy builder.
+    var verticalOscCmAvg: Double? = nil
+
     // HYROX-specific manual-entry stats. The killer feature
     // every other HYROX app misses: a sled push at 80kg and a
     // sled push at 152kg are different universes; without
@@ -168,6 +191,11 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
         case repsCompleted
         case rpe
         case roxzoneSeconds
+        // §19 Phase 10I — added late in the schema lifecycle.
+        // Default-nil declaration means old payloads decode
+        // cleanly via Codable synthesizer's decodeIfPresent
+        // path; new payloads include the key.
+        case verticalOscCmAvg
     }
 
     // Convenience initializer preserving the pre-HR API so all existing
@@ -229,7 +257,7 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
         lowestSpO2: Double? = nil,
         activeCalories: Double?
     ) -> Split {
-        Split(
+        let newSplit = Split(
             station: station,
             startedAt: startedAt,
             endedAt: endedAt,
@@ -247,6 +275,13 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
             rpe: rpe,
             roxzoneSeconds: roxzoneSeconds
         )
+        // §19 Phase 10I — preserve the existing osc value
+        // through HK-stats patches. Split's init doesn't take
+        // verticalOscCmAvg (single mutation point); the
+        // builders restore it after init so HR-stats updates
+        // don't wipe the running-economy reading.
+        newSplit.verticalOscCmAvg = verticalOscCmAvg
+        return newSplit
     }
 
     // Return a new Split patched with post-segment recovery HR
@@ -262,7 +297,7 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
         heartRateRecovery30s: Double?,
         heartRateRecovery60s: Double?
     ) -> Split {
-        Split(
+        let newSplit = Split(
             station: station,
             startedAt: startedAt,
             endedAt: endedAt,
@@ -280,6 +315,8 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
             rpe: rpe,
             roxzoneSeconds: roxzoneSeconds
         )
+        newSplit.verticalOscCmAvg = verticalOscCmAvg
+        return newSplit
     }
 
     // Return a new Split with manual-entry station stats (weight,
@@ -295,7 +332,7 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
         repsCompleted newReps: Int?? = nil,
         rpe newRPE: Int?? = nil
     ) -> Split {
-        Split(
+        let newSplit = Split(
             station: station,
             startedAt: startedAt,
             endedAt: endedAt,
@@ -313,13 +350,15 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
             rpe: newRPE ?? rpe,
             roxzoneSeconds: roxzoneSeconds
         )
+        newSplit.verticalOscCmAvg = verticalOscCmAvg
+        return newSplit
     }
 
     // Builder for the engine's roxzone-close path. Sets the
     // transition time spent before this segment's work began.
     // Other fields preserved.
     func withRoxzone(seconds: TimeInterval) -> Split {
-        Split(
+        let newSplit = Split(
             station: station,
             startedAt: startedAt,
             endedAt: endedAt,
@@ -337,5 +376,7 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
             rpe: rpe,
             roxzoneSeconds: seconds
         )
+        newSplit.verticalOscCmAvg = verticalOscCmAvg
+        return newSplit
     }
 }
