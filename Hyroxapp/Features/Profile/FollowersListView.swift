@@ -124,6 +124,29 @@ struct FollowersListView: View {
             else { return }
             applyFollowBroadcast(userID: targetID, isFollowing: isFollowing)
         }
+        // §16 — Realtime invalidation. When the FollowSyncService
+        // bumps the relevant token (someone followed/unfollowed
+        // us, or vice versa), reload the list. The two tokens
+        // are tracked separately so the followers view doesn't
+        // re-fetch on outgoing-follow churn and vice versa.
+        // Local optimistic updates (tap-Follow on a row in this
+        // list) flow through the .followStateChanged path
+        // above and don't trigger a refetch — Realtime is only
+        // for state we DIDN'T initiate.
+        .onChange(of: relevantRealtimeToken) { _, _ in
+            Task { await load() }
+        }
+    }
+
+    // §16 — token to watch for Realtime invalidations, picked
+    // based on which list this view is showing. Followers list
+    // watches incoming-follow changes; Following list watches
+    // outgoing-follow changes.
+    private var relevantRealtimeToken: Int {
+        switch kind {
+        case .followers: return FollowSyncService.shared.followerChangeToken
+        case .following: return FollowSyncService.shared.followingChangeToken
+        }
     }
 
     // MARK: - Load

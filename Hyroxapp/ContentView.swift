@@ -490,6 +490,17 @@ struct ContentView: View {
                     userID: userID,
                     modelContext: context
                 )
+                // §16 — open the Realtime follow-sync subscription.
+                // Idempotent — re-firing on a subsequent bootstrap
+                // (after the auth gate swaps Sign-in → Content)
+                // is a no-op if the user_id hasn't changed. The
+                // service stops itself on auth-state change via
+                // the signed-out path: AuthService.signOut clears
+                // user; the auth gate then re-renders SignInView
+                // and ContentView's bootstrap doesn't fire again.
+                // Explicit stop on signout is wired alongside
+                // signOut() in AuthService.
+                await FollowSyncService.shared.start(forUserID: userID)
             }
         }
         #endif

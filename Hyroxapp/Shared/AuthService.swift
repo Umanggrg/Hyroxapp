@@ -166,6 +166,12 @@ final class AuthService: NSObject {
     // app's auth gate flips back to the sign-in screen.
     func signOut() {
         Task { @MainActor in
+            // §16 — tear down the Realtime follow-sync
+            // subscription BEFORE clearing the Supabase session.
+            // The channel topic includes the user_id so a
+            // stale subscription after signout would still be
+            // routing events from a since-cleared session.
+            await FollowSyncService.shared.stop()
             try? await SupabaseService.shared.auth.signOut()
             self.user = nil
         }

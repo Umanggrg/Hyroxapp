@@ -347,6 +347,21 @@ struct ProfileView: View {
                 prepareProfileShareImage()
                 refreshFollowCounts()
             }
+            // §16 — Realtime invalidation. When another user
+            // follows / unfollows us, FollowSyncService bumps
+            // followerChangeToken; refresh the counts so the
+            // ProfileHero's "12 followers" stays current
+            // without a pull-to-refresh. Same trick for
+            // followingChangeToken in case the user has
+            // multiple devices and an unfollow happened
+            // elsewhere — the count on this device stays
+            // honest.
+            .onChange(of: FollowSyncService.shared.followerChangeToken) { _, _ in
+                refreshFollowCounts()
+            }
+            .onChange(of: FollowSyncService.shared.followingChangeToken) { _, _ in
+                refreshFollowCounts()
+            }
             // Cross-surface sync: when a FollowButton anywhere
             // in the app (public profile sheet, followers /
             // following list row, future feed kudos surface)
