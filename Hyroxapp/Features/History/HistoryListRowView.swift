@@ -80,6 +80,19 @@ struct HistoryListRowView: View {
                 Text(descriptor.subtitleCaps)
                     .capsLabelStyle()
 
+                // §14 — RaceKind tag. Sits first among the row
+                // markers because it answers the most-fundamental
+                // question ("what kind of session is this?")
+                // before any partial / health-import metadata.
+                // Tinted-fill instead of outlined-neutral so the
+                // SIM / Q / T pop visually — these aren't
+                // informational asides like PARTIAL, they're the
+                // row's primary kind signal.
+                if let label = descriptor.kindBadgeLabel,
+                   let tint = descriptor.kindBadgeTint {
+                    rowKindTag(label: label, tint: tint)
+                }
+
                 if descriptor.isPartial {
                     rowTag(label: "PARTIAL", tint: Color.textTertiary, border: Color.divider)
                 }
@@ -105,6 +118,22 @@ struct HistoryListRowView: View {
             .background(
                 Capsule()
                     .stroke(border, lineWidth: 0.8)
+            )
+    }
+
+    // §14 — solid-fill version for the RaceKind tag. Different
+    // visual weight from `rowTag` because kind is the row's
+    // primary categorization, not a side note. Same tracking +
+    // size so the row's tag rhythm stays consistent.
+    private func rowKindTag(label: String, tint: Color) -> some View {
+        Text(label)
+            .font(.system(size: 8, weight: .heavy))
+            .tracking(0.6)
+            .foregroundStyle(tint)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(
+                Capsule().fill(tint.opacity(0.16))
             )
     }
 
@@ -172,6 +201,16 @@ struct HistoryRowDescriptor: Identifiable, Hashable {
     //     metadata is thinner than a native row.
     let isPartial: Bool
     let isImportedFromHealth: Bool
+
+    // §14 — short kind badge ("SIM" / "Q" / "T") and its tint.
+    // Nil when the row is a default `.race` kind — the row's
+    // subtitleCaps already says "FULL · 16 STATIONS" or similar
+    // in that case, so a redundant RACE badge would be noise.
+    // FreeRun rows also leave this nil (they have their own
+    // subtitle vocabulary). Populated only for non-default
+    // RaceKind values via the parent feed assembly.
+    let kindBadgeLabel: String?
+    let kindBadgeTint: Color?
 
     // Day-of-week label for the badge ("SUN", "WED", "MON").
     var dayOfWeekLabel: String {

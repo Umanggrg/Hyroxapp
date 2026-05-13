@@ -223,6 +223,25 @@ final class Race {
     // mid-race) rather than just the last one.
     var hrSourcePrimary: String?
 
+    // §14 — what kind of session this Race represents.
+    // Stored as a raw string so SwiftData's additive-schema
+    // migration accepts it cleanly: pre-existing rows decode
+    // as the empty string, which the `kind` accessor below
+    // maps to `.race` (the only kind that existed before this
+    // field landed). Direct mutation is fine — RaceViewModel
+    // sets this at race-start time based on which Train-hub
+    // card the athlete tapped.
+    //
+    // Note: the field is stored separately from `name` even
+    // though both are athlete-facing categorizations because
+    // they answer different questions: `name` is "what did I
+    // call this session?" (free-form), `kindRaw` is "what
+    // type of session is this?" (constrained enum). Keeping
+    // them separate means History can filter by kind without
+    // doing string-search on name, and a kind badge stays
+    // present even when the athlete leaves name empty.
+    var kindRaw: String = ""
+
     // §19.4 Phase 10J — posture drift across the race, in
     // degrees of forward head pitch. Positive = head tilted
     // further forward in the second half vs the first half
@@ -389,6 +408,25 @@ final class Race {
     // Maximum cap of 5 tags per race — beyond that the UX gets
     // cluttered and the categorization stops being meaningful.
     // Setter trims to 5 silently; UI should also gate at 5.
+    // §14 — typed view onto the `kindRaw` field. Empty string
+    // (the SwiftData additive-migration default for pre-existing
+    // rows that don't carry a kind value) maps to `.race` so
+    // every old row continues to read as a full Race Mode
+    // session — which is what they were when the schema field
+    // didn't exist yet.
+    //
+    // Always set through this accessor; don't touch kindRaw
+    // directly outside the model so the rawValue contract stays
+    // in one place.
+    var kind: RaceKind {
+        get {
+            RaceKind(rawValue: kindRaw) ?? .race
+        }
+        set {
+            kindRaw = newValue.rawValue
+        }
+    }
+
     var tags: [String] {
         get {
             tagsRaw

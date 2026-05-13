@@ -563,18 +563,32 @@ enum HistoryFilter: Int, CaseIterable, Identifiable, Hashable {
     // their duo races (to see partner history at a glance).
     case soloOnly
     case duoOnly
+    // §14 — kind-based filters. Distinct from `customWorkouts`
+    // (which compares the station sequence against the canonical
+    // 16-segment HYROX); these match against the explicit
+    // RaceKind tag set at Train hub start time. Athletes can mix
+    // these (e.g. "show me my simulations") with the existing
+    // tag filter row at the bottom of the filter strip.
+    case racesOnly
+    case simulationsOnly
+    case quickStationsOnly
+    case trainingOnly
 
     var id: Int { rawValue }
 
     var displayName: String {
         switch self {
-        case .all:             return "All"
-        case .thisMonth:       return "This Month"
-        case .pbsOnly:         return "PBs Only"
-        case .customWorkouts:  return "Custom"
-        case .withPhoto:       return "With Photo"
-        case .soloOnly:        return "Solo"
-        case .duoOnly:         return "Duo"
+        case .all:                return "All"
+        case .thisMonth:          return "This Month"
+        case .pbsOnly:            return "PBs Only"
+        case .customWorkouts:     return "Custom"
+        case .withPhoto:          return "With Photo"
+        case .soloOnly:           return "Solo"
+        case .duoOnly:            return "Duo"
+        case .racesOnly:          return "Races"
+        case .simulationsOnly:    return "Simulations"
+        case .quickStationsOnly:  return "Quick Stations"
+        case .trainingOnly:       return "Training"
         }
     }
 
@@ -603,6 +617,14 @@ enum HistoryFilter: Int, CaseIterable, Identifiable, Hashable {
             return race.mode == .solo
         case .duoOnly:
             return race.mode == .duo
+        case .racesOnly:
+            return race.kind == .race
+        case .simulationsOnly:
+            return race.kind == .simulation
+        case .quickStationsOnly:
+            return race.kind == .quickStation
+        case .trainingOnly:
+            return race.kind == .training
         }
     }
 }

@@ -293,6 +293,17 @@ struct RaceCardView: View {
                     .font(.metadata)
                     .foregroundStyle(Color.textSecondary)
 
+                // §14 — RaceKind badge. Renders SIM / Q / T when the
+                // race is a non-default kind so the History feed can
+                // be parsed at a glance ("which of these is a real
+                // race vs a quick drill?"). Hidden for `.race` (every
+                // legacy row IS a race; adding a badge there would
+                // be visual noise). Sits above the PRIVATE chip when
+                // both apply.
+                if let badge = race.kind.shortBadge {
+                    kindBadge(text: badge, tint: race.kind.badgeColor)
+                }
+
                 // Private indicator — small lock icon when this race is
                 // flagged private. Forward-compatible with the v1 social
                 // feed: athletes scanning their own History at a glance
@@ -426,6 +437,25 @@ struct RaceCardView: View {
                 .foregroundStyle(Color.textSecondary)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    // §14 — small kind badge rendered in the header trailing
+    // column when the race is a non-default kind (SIM / Q / T).
+    // Inline helper rather than its own view file because the
+    // markup is small + tightly coupled to RaceCardView's
+    // layout idiom. Matches the visual weight of the PRIVATE
+    // chip below it so the trailing column reads as a stack
+    // of small metadata pills.
+    private func kindBadge(text: String, tint: Color) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .heavy))
+            .tracking(0.6)
+            .foregroundStyle(tint)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                Capsule().fill(tint.opacity(0.16))
+            )
     }
 
     private var pbBadge: some View {

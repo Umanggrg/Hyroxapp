@@ -16,6 +16,16 @@ import Auth
 struct RaceStartView: View {
     let viewModel: RaceViewModel
 
+    // §14 — the RaceKind tag to apply to the race when it starts.
+    // Driven by which Train hub card pushed us here:
+    //   • Race Mode card → .race (default)
+    //   • Race Simulation card → .simulation
+    // Plumbed through to RaceViewModel.startRaceWithCountdown at
+    // start-tap time so History can render the correct badge.
+    // Defaults to .race so any direct programmatic instantiation
+    // (preview / future deep link / etc) keeps existing semantics.
+    var kind: RaceKind = .race
+
     // Duo state owned by the parent RaceView. Bindings rather than
     // local @State because the coordinator + controller need to
     // outlive RaceStartView's lifetime — a duo race continues after
@@ -230,7 +240,15 @@ struct RaceStartView: View {
                         targetDuration: targetDuration,
                         countdownEnabled: countdownEnabled,
                         defaultPrivate: defaultRacePrivate,
-                        liveActivityEnabled: liveActivityEnabled
+                        liveActivityEnabled: liveActivityEnabled,
+                        // The legacy in-RaceStartView builder is
+                        // reached only when the athlete picks
+                        // Custom Workout from inside the start
+                        // screen (not from the Train hub MORE
+                        // section). Both flows hit a custom
+                        // sequence not the canonical HYROX one,
+                        // so .training is the right kind.
+                        kind: .training
                     )
                 },
                 onStartFreeRun: { locationType, splitUnit in
@@ -470,7 +488,14 @@ struct RaceStartView: View {
                 targetDuration: targetDuration,
                 countdownEnabled: countdownEnabled,
                 defaultPrivate: defaultRacePrivate,
-                liveActivityEnabled: liveActivityEnabled
+                liveActivityEnabled: liveActivityEnabled,
+                // §14 — pass through the kind set by whichever
+                // Train hub card pushed us here (.race or
+                // .simulation). The primary CTA is the host's
+                // path for the full 16-segment sequence; the
+                // custom-workout sheet has its own startRace call
+                // above that always tags .training.
+                kind: kind
             )
         } label: {
             HStack(spacing: 10) {

@@ -120,6 +120,16 @@ struct TrainHubView: View {
         }
     }
 
+    // §14 — map a builder entry point to its RaceKind so the
+    // resulting Race row gets the right History badge.
+    static func raceKind(forIntent intent: BuilderIntent) -> RaceKind {
+        switch intent {
+        case .quickStation: return .quickStation
+        case .compromised:  return .training
+        case .custom:       return .training
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -141,13 +151,15 @@ struct TrainHubView: View {
                 .padding(.bottom, 24)
             }
             .background(Color.background.ignoresSafeArea())
-            .navigationDestination(item: $pushedRaceStart) { _ in
+            .navigationDestination(item: $pushedRaceStart) { intent in
                 // Both .race and .simulation push the same
-                // RaceStartView. The intent enum is forward-compat
-                // for when we want to preset the simulation flag
-                // here (drives Race.kind = .simulation on start).
+                // RaceStartView; the difference is the kind tag
+                // we hand it so the resulting Race row carries
+                // the right RaceKind and History renders the
+                // SIM badge on simulation entries.
                 RaceStartView(
                     viewModel: viewModel,
+                    kind: intent == .simulation ? .simulation : .race,
                     selectedMode: $selectedMode,
                     duoCoordinator: $duoCoordinator,
                     cloudDuoCoordinator: $cloudDuoCoordinator,
@@ -166,7 +178,16 @@ struct TrainHubView: View {
                             targetDuration: nil,
                             countdownEnabled: countdownEnabled,
                             defaultPrivate: defaultRacePrivate,
-                            liveActivityEnabled: liveActivityEnabled
+                            liveActivityEnabled: liveActivityEnabled,
+                            // §14 — map BuilderIntent to RaceKind so
+                            // the resulting Race row carries the
+                            // right History badge. Quick Station is
+                            // its own kind; Compromised + Custom are
+                            // multi-segment training sessions, both
+                            // tagged .training (athletes typically
+                            // think of them as the same category of
+                            // work — varied structured sequences).
+                            kind: Self.raceKind(forIntent: intent)
                         )
                         builderIntent = nil
                     }

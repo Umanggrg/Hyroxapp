@@ -125,7 +125,15 @@ struct HistoryListMode: View {
             pbDeltaLabel: pbDelta,
             isFullRace: isFullRace && !isPartial,
             isPartial: isPartial,
-            isImportedFromHealth: race.importedFromHealth
+            isImportedFromHealth: race.importedFromHealth,
+            // §14 — non-default RaceKind surfaces as a coloured
+            // pill ("SIM" / "Q" / "T") on the list row. The
+            // shortBadge accessor returns nil for `.race` which
+            // suppresses the pill (default kind doesn't need a
+            // marker; the subtitle line already conveys "full
+            // 16-station HYROX" via "FULL · 16 STATIONS").
+            kindBadgeLabel: race.kind.shortBadge,
+            kindBadgeTint: race.kind.shortBadge != nil ? race.kind.badgeColor : nil
         )
     }
 
@@ -154,7 +162,13 @@ struct HistoryListMode: View {
             pbDeltaLabel: nil,  // free runs don't surface PB delta here
             isFullRace: false,
             isPartial: false,           // free runs aren't "partial"
-            isImportedFromHealth: false // free runs aren't currently imported
+            isImportedFromHealth: false, // free runs aren't currently imported
+            // FreeRun rows have their own subtitle vocabulary
+            // (distance "5.2 KM"); a kind badge would be
+            // redundant. Set both nil so the row's kind-tag
+            // branch silently no-ops.
+            kindBadgeLabel: nil,
+            kindBadgeTint: nil
         )
     }
 

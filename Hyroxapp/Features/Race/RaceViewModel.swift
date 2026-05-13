@@ -81,6 +81,14 @@ final class RaceViewModel {
     private(set) var countdownValue: Int?
     private var countdownTask: Task<Void, Never>?
 
+    // §14 — the RaceKind requested for the race currently being
+    // counted down toward. Captured at startRaceWithCountdown
+    // time so the tap-to-skip affordance (which can be invoked
+    // from RaceView's overlay without knowing the original kind
+    // call site's params) restores it correctly. Cleared once
+    // the race actually starts.
+    private var pendingKind: RaceKind = .race
+
     var isCountingDown: Bool { countdownValue != nil }
 
     // How often we poll HealthKit for current HR during a race. The
@@ -487,16 +495,25 @@ final class RaceViewModel {
         targetDuration: TimeInterval? = nil,
         countdownEnabled: Bool,
         defaultPrivate: Bool = false,
-        liveActivityEnabled: Bool = true
+        liveActivityEnabled: Bool = true,
+        kind: RaceKind = .race
     ) {
         guard !isCountingDown, !isRacing else { return }
+
+        // §14 — capture kind so the skip-tap path (which can be
+        // invoked from RaceView's overlay without re-passing the
+        // params) preserves it. Set BEFORE the no-countdown short-
+        // circuit so even direct startRace fallthroughs see it.
+        // Cleared at race start by startRace itself.
+        pendingKind = kind
 
         guard countdownEnabled else {
             startRace(
                 sequence: sequence,
                 targetDuration: targetDuration,
                 defaultPrivate: defaultPrivate,
-                liveActivityEnabled: liveActivityEnabled
+                liveActivityEnabled: liveActivityEnabled,
+                kind: kind
             )
             return
         }
@@ -525,7 +542,8 @@ final class RaceViewModel {
                 sequence: sequence,
                 targetDuration: targetDuration,
                 defaultPrivate: defaultPrivate,
-                liveActivityEnabled: liveActivityEnabled
+                liveActivityEnabled: liveActivityEnabled,
+                kind: kind
             )
         }
     }
@@ -545,17 +563,24 @@ final class RaceViewModel {
         sequence: [Station] = Station.raceSequence,
         targetDuration: TimeInterval? = nil,
         defaultPrivate: Bool = false,
-        liveActivityEnabled: Bool = true
+        liveActivityEnabled: Bool = true,
+        kind: RaceKind? = nil
     ) {
         guard isCountingDown else { return }
         countdownTask?.cancel()
         countdownTask = nil
         countdownValue = nil
+        // §14 — prefer the kind passed by the caller (RaceStartView
+        // knows what it requested), fall back to the kind stashed
+        // by `startRaceWithCountdown` (RaceView's overlay skip tap
+        // doesn't carry the kind explicitly). Default `.race`
+        // only when both are absent.
         startRace(
             sequence: sequence,
             targetDuration: targetDuration,
             defaultPrivate: defaultPrivate,
-            liveActivityEnabled: liveActivityEnabled
+            liveActivityEnabled: liveActivityEnabled,
+            kind: kind ?? pendingKind
         )
     }
 
@@ -563,7 +588,8 @@ final class RaceViewModel {
         sequence: [Station] = Station.raceSequence,
         targetDuration: TimeInterval? = nil,
         defaultPrivate: Bool = false,
-        liveActivityEnabled: Bool = true
+        liveActivityEnabled: Bool = true,
+        kind: RaceKind = .race
     ) {
         guard !sequence.isEmpty else { return }
 
@@ -583,6 +609,16 @@ final class RaceViewModel {
         // doesn't take isPrivate as a param to keep that signature
         // tight; setting it post-init is equivalent.
         race.isPrivate = defaultPrivate
+        // §14 — categorize the race based on which Train hub card
+        // the athlete tapped. Default `.race` covers the Race Mode
+        // path + any legacy call sites that haven't been updated.
+        race.kind = kind
+        // Clear the pendingKind stash — the race has started, so
+        // any future startRaceWithCountdown call will re-set this
+        // afresh. (Defensive: a stale value here can't hurt since
+        // it's only consulted by skipCountdown which is gated on
+        // isCountingDown, but cleaner state is cleaner state.)
+        pendingKind = .race
         modelContext?.insert(race)
         activeRace = race
         saveContextSilently()
