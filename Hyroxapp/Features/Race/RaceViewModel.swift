@@ -638,6 +638,12 @@ final class RaceViewModel {
         let wasInProgress = !engine.isFinished
         let endedAt = Date()
         engine.endSegment(at: endedAt)
+        // §13.8 Tier 2 — same advance-time rep stamp as `advance()`.
+        // endSegment is the roxzone-mode counterpart that closes a
+        // station before the transition timer starts. Either path
+        // appends the same Split shape; rep counting needs to fire
+        // on both.
+        stampLatestRepCountOnJustClosedSplit()
         let newSplitIndex = engine.splits.count - 1
         persistActiveRace()
 
@@ -719,6 +725,15 @@ final class RaceViewModel {
         let wasFinished = engine.isFinished
         let advancedAt = Date()
         engine.advance(at: advancedAt)
+        // §13.8 Tier 2 — stamp the latest Watch rep count onto the
+        // just-closed Split if its station matches. Has to run
+        // BEFORE persistActiveRace so the SwiftData write captures
+        // the rep count alongside everything else the persist
+        // mirrors. The method handles the manual-override case
+        // (doesn't clobber a user-typed value) and clears
+        // latestWatchRepUpdate so a stale value doesn't bleed
+        // into a future advance.
+        stampLatestRepCountOnJustClosedSplit()
         // Capture the index of the split that `engine.advance` just appended
         // so the async HR patch can find and update it below. Must be read
         // before `persistActiveRace` because that's a sync write; the HR
@@ -1046,6 +1061,11 @@ final class RaceViewModel {
         let now = Date()
 
         engine.forceFinish(at: now)
+        // §13.8 Tier 2 — stamp Watch rep count onto the closing
+        // segment's Split if applicable. forceFinish appends a
+        // closing-segment Split the same way advance does, so the
+        // rep-counting stamp pattern fires identically.
+        stampLatestRepCountOnJustClosedSplit()
 
         // Mirror engine state onto the Race row using the same path
         // a natural finish takes. This stamps `endedAt` and
@@ -1257,6 +1277,127 @@ final class RaceViewModel {
     // old samples (e.g. from a previous race that somehow gets
     // replayed by the OS's WCSession layer).
     private static let watchHRStaleThreshold: TimeInterval = 90
+
+    // MARK: - Watch-sourced rep counting (§13.8 Tier 2)
+
+    // §13.8 Tier 2 — public computed view of the latest Watch
+    // rep count for SwiftUI consumption. Returns the count ONLY
+    // when the latest update's stationRaw matches the current
+    // station (otherwise it's a stale value from the last station
+    // and shouldn't render). Nil before the first update of a
+    // station OR when the athlete isn't on a rep-counting station.
+    //
+    // RaceView reads this to render the live REPS stat tile.
+    // Backed by the observable `latestWatchRepUpdate` so SwiftUI
+    // dependency tracking re-renders when it changes.
+    var currentRepCount: Int? {
+        guard let update = latestWatchRepUpdate,
+              update.stationRaw == currentStation?.rawValue
+        else { return nil }
+        return update.count
+    }
+
+    // The most recent rep count update we've accepted from the
+    // Watch's WatchRepCountingService. Holds the count for whichever
+    // station the Watch was last counting for. Used at engine.advance
+    // time to auto-fill Split.repsCompleted when the just-completed
+    // station matches `stationRaw`.
+    //
+    // Last-write-wins keyed by sampledAt — the watch publishes at
+    // ~1Hz throughout the station plus one final publish at stop()
+    // (i.e. when the station ends). The final one is usually the
+    // last value we see; if it's late and arrives after advance, it
+    // can also patch the just-finished split's repsCompleted if
+    // the field hasn't been touched manually — see
+    // `ingestRepCount` for the patching logic.
+    private var latestWatchRepUpdate: WatchRepCountUpdate?
+
+    // Most recent sampledAt we accepted — same out-of-order
+    // rejection pattern as HR sample ingest.
+    private var lastWatchRepSampleAt: Date = .distantPast
+
+    // Maximum age of a Watch rep-count sample we'll accept. Same
+    // 90s threshold as HR — covers transferUserInfo queued bursts
+    // after a pocket-cycle while still discarding genuinely stale
+    // samples from a previous race.
+    private static let watchRepStaleThreshold: TimeInterval = 90
+
+    // Receive a rep-count sample published from the Watch's
+    // WatchRepCountingService via WCSession. Wired by RaceView
+    // through `WatchCompanionService.onRepCount` for the active-
+    // race lifetime.
+    //
+    // Two side effects:
+    //   1. Update `latestWatchRepUpdate` so advance() can stamp
+    //      the just-completed Split.repsCompleted.
+    //   2. If the just-completed split (one before the current
+    //      segment) has matching stationRaw AND no manually-set
+    //      repsCompleted yet, patch it in-place — handles the
+    //      "Watch's final-publish landed after iPhone advanced"
+    //      race condition.
+    func ingestRepCount(_ update: WatchRepCountUpdate) {
+        let age = Date().timeIntervalSince(update.sampledAt)
+        guard age < Self.watchRepStaleThreshold else { return }
+        guard update.sampledAt >= lastWatchRepSampleAt else { return }
+        lastWatchRepSampleAt = update.sampledAt
+
+        latestWatchRepUpdate = update
+
+        // Catch-up patching: if a rep update arrives AFTER the
+        // athlete already advanced past the station it belongs to,
+        // the just-completed Split is at index `splits.count - 1`
+        // (engine.advance appended it). Find that split, check
+        // station rawValue + that repsCompleted is still nil
+        // (don't clobber a manual override), and patch.
+        //
+        // Walks backwards from the most-recent split. Two reasons:
+        //   • Repeats — same station can appear multiple times in
+        //     custom workouts; the most recent match is correct.
+        //   • Bound — we only need to look at recently-closed
+        //     splits, not the whole race.
+        let splits = engine.splits
+        for index in splits.indices.reversed() {
+            let split = splits[index]
+            guard split.station.rawValue == update.stationRaw else { continue }
+            // Found the most recent split with matching station.
+            // Patch only if reps are still nil (don't overwrite
+            // manual input from the athlete in StationStatsSheet).
+            if split.repsCompleted == nil {
+                engine.setStationStats(
+                    repsCompleted: .some(update.count),
+                    atSplitIndex: index
+                )
+                persistActiveRace()
+            }
+            break
+        }
+    }
+
+    // Called from `advance()` after engine.advance has appended
+    // the just-finished split. Stamps repsCompleted on that split
+    // when the latest Watch rep update matches its station and the
+    // field is still nil (manual edits via StationStatsSheet win).
+    //
+    // Separate from `ingestRepCount`'s catch-up patching so the
+    // happy-path advance (latest count is already in hand, no
+    // race condition) is fast + obvious.
+    private func stampLatestRepCountOnJustClosedSplit() {
+        guard let update = latestWatchRepUpdate else { return }
+        let index = engine.splits.count - 1
+        guard engine.splits.indices.contains(index) else { return }
+        let split = engine.splits[index]
+        guard split.station.rawValue == update.stationRaw else { return }
+        guard split.repsCompleted == nil else { return }
+        engine.setStationStats(
+            repsCompleted: .some(update.count),
+            atSplitIndex: index
+        )
+        // Clear so a stale-but-still-recent update doesn't bleed
+        // into a future advance on the same station (unlikely in
+        // HYROX's fixed sequence but possible for custom workouts
+        // that repeat a station).
+        latestWatchRepUpdate = nil
+    }
 
     // Receive a heart-rate sample published from the Watch's
     // HKLiveWorkoutBuilder via WCSession. Wired up by `RaceView` for

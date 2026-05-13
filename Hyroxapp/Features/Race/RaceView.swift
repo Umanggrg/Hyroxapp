@@ -465,6 +465,10 @@ struct RaceView: View {
         #if canImport(WatchConnectivity)
         WatchCompanionService.shared.onAction = nil
         WatchCompanionService.shared.onHeartRate = nil
+        // §13.8 Tier 2 — clear the rep count handler so a stale
+        // closure can't fire after the user navigates away from
+        // Race. Same teardown discipline as onAction / onHeartRate.
+        WatchCompanionService.shared.onRepCount = nil
         #endif
         // Cancel any in-flight speech so a stale "next: sled push"
         // doesn't fire after the user navigates away from Race.
@@ -1785,6 +1789,18 @@ struct RaceView: View {
             if isWorkout {
                 statCell(caption: "CAL", value: cumulativeCaloriesString)
                 statCell(caption: "SPLIT", value: RaceStats.format(viewModel.currentSegmentElapsed(at: now)))
+                // §13.8 Tier 2 — REPS cell appears only on rep-
+                // counting workout stations (Phase 1 = wall balls)
+                // AND only when the Watch's WatchRepCountingService
+                // has published a count. Self-hides when no Watch
+                // is paired, no rep station is active, or no count
+                // has been received yet. The cell shows the live
+                // tally so the athlete can glance at the phone
+                // (e.g. propped on the floor) and see progress
+                // without counting in their head.
+                if let count = viewModel.currentRepCount {
+                    statCellReps(count: count)
+                }
             } else {
                 statCell(caption: "DIST", value: cumulativeDistanceString(now: now))
                 statCell(caption: "CAL", value: cumulativeCaloriesString)
@@ -1793,6 +1809,33 @@ struct RaceView: View {
                 }
             }
         }
+    }
+
+    // §13.8 Tier 2 — live rep count cell. Caps "REPS" label +
+    // watch glyph above the big rounded count number below. Mirrors
+    // the cadence cell's structure since they're sibling sensor-
+    // sourced metrics. Watch glyph signals "this came from your
+    // wrist," distinguishing it from the eventual manual-edit
+    // path in StationStatsSheet.
+    private func statCellReps(count: Int) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Text("REPS")
+                    .font(.caption2.weight(.heavy))
+                    .tracking(0.8)
+                    .foregroundStyle(Color.textSecondary)
+                Image(systemName: "applewatch")
+                    .font(.system(size: 9, weight: .heavy))
+                    .foregroundStyle(Color.textTertiary)
+            }
+            Text("\(count)")
+                .font(.system(size: 22, weight: .heavy, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(Color.textPrimary)
+                .contentTransition(.numericText())
+                .accessibilityLabel("\(count) reps counted")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // HR cell — caps "HR" label above, big rounded BPM number
@@ -2973,6 +3016,17 @@ struct RaceView: View {
         // paired or its workout session isn't running.
         WatchCompanionService.shared.onHeartRate = { update in
             viewModel.ingestHeartRate(update)
+        }
+
+        // §13.8 Tier 2 — rep count samples from the Watch's wrist
+        // IMU during a rep-counting station (wall balls in Phase 1).
+        // The handler routes into the view model where the latest
+        // count is held until engine.advance closes the station's
+        // Split, at which point it's stamped onto Split.repsCompleted.
+        // Late samples (after advance has fired) get patched onto
+        // the just-closed split if its repsCompleted is still nil.
+        WatchCompanionService.shared.onRepCount = { update in
+            viewModel.ingestRepCount(update)
         }
         #endif
     }

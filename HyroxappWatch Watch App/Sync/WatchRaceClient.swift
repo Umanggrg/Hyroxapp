@@ -121,6 +121,41 @@ final class WatchRaceClient: NSObject {
         }
     }
 
+    // Push a rep-count update to the paired iPhone during a rep-
+    // counting station (Phase 1 — wall balls). Called from
+    // `WatchRepCountingService` on its ~1Hz throttle, AND from
+    // the rep-counting service's stop() caller at segment-end
+    // so the iPhone has the authoritative final count before
+    // the snapshot's currentStation rolls over.
+    //
+    // Same dual-path delivery story as `publishHeartRate`:
+    //   • sendMessage when the iPhone is reachable (live path,
+    //     low latency)
+    //   • transferUserInfo when not (queued, eventually consistent)
+    //
+    // The receiving side (`WatchCompanionService` → `RaceViewModel`)
+    // de-duplicates by sampledAt timestamp, so even if both
+    // transports happen to deliver the same payload the chip
+    // only re-renders once.
+    func publishRepCount(_ update: WatchRepCountUpdate) {
+        let session = WCSession.default
+        guard session.activationState == .activated else { return }
+
+        let dict = update.toDictionary()
+
+        if session.isReachable {
+            session.sendMessage(
+                dict,
+                replyHandler: nil,
+                errorHandler: { error in
+                    print("[WatchClient] publishRepCount sendMessage FAILED — \(error.localizedDescription)")
+                }
+            )
+        } else {
+            session.transferUserInfo(dict)
+        }
+    }
+
     // Send a user-initiated action to the paired iPhone (e.g. "advance
     // to next station" when the Watch's Next button is tapped).
     //

@@ -180,6 +180,18 @@ struct WatchRaceView: View {
         .onChange(of: client.snapshot?.currentStationIndex) { _, newIndex in
             handleStationIndexChange(to: newIndex)
         }
+        // §13.8 Tier 2 — start/stop the wrist IMU rep counter as
+        // the athlete enters / leaves a rep-based station. Computed
+        // boolean watches both "is a race active" AND "is the
+        // current station rep-countable"; transitions in either
+        // direction trigger the start/stop side effects below.
+        // Phase 1 ships wall balls only — WatchRepCountingService
+        // refuses non-supported stations internally, so this
+        // wiring stays station-agnostic for forward compatibility
+        // when burpees / lunges / farmers carry follow.
+        .onChange(of: currentRepStationRaw) { oldRaw, newRaw in
+            handleRepStationChange(from: oldRaw, to: newRaw)
+        }
         // Self-heal HKWorkoutSession state from the snapshot phase.
         // This is the resilience fix for "HR not showing" — if the
         // iPhone's `sendControl(.startWorkout)` was dropped because
@@ -1097,6 +1109,81 @@ struct WatchRaceView: View {
             .shadow(color: Color.accent.opacity(0.4), radius: 10, y: 0)
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - Rep counting lifecycle (§13.8 Tier 2)
+
+    // Returns the rawValue of the rep-countable station the athlete
+    // is currently on, or nil when:
+    //   • no race is active, or
+    //   • the current station isn't rep-countable, or
+    //   • the race is paused / finished / in roxzone (rep counter
+    //     should be silent off-station even on a rep-countable
+    //     station type).
+    //
+    // The `.onChange` watcher reads this and routes the transition
+    // through `handleRepStationChange`. Wrapping the station + phase
+    // check into one value means the watcher fires on the right
+    // moments without needing two separate observers.
+    private var currentRepStationRaw: Int? {
+        guard let snapshot = client.snapshot,
+              snapshot.phase == .inProgress,
+              let station = snapshot.currentStation,
+              Self.isRepCountable(station)
+        else { return nil }
+        return station.rawValue
+    }
+
+    // Phase 1 — only wall balls. Burpees / sandbag lunges / farmers
+    // carry are tracked in §13.8 Tier 2's deferred work; when their
+    // motion signatures are implemented (and WatchRepCountingService
+    // recognizes them in `start(for:)`), the gate widens here.
+    static func isRepCountable(_ station: Station) -> Bool {
+        station == .wallBalls
+    }
+
+    // Transition handler. Three meaningful cases:
+    //   • oldRaw == nil, newRaw != nil — athlete entered a rep-
+    //     countable station. Start counting fresh from 0.
+    //   • oldRaw != nil, newRaw == nil — athlete left the station
+    //     (advanced, paused, finished, etc.). Stop counting; the
+    //     service's stop() publishes one final WCSession update so
+    //     the iPhone has the authoritative end-of-station count
+    //     even if the throttle swallowed the last live tick.
+    //   • oldRaw != nil, newRaw != nil, but different — athlete
+    //     ran a back-to-back rep station chain (not realistic for
+    //     HYROX's fixed sequence but possible for custom workouts).
+    //     Stop the previous count, start fresh for the new one.
+    //
+    // Equal-value calls don't fire `.onChange`, so the "same
+    // station, same phase" identity case is silently a no-op.
+    private func handleRepStationChange(from oldRaw: Int?, to newRaw: Int?) {
+        let service = WatchRepCountingService.shared
+
+        if oldRaw != nil {
+            // Leaving a rep-counting station — stop and let the
+            // service publish its final count. The returned value
+            // is discarded here because the service already routes
+            // the final count through publishCurrentCount internally
+            // when stop() is followed by an external snapshot push
+            // — that's the iPhone-side advance writing Split.reps
+            // before the next station's snapshot lands.
+            //
+            // Actually we DO need to publish the final count
+            // explicitly: stop() doesn't publish on its way down.
+            // Publish first, then stop, so the WCSession payload
+            // carries the right stationRaw (after stop() clears
+            // currentStationRaw, publish would no-op).
+            service.publishCurrentCount()
+            _ = service.stop()
+        }
+
+        if let newRaw, let station = Station(rawValue: newRaw) {
+            // Entering a rep-counting station. Service refuses
+            // unsupported stations internally so we don't have to
+            // re-check here.
+            _ = service.start(for: station)
+        }
     }
 
     // Watch-tuned variant of the iPhone's `HoldToConfirmButton`.

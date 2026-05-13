@@ -116,6 +116,7 @@
 				Shared/WatchSync/WatchAction.swift,
 				Shared/WatchSync/WatchControl.swift,
 				Shared/WatchSync/WatchHeartRateUpdate.swift,
+				Shared/WatchSync/WatchRepCountUpdate.swift,
 			);
 			target = D8BC4D402F9B13B2004472F3 /* HyroxappWatch Watch App */;
 		};
@@ -872,6 +873,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = HyroxappWatch;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Trakrr reads your heart rate during races so the timer screen can show live BPM and the post-race summary can show per-station averages.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Trakrr writes your finished races to Apple Health so they appear alongside your other workouts and earn Activity ring credit.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "Trakrr uses your Apple Watch's motion sensors to count reps on rep-based HYROX stations (wall balls, burpees, lunges, farmers carry) so you don't have to count manually during a race.";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.umanggurung.trakr;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -908,6 +910,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = HyroxappWatch;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Trakrr reads your heart rate during races so the timer screen can show live BPM and the post-race summary can show per-station averages.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Trakrr writes your finished races to Apple Health so they appear alongside your other workouts and earn Activity ring credit.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "Trakrr uses your Apple Watch's motion sensors to count reps on rep-based HYROX stations (wall balls, burpees, lunges, farmers carry) so you don't have to count manually during a race.";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.umanggurung.trakr;
 				LD_RUNPATH_SEARCH_PATHS = (

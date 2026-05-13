@@ -72,6 +72,14 @@ struct WatchRaceMainPage: View {
 
             paceDelta
 
+            // §13.8 Tier 2 — wrist IMU rep counter. Self-hides
+            // except on rep-counting stations (Phase 1 = wall
+            // balls) where WatchRepCountingService is active. Sits
+            // between the pace delta and the heart rate bar so
+            // the athlete's natural glance order is timer → reps
+            // → HR.
+            repCounterChip
+
             Spacer(minLength: 4)
 
             heartRateBar
@@ -87,6 +95,38 @@ struct WatchRaceMainPage: View {
         .padding(.horizontal, 8)
         .padding(.top, 6)
         .padding(.bottom, 4)
+    }
+
+    // §13.8 Tier 2 — live rep counter chip. Wraps the rep counting
+    // service's @Observable currentRepCount in a small wrist-tuned
+    // surface. Hidden when isCounting is false (off-station or
+    // hardware doesn't support rep counting) or the count is still
+    // zero (no reps detected yet). The chip glows coral with a
+    // dumbbell glyph to read as "this is the active rep counter"
+    // without taking the visual weight of the timer hero.
+    @ViewBuilder
+    private var repCounterChip: some View {
+        let service = WatchRepCountingService.shared
+        if service.isCounting && service.currentRepCount > 0 {
+            HStack(spacing: 4) {
+                Image(systemName: "dumbbell.fill")
+                    .font(.system(size: 10, weight: .heavy))
+                Text("\(service.currentRepCount)")
+                    .font(.system(size: 15, weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                Text("REPS")
+                    .font(.system(size: 9, weight: .heavy))
+                    .tracking(0.5)
+                    .opacity(0.7)
+            }
+            .foregroundStyle(Color.accent)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                Capsule().fill(Color.accent.opacity(0.14))
+            )
+        }
     }
 
     // Top header — segment name + run/station progress count.

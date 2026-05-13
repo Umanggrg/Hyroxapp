@@ -65,6 +65,19 @@ final class WatchCompanionService: NSObject {
     // continues to populate `currentHeartRateBPM` as a fallback.
     var onHeartRate: (@MainActor @Sendable (WatchHeartRateUpdate) -> Void)?
 
+    // §13.8 Tier 2 — callback invoked on MainActor when the Watch
+    // publishes a rep-count update during a rep-counting station
+    // (Phase 1 — wall balls). Set by RaceView for the active-race
+    // lifetime; the handler forwards the update into RaceViewModel
+    // which holds the latest count per station rawValue and stamps
+    // it onto Split.repsCompleted at engine.advance time.
+    //
+    // When no rep-counting station is active (or the Watch lacks
+    // compatible motion hardware), this callback simply never
+    // fires and Split.repsCompleted stays at whatever manual value
+    // the athlete entered (or nil).
+    var onRepCount: (@MainActor @Sendable (WatchRepCountUpdate) -> Void)?
+
     private override init() {
         super.init()
     }
@@ -299,6 +312,16 @@ extension WatchCompanionService: WCSessionDelegate {
             return
         }
 
+        // §13.8 Tier 2 — rep count updates during wall balls
+        // (Phase 1). Same throttled-publish cadence as HR (~1Hz),
+        // routed through the same MainActor handler pattern.
+        if let repUpdate = WatchRepCountUpdate(dictionary: message) {
+            Task { @MainActor in
+                Self.shared.onRepCount?(repUpdate)
+            }
+            return
+        }
+
         if let action = WatchAction(dictionary: message) {
             Task { @MainActor in
                 print("[WatchCompanion] dispatching action=\(action) — handler \(Self.shared.onAction == nil ? "NOT set" : "set")")
@@ -334,6 +357,20 @@ extension WatchCompanionService: WCSessionDelegate {
         if let hrUpdate = WatchHeartRateUpdate(dictionary: userInfo) {
             Task { @MainActor in
                 Self.shared.onHeartRate?(hrUpdate)
+            }
+            return
+        }
+
+        // §13.8 Tier 2 — rep count via the queued path. Same
+        // de-dup discipline as HR (ingest handler keys by
+        // sampledAt). transferUserInfo is the fallback when the
+        // iPhone is locked / pocketed; late delivery is fine
+        // because the phone-side ingest applies the latest count
+        // for a station as long as the station hasn't been
+        // closed manually.
+        if let repUpdate = WatchRepCountUpdate(dictionary: userInfo) {
+            Task { @MainActor in
+                Self.shared.onRepCount?(repUpdate)
             }
             return
         }
