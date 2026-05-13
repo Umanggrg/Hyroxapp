@@ -62,6 +62,13 @@ struct SerializedSplit: Codable, Sendable, Equatable {
     // the same per-segment number as the host's.
     let verticalOscCmAvg: Double?
 
+    // §19.4 Phase 10K — per-segment average ground contact time
+    // (ms) from AirPods head motion. Same shape + lifecycle as
+    // verticalOscCmAvg above; sent across the duo wire so the
+    // guest's RaceDetail Running Economy section shows the
+    // same per-segment number the host sees.
+    let groundContactTimeMsAvg: Double?
+
     init(from split: Split) {
         self.stationRaw = split.station.rawValue
         self.startedAt = split.startedAt
@@ -76,6 +83,7 @@ struct SerializedSplit: Codable, Sendable, Equatable {
         self.rpe = split.rpe
         self.roxzoneSeconds = split.roxzoneSeconds
         self.verticalOscCmAvg = split.verticalOscCmAvg
+        self.groundContactTimeMsAvg = split.groundContactTimeMsAvg
     }
 
     // Round-trip back to a `Split`. Returns nil for an unknown
@@ -108,6 +116,7 @@ struct SerializedSplit: Codable, Sendable, Equatable {
         // from RaceViewModel); reinstating it post-init is the
         // same pattern.
         split.verticalOscCmAvg = verticalOscCmAvg
+        split.groundContactTimeMsAvg = groundContactTimeMsAvg
         return split
     }
 }

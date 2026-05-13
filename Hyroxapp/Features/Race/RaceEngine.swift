@@ -734,6 +734,56 @@ struct RaceEngine: Sendable {
             )
         }
     }
+
+    // §19.4 Phase 10K — stamp the ground-contact-time rolling
+    // avg onto the just-ended split. Same shape as
+    // setVerticalOscillation above; both are run-kind metrics
+    // captured at segment-end by RaceViewModel.attach
+    // SegmentStats. State-symmetric across all engine states
+    // (in-progress, paused, in-roxzone, finished) for the
+    // same reasons.
+    mutating func setGroundContactTime(
+        _ groundContactMs: Double,
+        atSplitIndex index: Int
+    ) {
+        switch state {
+        case .notStarted:
+            return
+        case .inProgress(let startedAt, let segmentStart, var splits):
+            guard splits.indices.contains(index) else { return }
+            splits[index].groundContactTimeMsAvg = groundContactMs
+            state = .inProgress(
+                startedAt: startedAt,
+                currentSegmentStartedAt: segmentStart,
+                splits: splits
+            )
+        case .paused(let startedAt, let segmentStart, var splits, let pausedAt):
+            guard splits.indices.contains(index) else { return }
+            splits[index].groundContactTimeMsAvg = groundContactMs
+            state = .paused(
+                startedAt: startedAt,
+                currentSegmentStartedAt: segmentStart,
+                splits: splits,
+                pausedAt: pausedAt
+            )
+        case .inRoxzone(let startedAt, var splits, let roxzoneStart):
+            guard splits.indices.contains(index) else { return }
+            splits[index].groundContactTimeMsAvg = groundContactMs
+            state = .inRoxzone(
+                startedAt: startedAt,
+                splits: splits,
+                roxzoneStartedAt: roxzoneStart
+            )
+        case .finished(let startedAt, let endedAt, var splits):
+            guard splits.indices.contains(index) else { return }
+            splits[index].groundContactTimeMsAvg = groundContactMs
+            state = .finished(
+                startedAt: startedAt,
+                endedAt: endedAt,
+                splits: splits
+            )
+        }
+    }
 }
 
 // MARK: - Helpers

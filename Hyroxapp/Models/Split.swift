@@ -120,6 +120,28 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
     // formalize via a withRunningEconomy builder.
     var verticalOscCmAvg: Double? = nil
 
+    // §19.4 Phase 10K — ground contact time, milliseconds.
+    // Average per-step duration the foot is in contact with
+    // the ground during this run segment. Elite distance
+    // runners run 180-220ms; recreational 250-300ms+. Lower =
+    // more efficient (less braking on each step, better
+    // elastic-recoil energy return).
+    //
+    // Derived from AirPods head motion: in each step cycle,
+    // GCT is the time from the negative Z-axis trough (head
+    // dips on impact) to the moment vertical acceleration
+    // returns to neutral (flight phase begins). Head motion
+    // is a noisier approximation than a foot pod, but it's
+    // free (no extra hardware) and trends across races stay
+    // meaningful even if the absolute number differs from
+    // dedicated kit by ±20-40ms.
+    //
+    // Gated on the same `airPodsRunningEconomyEnabled`
+    // Settings toggle as vertical oscillation. Off → field
+    // stays nil; RunningEconomySection on RaceDetail omits
+    // the GCT row.
+    var groundContactTimeMsAvg: Double? = nil
+
     // HYROX-specific manual-entry stats. The killer feature
     // every other HYROX app misses: a sled push at 80kg and a
     // sled push at 152kg are different universes; without
@@ -196,6 +218,10 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
         // cleanly via Codable synthesizer's decodeIfPresent
         // path; new payloads include the key.
         case verticalOscCmAvg
+        // §19.4 Phase 10K — same additive-Codable pattern as
+        // verticalOscCmAvg above. Pre-existing splits decode
+        // as nil; new ones serialize the field.
+        case groundContactTimeMsAvg
     }
 
     // Convenience initializer preserving the pre-HR API so all existing
@@ -285,6 +311,7 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
         // builders restore it after init so HR-stats updates
         // don't wipe the running-economy reading.
         newSplit.verticalOscCmAvg = verticalOscCmAvg
+        newSplit.groundContactTimeMsAvg = groundContactTimeMsAvg
         return newSplit
     }
 
@@ -320,6 +347,7 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
             roxzoneSeconds: roxzoneSeconds
         )
         newSplit.verticalOscCmAvg = verticalOscCmAvg
+        newSplit.groundContactTimeMsAvg = groundContactTimeMsAvg
         return newSplit
     }
 
@@ -355,6 +383,7 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
             roxzoneSeconds: roxzoneSeconds
         )
         newSplit.verticalOscCmAvg = verticalOscCmAvg
+        newSplit.groundContactTimeMsAvg = groundContactTimeMsAvg
         return newSplit
     }
 
@@ -381,6 +410,7 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
             roxzoneSeconds: seconds
         )
         newSplit.verticalOscCmAvg = verticalOscCmAvg
+        newSplit.groundContactTimeMsAvg = groundContactTimeMsAvg
         return newSplit
     }
 }

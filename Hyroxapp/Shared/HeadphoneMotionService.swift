@@ -100,6 +100,37 @@ final class HeadphoneMotionService {
     /// 8 used for currentVerticalOscillationCm rolling avg.
     private var stepAmplitudes: [Double] = []
 
+    /// §19.4 Phase 10K — average ground contact time in
+    /// milliseconds, rolling-averaged over the last 8 steps.
+    /// Computed from the time the foot is on the ground during
+    /// each step cycle (Z dip → Z return to neutral). Nil
+    /// while the rolling buffer fills (< 4 steps) OR when no
+    /// steps in the last 3s.
+    ///
+    /// Elite distance runners run 180-220ms; recreational
+    /// 250-300ms+. Lower = more efficient (less energy lost to
+    /// braking on each step, better elastic-recoil return).
+    private(set) var currentGroundContactTimeMs: Double?
+
+    /// §19.4 Phase 10K — per-step GCT values in milliseconds,
+    /// captured during each step cycle. Trailing 8 used for
+    /// currentGroundContactTimeMs rolling avg. Parallel
+    /// structure to stepAmplitudes for symmetry.
+    private var stepGroundContactsMs: [Double] = []
+
+    /// §19.4 Phase 10K — timestamp of the start of the current
+    /// step's impact phase (the moment Z first crossed below
+    /// the negative threshold). Cleared at step-registration
+    /// time so each cycle measures its GCT independently.
+    private var impactStartedAt: Date?
+
+    /// §19.4 Phase 10K — GCT for the in-flight cycle, captured
+    /// when Z returns to >= 0 (flight phase begins). Held until
+    /// the step actually registers on the positive peak (so
+    /// the period gate's discard path can short-circuit
+    /// cleanly without partial state).
+    private var pendingGroundContactMs: Double?
+
     /// Running min/max Z during the current step cycle (between
     /// negative-cross and positive-cross). Reset on each step
     /// registration so the next cycle's amplitude is measured
@@ -168,14 +199,18 @@ final class HeadphoneMotionService {
 
         stepTimestamps.removeAll()
         stepAmplitudes.removeAll()
+        stepGroundContactsMs.removeAll()
         pitchSamples.removeAll()
         currentCycleZMin = 0
         currentCycleZMax = 0
         lastPitchSampleAt = .distantPast
         lastZ = 0
         crossedNegative = false
+        impactStartedAt = nil
+        pendingGroundContactMs = nil
         currentCadenceSPM = nil
         currentVerticalOscillationCm = nil
+        currentGroundContactTimeMs = nil
 
         manager.startDeviceMotionUpdates(to: .main) { [weak self] motion, error in
             guard let self else { return }
@@ -221,11 +256,15 @@ final class HeadphoneMotionService {
         isStreaming = false
         stepTimestamps.removeAll()
         stepAmplitudes.removeAll()
+        stepGroundContactsMs.removeAll()
         currentCycleZMin = 0
         currentCycleZMax = 0
         currentCadenceSPM = nil
         currentVerticalOscillationCm = nil
+        currentGroundContactTimeMs = nil
         crossedNegative = false
+        impactStartedAt = nil
+        pendingGroundContactMs = nil
         lastZ = 0
         staleCheckTask?.cancel()
         staleCheckTask = nil
@@ -279,15 +318,45 @@ final class HeadphoneMotionService {
         // latch, a slow walk could trigger spurious steps from
         // signal noise floating around zero.
         if z < Self.zNegativeThreshold {
+            if !crossedNegative {
+                // §19.4 Phase 10K — first crossing into the
+                // impact phase of this step cycle. Foot has
+                // just landed; head's accelerating downward.
+                // Mark the moment so we can measure GCT when
+                // Z returns to neutral.
+                impactStartedAt = now
+            }
             crossedNegative = true
-        } else if crossedNegative && z > Self.zPositiveThreshold {
-            crossedNegative = false
-            // Cycle complete — pass the captured amplitude
-            // (max − min) to registerStep, which uses it to
-            // update the vertical-oscillation rolling avg
-            // AND resets the cycle's min/max for the next step.
-            let amplitude = currentCycleZMax - currentCycleZMin
-            registerStep(at: now, amplitudeG: amplitude)
+        } else if crossedNegative {
+            // §19.4 Phase 10K — capture flight-start time on
+            // the first zero-crossing after impact. The foot
+            // has left the ground; vertical accel has returned
+            // to neutral (briefly) before reversing upward to
+            // the positive peak. This is the cleanest signal
+            // for GCT end from head motion.
+            //
+            // Only set pendingGroundContactMs once per cycle
+            // (the nil-check); subsequent Z samples in the
+            // rising phase shouldn't overwrite the captured
+            // value with a later one.
+            if pendingGroundContactMs == nil,
+               z >= 0,
+               let start = impactStartedAt {
+                pendingGroundContactMs = now.timeIntervalSince(start) * 1000.0
+            }
+
+            if z > Self.zPositiveThreshold {
+                crossedNegative = false
+                // Cycle complete — pass the captured amplitude
+                // (max − min) to registerStep, which uses it to
+                // update the vertical-oscillation rolling avg
+                // AND resets the cycle's min/max for the next step.
+                let amplitude = currentCycleZMax - currentCycleZMin
+                let gct = pendingGroundContactMs
+                impactStartedAt = nil
+                pendingGroundContactMs = nil
+                registerStep(at: now, amplitudeG: amplitude, gctMs: gct)
+            }
         }
         lastZ = z
 
@@ -311,7 +380,7 @@ final class HeadphoneMotionService {
     }
     #endif
 
-    private func registerStep(at timestamp: Date, amplitudeG: Double = 0) {
+    private func registerStep(at timestamp: Date, amplitudeG: Double = 0, gctMs: Double? = nil) {
         // Enforce minimum step interval to suppress double-
         // detects on the same impact's recovery curve.
         if let last = stepTimestamps.last,
@@ -336,6 +405,19 @@ final class HeadphoneMotionService {
             }
         }
 
+        // §19.4 Phase 10K — record the step's GCT in
+        // milliseconds. Plausibility-gated 50-500ms to filter
+        // edge cases where the impact-end detection misfires
+        // (e.g. AirPods readjustment, walking slow enough that
+        // there's no flight phase). Steps outside the band
+        // still count for cadence but contribute no GCT data.
+        if let gctMs, gctMs >= 50, gctMs <= 500 {
+            stepGroundContactsMs.append(gctMs)
+            if stepGroundContactsMs.count > 16 {
+                stepGroundContactsMs.removeFirst(stepGroundContactsMs.count - 16)
+            }
+        }
+
         // Reset the cycle's min/max so the next step measures
         // its full peak-to-trough range without bleeding in
         // values from the previous cycle. lastZ is the most
@@ -346,6 +428,23 @@ final class HeadphoneMotionService {
 
         updateCadenceFromBuffer()
         updateVerticalOscillationFromBuffer()
+        updateGroundContactTimeFromBuffer()
+    }
+
+    // §19.4 Phase 10K — rolling-average update for the
+    // published `currentGroundContactTimeMs` value. Same shape
+    // as updateVerticalOscillationFromBuffer above: needs at
+    // least 4 samples before publishing (anything below is
+    // signal noise), uses the trailing 8 for the rolling
+    // average.
+    private func updateGroundContactTimeFromBuffer() {
+        guard stepGroundContactsMs.count >= 4 else {
+            currentGroundContactTimeMs = nil
+            return
+        }
+        let window = stepGroundContactsMs.suffix(8)
+        let avg = window.reduce(0, +) / Double(window.count)
+        currentGroundContactTimeMs = avg
     }
 
     // §19 Phase 10I — convert step amplitude (g-units) to
@@ -411,6 +510,8 @@ final class HeadphoneMotionService {
             // semantics ("no fresh steps" → no published
             // metric).
             currentVerticalOscillationCm = nil
+            // §19.4 Phase 10K — same staleness semantics for GCT.
+            currentGroundContactTimeMs = nil
         }
     }
 }

@@ -896,6 +896,19 @@ final class RaceViewModel {
             engine.setVerticalOscillation(osc, atSplitIndex: index)
         }
 
+        // §19.4 Phase 10K — same gating + station kind + index
+        // guards as vertical oscillation above. Both metrics
+        // share the AirPods running-economy toggle and both are
+        // run-station-only. GCT comes from the same Headphone
+        // MotionService rolling-average buffer, just a different
+        // published property.
+        if airPodsRunningEconomyEnabled,
+           engine.splits.indices.contains(index),
+           engine.splits[index].station.kind == .run,
+           let gct = HeadphoneMotionService.shared.currentGroundContactTimeMs {
+            engine.setGroundContactTime(gct, atSplitIndex: index)
+        }
+
         #if canImport(HealthKit)
         // Read the segment bounds on the current actor before hopping
         // into the async Task — avoids capturing mutable engine state

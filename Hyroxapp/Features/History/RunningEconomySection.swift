@@ -39,29 +39,38 @@ struct RunningEconomySection: View {
             .map { (index: $0.offset, split: $0.element) }
     }
 
-    private var runsWithOsc: [(runNumber: Int, osc: Double)] {
+    // §19.4 Phase 10K — a row is meaningful if it carries
+    // AT LEAST ONE of vertical osc or ground contact time.
+    // Athletes with older builds (osc only) keep rendering;
+    // newer races with both metrics show the richer view.
+    private var runsWithEconomy: [(runNumber: Int, osc: Double?, gct: Double?)] {
         var runNumber = 0
-        return runSplits.compactMap { item -> (Int, Double)? in
+        return runSplits.compactMap { item -> (Int, Double?, Double?)? in
             runNumber += 1
-            guard let osc = item.split.verticalOscCmAvg else { return nil }
-            return (runNumber, osc)
+            let osc = item.split.verticalOscCmAvg
+            let gct = item.split.groundContactTimeMsAvg
+            // Filter out rows where both are nil — those add
+            // no information.
+            guard osc != nil || gct != nil else { return nil }
+            return (runNumber, osc, gct)
         }
     }
 
     static func hasData(in race: Race) -> Bool {
         race.splits.contains { split in
-            split.station.kind == .run && split.verticalOscCmAvg != nil
+            split.station.kind == .run &&
+            (split.verticalOscCmAvg != nil || split.groundContactTimeMsAvg != nil)
         }
     }
 
     var body: some View {
-        if !runsWithOsc.isEmpty {
+        if !runsWithEconomy.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 header
 
                 VStack(spacing: 4) {
-                    ForEach(runsWithOsc, id: \.runNumber) { entry in
-                        row(runNumber: entry.runNumber, osc: entry.osc)
+                    ForEach(runsWithEconomy, id: \.runNumber) { entry in
+                        row(runNumber: entry.runNumber, osc: entry.osc, gct: entry.gct)
                     }
                 }
 
@@ -91,42 +100,78 @@ struct RunningEconomySection: View {
 
     // MARK: - Per-run row
 
-    private func row(runNumber: Int, osc: Double) -> some View {
-        let tier = tier(for: osc)
+    private func row(runNumber: Int, osc: Double?, gct: Double?) -> some View {
+        // Tier chip prioritizes vertical osc when available
+        // (the longer-standing metric); falls back to GCT
+        // tiering when only GCT is present. Both null is
+        // already filtered out at the runsWithEconomy stage.
+        let oscTier = osc.map { tier(for: $0) }
+        let gctTier = gct.map { gctTier(for: $0) }
+        let primaryTier = oscTier ?? gctTier
 
-        return HStack(spacing: 10) {
+        return HStack(alignment: .top, spacing: 10) {
             Text("RUN \(runNumber)")
                 .font(.system(size: 11, weight: .heavy))
                 .tracking(0.4)
                 .foregroundStyle(Color.textTertiary)
                 .frame(width: 56, alignment: .leading)
+                .padding(.top, 2)
 
-            // Numeric value — "8.4 cm" with cm dim so the
-            // number reads as the visual anchor.
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(String(format: "%.1f", osc))
-                    .font(.system(size: 15, weight: .heavy, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(Color.textPrimary)
-                Text("cm")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(Color.textTertiary)
+            // Stacked value column — vertical osc on top, GCT
+            // below. Each renders only when its source value
+            // is non-nil; older races (osc only) compress
+            // back to a single line because the GCT branch
+            // is empty.
+            VStack(alignment: .leading, spacing: 2) {
+                if let osc {
+                    HStack(alignment: .firstTextBaseline, spacing: 3) {
+                        Text(String(format: "%.1f", osc))
+                            .font(.system(size: 15, weight: .heavy, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(Color.textPrimary)
+                        Text("cm")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(Color.textTertiary)
+                        Text("OSC")
+                            .font(.system(size: 9, weight: .heavy))
+                            .tracking(0.5)
+                            .foregroundStyle(Color.textTertiary.opacity(0.7))
+                    }
+                }
+                if let gct {
+                    HStack(alignment: .firstTextBaseline, spacing: 3) {
+                        Text("\(Int(gct.rounded()))")
+                            .font(.system(size: 13, weight: .heavy, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(Color.textSecondary)
+                        Text("ms")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(Color.textTertiary)
+                        Text("GCT")
+                            .font(.system(size: 9, weight: .heavy))
+                            .tracking(0.5)
+                            .foregroundStyle(Color.textTertiary.opacity(0.7))
+                    }
+                }
             }
 
             Spacer()
 
             // Tier chip — coaching-grade indicator at a glance.
-            Text(tier.label)
-                .font(.system(size: 9, weight: .heavy))
-                .tracking(0.6)
-                .textCase(.uppercase)
-                .foregroundStyle(tier.color)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(
-                    Capsule()
-                        .fill(tier.color.opacity(0.12))
-                )
+            if let primaryTier {
+                Text(primaryTier.label)
+                    .font(.system(size: 9, weight: .heavy))
+                    .tracking(0.6)
+                    .textCase(.uppercase)
+                    .foregroundStyle(primaryTier.color)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule()
+                            .fill(primaryTier.color.opacity(0.12))
+                    )
+                    .padding(.top, 2)
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -155,10 +200,25 @@ struct RunningEconomySection: View {
         }
     }
 
+    // §19.4 Phase 10K — research-grounded GCT bands: elite
+    // distance runners 180-220ms; sub-elite 220-260ms;
+    // recreational 260-300+ms. Lower = more efficient.
+    // Tier labels match the vertical-osc tier vocabulary so
+    // the chip reads consistently when GCT-only rows render
+    // (older races where vertical-osc fired but no GCT, or
+    // future races where the inverse).
+    private func gctTier(for gct: Double) -> Tier {
+        switch gct {
+        case ..<220:  return Tier(label: "Elite",      color: Color.success)
+        case 220..<260: return Tier(label: "Good",     color: Color.accent)
+        default:      return Tier(label: "Improve",    color: Color.warning)
+        }
+    }
+
     // MARK: - Footnote
 
     private var footnote: some View {
-        Text("Lower is more efficient. Elite distance runners average 6-8 cm; recreational 10-14 cm. Measured from AirPods Pro head motion.")
+        Text("OSC: lower = less wasted vertical motion (elite 6-8 cm, recreational 10-14 cm). GCT: shorter ground contact = more elastic-recoil return (elite 180-220 ms, recreational 260+ ms). Both from AirPods Pro head motion.")
             .font(.system(size: 10))
             .foregroundStyle(Color.textTertiary)
             .fixedSize(horizontal: false, vertical: true)
