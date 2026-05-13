@@ -489,13 +489,32 @@ When we get there, the pattern is:
 
 ## 8\. Coding Conventions
 
-- **Swift 6 strict concurrency** — we're targeting a modern codebase, embrace it  
+- **Swift 6 strict concurrency** — we're targeting a modern codebase, embrace it (see §8.1 for the concrete patterns this implies)  
 - **`@Observable` over `ObservableObject`** — we're on iOS 17+  
 - **SwiftUI over UIKit** — no UIKit unless we hit a specific wall (haptics via `UIImpactFeedbackGenerator` is fine)  
 - **Prefer value types (structs) over classes** unless identity matters  
 - **One view per file** when views are non-trivial  
 - **No force unwraps (`!`)** in production code paths. Use `guard let` / `if let`.  
 - **Naming:** verbs for functions (`startRace()`, `advanceStation()`), nouns for properties
+
+### 8.1 — Concurrency hygiene (the established patterns)
+
+The codebase is built strict-concurrency-clean from the start. Build settings reflect this:
+
+- `SWIFT_VERSION = 5.0` with `SWIFT_APPROACHABLE_CONCURRENCY = YES` and `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` on every shipping target (main iOS app, watchOS companion, **and** the Widget extension). The default isolation means new types are MainActor-isolated unless explicitly marked otherwise — match this convention rather than fighting it.
+- Zero `@unchecked Sendable`, zero `nonisolated(unsafe)`, zero `@preconcurrency` imports. Don't introduce them. If a type needs Sendable, make its storage actually Sendable; don't paper over with `@unchecked`.
+- Every value type in `Hyroxapp/Models/` (Split, Station, Division, RaceMode, RaceKind, HRZone, FreeRunSplit, Badge, HyroxPillar, ThemePreference, Challenge, FreeRunLocationType, FreeRunSplitUnit) is explicitly `Sendable`. Every Watch transport type (RaceStateSnapshot, FreeRunStateSnapshot, WatchAction, WatchControl, WatchHeartRateUpdate, WatchRepCountUpdate) is `Sendable`. Every Supabase DTO (RemoteRace, RemoteFreeRun, RemoteComment, RemoteProfile, RemoteFollow, RemoteReaction, Remote*Profile / Race / RaceStats) is `Sendable`. Match the pattern when adding new value types: `Codable, Equatable, Hashable, Sendable` is the default conformance shape for cross-boundary data.
+
+**Delegate-callback bridge pattern.** Several Apple frameworks (HKWorkoutSession / HKLiveWorkoutBuilder, WCSessionDelegate, CMHeadphoneMotionManager handler, CMBatchedSensorManager handler) call us from arbitrary background queues. The pattern is:
+1. Mark the delegate method `nonisolated` so the compiler doesn't complain about the framework calling it off MainActor.
+2. Hop to MainActor inside the body via `Task { @MainActor in ... }` before reading or writing any observable state.
+3. Capture only Sendable values across the hop; never capture `@Observable` instance state via implicit `self` — use explicit `[weak self]` and re-bind inside the Task.
+
+There are 60+ instances of this pattern in the codebase; new delegate methods should follow it without inventing variants.
+
+**WCSession + WatchConnectivity edges.** When a continuous-sample payload type is added (HR, reps, cadence, etc.), every payload struct ships with a `kind` discriminator constant and a `sampledAt: Date` field. The receiving side de-duplicates by `sampledAt` and rejects out-of-order arrivals. See `WatchHeartRateUpdate` for the canonical shape.
+
+**MainActor-isolated singletons.** `@MainActor @Observable final class Service { static let shared = Service() }` is the standard for app-wide services (SensorSourceRegistry, FollowSyncService, LiveActivityService, HeadphoneMotionService, WatchRepCountingService, WatchWorkoutManager). View code reads them directly; cross-actor reads hop via `Task { @MainActor }`.
 
 ### SwiftUI Specifics
 
