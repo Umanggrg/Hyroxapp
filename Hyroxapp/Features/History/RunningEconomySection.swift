@@ -105,9 +105,14 @@ struct RunningEconomySection: View {
         // (the longer-standing metric); falls back to GCT
         // tiering when only GCT is present. Both null is
         // already filtered out at the runsWithEconomy stage.
-        let oscTier = osc.map { tier(for: $0) }
-        let gctTier = gct.map { gctTier(for: $0) }
-        let primaryTier = oscTier ?? gctTier
+        //
+        // Locals are suffixed `Value` because `gctTier` would
+        // otherwise shadow the `gctTier(for:)` instance method
+        // (Swift resolves the identifier to the local at the
+        // closure call site, breaking the `.map { gctTier(for:) }`).
+        let oscTierValue = osc.map { tier(for: $0) }
+        let gctTierValue = gct.map { gctTier(for: $0) }
+        let primaryTier = oscTierValue ?? gctTierValue
 
         return HStack(alignment: .top, spacing: 10) {
             Text("RUN \(runNumber)")
