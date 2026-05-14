@@ -134,7 +134,12 @@ struct FreeRunView: View {
                 let age = Date().timeIntervalSince(update.sampledAt)
                 guard age < 90 else { return }
                 guard update.bpm >= 30, update.bpm <= 230 else { return }
-                viewModel.ingestHeartRateBPM(update.bpm)
+                // §27 — forward the original sample timestamp,
+                // not Date(). The buffer's chronology must
+                // reflect when the Watch captured the sample,
+                // not when WCSession happened to hand it to us
+                // (queued deliveries can lag by seconds).
+                viewModel.ingestHeartRateBPM(update.bpm, at: update.sampledAt)
             }
             #endif
         }

@@ -58,6 +58,22 @@ final class FreeRunViewModel {
     // recent sample exists.
     private(set) var currentHeartRateBPM: Double?
 
+    // §27 — in-memory HR sample buffer accumulated during the
+    // run. Every Watch WCSession sample (primary) and HK 5s poll
+    // sample (fallback) gets appended here, deduped to a 0.5s
+    // minimum interval so the two sources don't double-count
+    // sub-second collisions. Flushed to `activeRun.hrSeriesData`
+    // on `end()` so post-run analytics have a dense, accurate
+    // series instead of relying on HK's stored sample density
+    // (which is sparse on outdoor runs where the optical sensor
+    // struggles or HK writes are delayed).
+    //
+    // Reset at start. Cleared at teardown. Not persisted mid-run
+    // — the cost of re-encoding a growing JSON blob on every HR
+    // sample would dwarf the value, and we never use the
+    // mid-run buffer for anything other than the post-run flush.
+    private var hrBuffer: [FreeRunHRSample] = []
+
     // Convenience accessor — true while a run is in progress
     // (engine exists AND it's in .inProgress phase). View layer
     // gates UI on this.
@@ -100,6 +116,10 @@ final class FreeRunViewModel {
         let engine = FreeRunEngine(splitUnit: splitUnit)
         engine.start(at: now)
         self.engine = engine
+
+        // §27 — reset HR buffer at start so a previous session's
+        // samples can't bleed into this run.
+        hrBuffer = []
 
         let run = FreeRun(
             startedAt: now,
@@ -179,6 +199,16 @@ final class FreeRunViewModel {
         guard let engine, engine.isRunning || engine.isPaused else { return }
         let now = Date()
         engine.end(at: now)
+
+        // §27 — flush the in-memory HR sample buffer onto the
+        // FreeRun row BEFORE persistActiveRun() so the encoded
+        // BLOB lands in the same SwiftData save that finalizes
+        // `endedAt`. Empty buffers are still written (nil) so
+        // a run with zero HR samples is unambiguous downstream.
+        if let run = activeRun {
+            run.setHRSeries(hrBuffer)
+        }
+
         persistActiveRun()
 
         stopDistanceSource()
@@ -229,6 +259,12 @@ final class FreeRunViewModel {
         engine = nil
         activeRun = nil
         currentHeartRateBPM = nil
+        // §27 — drop the buffer too so an abandoned-and-then-
+        // restarted session starts clean. end() has already
+        // flushed it onto the FreeRun row for the happy path;
+        // the abandon path drops the row entirely, so clearing
+        // here is safe in both cases.
+        hrBuffer = []
         stopDistanceSource()
         stopHeartRateObservation()
         // §11 Free Run cathedral — also unconditionally tear
@@ -472,9 +508,15 @@ final class FreeRunViewModel {
             self.engine?.recordDistance(at: date, metres: metres)
             self.persistActiveRun()
         }
-        manager.onHeartRateUpdate = { [weak self] _, bpm in
+        manager.onHeartRateUpdate = { [weak self] date, bpm in
             guard let self else { return }
-            self.currentHeartRateBPM = bpm
+            // §27 — funnel HK poll samples through the same
+            // ingest the Watch WCSession stream uses so the
+            // buffer captures both sources. Dedupe inside
+            // `ingestHeartRateBPM` keeps a fresh Watch sample
+            // from being clobbered by a stale poll arriving
+            // within 0.5s.
+            self.ingestHeartRateBPM(bpm, at: date)
         }
 
         Task { @MainActor in
@@ -575,15 +617,39 @@ final class FreeRunViewModel {
         currentHeartRateBPM = nil
     }
 
-    // Public ingest for Watch-streamed HR samples. The view
-    // (`FreeRunView`) registers the WCSession HR callback and
-    // forwards each update through this method so the property
-    // stays `private(set)` from the rest of the world. Same
+    // Public ingest for HR samples — single funnel for both the
+    // Watch WCSession stream (primary, ~1Hz from the wrist's
+    // HKLiveWorkoutBuilder) and the HK 5s poll fallback. Same
     // contract `RaceViewModel.ingestHeartRate(_:)` provides for
     // race mode — keeps internal mutation centralized while
     // letting the view's WCSession bridge feed the value.
-    func ingestHeartRateBPM(_ bpm: Double) {
+    //
+    // §27 — appends every meaningful sample to `hrBuffer` so
+    // post-run analytics have a dense series. Dedupe window is
+    // 0.5s: the WCSession stream tops out at ~1Hz, so spacing
+    // ≥0.5s preserves it intact, while the HK 5s poll never
+    // collides with a fresh wrist sample. Out-of-order samples
+    // (rare WCSession queued-delivery edge case) are dropped —
+    // the buffer must stay chronological for the zone-time
+    // gap calculation to behave.
+    //
+    // Buffer fill is gated on `engine.isRunning` so paused runs
+    // don't accumulate samples (the live chip can still display
+    // them — that's fine — but the persisted series excludes
+    // the pause window, matching `totalDuration`'s definition).
+    func ingestHeartRateBPM(_ bpm: Double, at sampledAt: Date = Date()) {
         currentHeartRateBPM = bpm
+
+        guard engine?.isRunning == true else { return }
+        guard bpm >= 30, bpm <= 230 else { return }
+
+        if let last = hrBuffer.last {
+            // Drop out-of-order arrivals AND duplicates within
+            // 0.5s of the prior sample.
+            guard sampledAt.timeIntervalSince(last.sampledAt) >= 0.5 else { return }
+        }
+
+        hrBuffer.append(FreeRunHRSample(sampledAt: sampledAt, bpm: bpm))
     }
 
     // MARK: - Post-finish HK rehydrate

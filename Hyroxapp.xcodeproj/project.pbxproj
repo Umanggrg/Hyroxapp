@@ -103,6 +103,7 @@
 				Features/Race/RaceEngine.swift,
 				Models/Division.swift,
 				Models/FreeRun.swift,
+				Models/FreeRunHRSample.swift,
 				Models/FreeRunSplit.swift,
 				Models/HRZone.swift,
 				Models/Split.swift,

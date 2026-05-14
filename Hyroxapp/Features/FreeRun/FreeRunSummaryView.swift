@@ -187,7 +187,26 @@ struct FreeRunSummaryView: View {
     private func prepareShareImage() {
         Task { @MainActor in
             let buckets: [HRZone: TimeInterval]
-            if let endedAt = run.endedAt {
+            // §27 — prefer the persisted in-app HR series when
+            // present (post-Phase-27 runs). This is the dense
+            // series captured live from the Watch WCSession
+            // stream + HK 5s poll fallback, and it doesn't
+            // depend on HK's stored sample density behaving.
+            //
+            // Pre-Phase-27 runs (and any post-Phase-27 run that
+            // somehow ended with an empty series — e.g. iPhone-
+            // only run with no Watch and HK auth denied) fall
+            // through to the existing HK query. Empty result
+            // there too renders the share card with flat zero
+            // bars instead of failing.
+            let inAppSeries = run.hrSeries
+            if !inAppSeries.isEmpty {
+                buckets = HRZone.timeInZones(
+                    samples: inAppSeries,
+                    maxBPM: maxHeartRate,
+                    end: run.endedAt
+                )
+            } else if let endedAt = run.endedAt {
                 buckets = await HealthKitService.shared.timeInZones(
                     from: run.startedAt,
                     to: endedAt,

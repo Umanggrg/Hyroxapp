@@ -170,4 +170,53 @@ enum HRZone: Int, CaseIterable, Sendable {
         }
         return totals
     }
+
+    // §27 — aggregate a dense `FreeRunHRSample` series into
+    // time-in-zone totals. Each sample contributes the time
+    // until the NEXT sample (capped at `maxGap` seconds to
+    // defend against long gaps where the Watch dropped or
+    // briefly went off-wrist). The final sample weighs the
+    // gap from itself to `end` if provided, also capped.
+    //
+    // Default `maxGap` is 30s — looser than the 10s cap inside
+    // `HealthKitService.timeInZones` because the dense
+    // WCSession-streamed series typically samples at ~1Hz and
+    // genuine gaps almost always indicate transient connection
+    // loss rather than per-sample timing noise. The 30s cap
+    // limits the damage of a long unbroken silent window
+    // (Watch died, off wrist for a stretch) while crediting
+    // realistic continuity for the common 5-15s WCSession
+    // hiccup pattern.
+    //
+    // Samples assumed pre-sorted ascending by sampledAt — the
+    // FreeRunViewModel ingest guarantees this via the dedupe
+    // guard. Out-of-order samples in the rare corruption
+    // edge case would inflate the final bucket slightly; not
+    // worth defending against at the cost of every other call.
+    static func timeInZones(
+        samples: [FreeRunHRSample],
+        maxBPM: Int,
+        end: Date? = nil,
+        maxGap: TimeInterval = 30
+    ) -> [HRZone: TimeInterval] {
+        guard !samples.isEmpty else { return [:] }
+        var totals: [HRZone: TimeInterval] = [:]
+        for index in samples.indices {
+            let sample = samples[index]
+            let next: Date
+            if index + 1 < samples.count {
+                next = samples[index + 1].sampledAt
+            } else if let end {
+                next = end
+            } else {
+                continue
+            }
+            let rawGap = next.timeIntervalSince(sample.sampledAt)
+            let weight = max(0, min(rawGap, maxGap))
+            guard weight > 0 else { continue }
+            let bucket = zone(for: sample.bpm, maxBPM: maxBPM)
+            totals[bucket, default: 0] += weight
+        }
+        return totals
+    }
 }

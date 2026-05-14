@@ -86,6 +86,26 @@ final class FreeRun {
     var heartRateAvgBPM: Double?
     var heartRateMaxBPM: Double?
 
+    // Dense HR sample series captured during the run — every
+    // WCSession HR sample streamed from the Watch + every HK
+    // poll fallback sample, in chronological order, deduped to
+    // a 0.5s minimum interval. Encoded as JSON-Codable
+    // `[FreeRunHRSample]` so SwiftData stores it as a single
+    // BLOB column (external storage to keep query performance
+    // up — same as `photoData`).
+    //
+    // Why this exists alongside the per-split avg/max: post-run
+    // zone-time analytics (share card, eventually Profile-level
+    // trends) need a dense series, not just per-split summaries.
+    // Pre-Phase-27 the share card re-queried HK directly, which
+    // failed when HK's stored sample density was sparse — a
+    // 34-min run could report only 14 min of zone time. Capturing
+    // the WCSession stream ourselves into this field guarantees
+    // the dense series persists regardless of HK's storage
+    // behavior. Nil for pre-Phase-27 runs (additive schema
+    // migration).
+    @Attribute(.externalStorage) var hrSeriesData: Data?
+
     // Active calories burned, kcal. Optional like the HR fields.
     var activeCaloriesKcal: Double?
 
@@ -173,6 +193,24 @@ final class FreeRun {
 
     var splitUnit: FreeRunSplitUnit {
         FreeRunSplitUnit(rawValue: splitUnitRaw) ?? .mile
+    }
+
+    // Decode the persisted HR sample series. Empty array when
+    // the BLOB is nil (pre-Phase-27 runs) or decoding fails
+    // (corrupt data — defensively swallowed so a single bad row
+    // can't crash the History feed).
+    var hrSeries: [FreeRunHRSample] {
+        guard let data = hrSeriesData else { return [] }
+        return (try? JSONDecoder().decode([FreeRunHRSample].self, from: data)) ?? []
+    }
+
+    // Re-encode a new HR series and persist it. Called by
+    // FreeRunViewModel on `end()` after flushing the in-memory
+    // buffer. Quiet on encode failure for the same defensive
+    // reason — losing the dense series for one run is preferable
+    // to a crash.
+    func setHRSeries(_ samples: [FreeRunHRSample]) {
+        hrSeriesData = try? JSONEncoder().encode(samples)
     }
 
     // True once `endedAt` has been written — used by History +
