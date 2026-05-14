@@ -73,6 +73,7 @@ struct SettingsView: View {
                 inRaceDisplaysSection
                 audioCuesSection
                 sensorsSection
+                devicesSection
                 notificationsSection
                 privacySection
                 dataSection
@@ -411,6 +412,54 @@ struct SettingsView: View {
             .listRowBackground(Color.surface)
         } header: {
             Text("Sensors (experimental)")
+        }
+    }
+
+    // §20 Path A — devices section. Today: external BLE HR monitor
+    // pairing (Garmin in broadcast mode, Polar H10, Wahoo TICKR,
+    // HRM-Pro Plus, etc.). Apple Watch + AirPods pair via iOS
+    // system settings; this section covers the standard-BLE-HRS
+    // path that those devices don't take.
+    //
+    // Tapping the row presents the pairing sheet. The footnote
+    // surfaces the current pairing state so the athlete can see
+    // their paired device at a glance without entering the sheet.
+    @State private var isPairingHRDevice = false
+
+    private var devicesSection: some View {
+        Section {
+            Button {
+                isPairingHRDevice = true
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                        .foregroundStyle(Color.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(profile.pairedHRDeviceName ?? "Pair external HR monitor")
+                            .foregroundStyle(Color.textPrimary)
+                        if profile.pairedHRDeviceUUID != nil {
+                            Text("Tap to manage")
+                                .font(.caption)
+                                .foregroundStyle(Color.textTertiary)
+                        }
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color.textTertiary)
+                }
+            }
+            .listRowBackground(Color.surface)
+
+            footnote(
+                "Pair any Bluetooth heart rate monitor — Garmin watches in broadcast mode, Polar H10, Wahoo TICKR, HRM-Pro Plus, etc. — and Trakrr uses it as the HR source for races and Free Runs. Apple Watch and AirPods Pro 3 pair through iOS settings; this is for everyone else."
+            )
+            .listRowBackground(Color.surface)
+        } header: {
+            Text("Devices")
+        }
+        .sheet(isPresented: $isPairingHRDevice) {
+            ExternalHRPairingSheet()
         }
     }
 

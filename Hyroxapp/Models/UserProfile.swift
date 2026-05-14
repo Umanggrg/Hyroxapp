@@ -263,6 +263,27 @@ final class UserProfile {
     // reflect state via its color/text.
     var coachingOverlaysEnabled: Bool = true
 
+    // §20 Path A — paired external BLE HR device. Identifies a
+    // Garmin watch (in HR broadcast mode), Polar H10 chest strap,
+    // Wahoo TICKR, HRM-Pro Plus, or any other device that
+    // advertises the standard Bluetooth Heart Rate Service GATT
+    // profile. Two-field record (UUID + display name) so the
+    // pairing UI can show "Forerunner 265" without doing a
+    // separate scan to resolve the name.
+    //
+    // Both nil for athletes who've never paired (the default).
+    // Both populated by the pairing flow on a successful first
+    // connect. Cleared by "Unpair device" in Settings → Devices.
+    // Additive migration — pre-§20 athletes decode with nil here.
+    //
+    // The UUID is iOS's CoreBluetooth-assigned identifier
+    // (CBPeripheral.identifier), which is STABLE per-device-per-
+    // device-per-iPhone-pair. Survives app restarts but doesn't
+    // round-trip to the cloud (different phones see different
+    // UUIDs for the same physical peripheral).
+    var pairedHRDeviceUUID: String? = nil
+    var pairedHRDeviceName: String? = nil
+
     // Pace ahead/behind chip in the in-race header. Compares
     // actual elapsed vs naïve split of target finish time.
     // Off → no pace chip at all. Athletes who race by feel

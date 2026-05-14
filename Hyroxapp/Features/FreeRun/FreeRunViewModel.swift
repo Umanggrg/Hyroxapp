@@ -610,11 +610,28 @@ final class FreeRunViewModel {
     // users (no paired Watch) get sparse HR — the chip simply
     // hides until a sample lands.
     private func startHeartRateObservation() {
-        // No-op — wired through the workout manager's callback.
+        // No-op for the iPhone HK poll path — wired through the
+        // workout manager's callback. §20 Path A adds the
+        // external BLE strap path here: register the service's
+        // onHeartRate callback so Garmin / Polar / Wahoo /
+        // HRM-Pro samples funnel into the same ingest as the
+        // Watch + AirPods paths. Safe no-op when no BLE strap
+        // is paired.
+        ExternalHRService.shared.onHeartRate = { [weak self] bpm, sampledAt in
+            guard let self else { return }
+            self.ingestHeartRateBPM(bpm, at: sampledAt)
+        }
+        ExternalHRService.shared.attemptReconnectToPaired()
     }
 
     private func stopHeartRateObservation() {
         currentHeartRateBPM = nil
+        // §20 Path A — clear the BLE callback so a stale closure
+        // doesn't keep firing into a torn-down viewmodel. We
+        // intentionally DON'T disconnect the peripheral — the
+        // BLE connection persists across runs to avoid the
+        // reconnect handshake on every start.
+        ExternalHRService.shared.onHeartRate = nil
     }
 
     // Public ingest for HR samples — single funnel for both the

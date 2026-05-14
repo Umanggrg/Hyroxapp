@@ -467,6 +467,18 @@ struct ContentView: View {
 
         guard let profile = profiles.first else { return }
 
+        // §20 Path A — hand the paired BLE HR device record from
+        // UserProfile to the ExternalHRService cache. Doesn't
+        // initiate a connection (that's race / free-run start's
+        // job); just makes the service aware that a pairing
+        // exists so its `attemptReconnectToPaired` later finds
+        // the right peripheral UUID.
+        let pairedUUID = profile.pairedHRDeviceUUID.flatMap { UUID(uuidString: $0) }
+        ExternalHRService.shared.loadPaired(
+            uuid: pairedUUID,
+            name: profile.pairedHRDeviceName
+        )
+
         // Stamp the Supabase user ID onto the local profile so any
         // future sync code knows which remote account this profile
         // belongs to. Lives here in bootstrap (called on every

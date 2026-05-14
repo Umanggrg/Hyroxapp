@@ -35,6 +35,8 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Trakrr uses Bluetooth to pair a Garmin watch (in HR broadcast mode), Polar chest strap, Wahoo TICKR, or any other external heart-rate monitor as a heart-rate source for races and Free Runs.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_hyrox-duo._tcp</string>

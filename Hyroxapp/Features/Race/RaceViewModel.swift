@@ -1724,6 +1724,25 @@ final class RaceViewModel {
         // racers.
         HeadphoneMotionService.shared.start()
 
+        // §20 Path A — wire the external BLE HR service into
+        // the same ingest funnel the Watch WCSession path uses.
+        // The callback flows BPM + timestamp straight to
+        // appendToHRBuffer via ingestHeartRate's logic. Safe
+        // no-op when no BLE strap is paired (the service's
+        // attemptReconnectToPaired bails immediately on a nil
+        // pairedPeripheralUUID).
+        ExternalHRService.shared.onHeartRate = { [weak self] bpm, sampledAt in
+            guard let self else { return }
+            // Sanity bounds — match the Watch ingest's defense.
+            guard bpm >= 30, bpm <= 230 else { return }
+            self.currentHeartRateBPM = bpm
+            // Source attribution flips to externalBLE inside the
+            // service's didUpdateValueFor delegate before this
+            // callback fires; no need to set it again here.
+            self.appendToHRBuffer(bpm: bpm, sampledAt: sampledAt)
+        }
+        ExternalHRService.shared.attemptReconnectToPaired()
+
         #if canImport(HealthKit)
         stopHeartRatePolling()
 
@@ -1792,6 +1811,14 @@ final class RaceViewModel {
         // would drain AirPods battery without any UI surface
         // consuming the values.
         HeadphoneMotionService.shared.stop()
+        // §20 Path A — clear the external HR callback so a
+        // race-scoped closure doesn't keep firing after teardown.
+        // We deliberately DON'T disconnect the BLE peripheral —
+        // the connection persists across races so the user
+        // doesn't pay the reconnect handshake on every start.
+        // The next startHeartRatePolling re-registers the
+        // callback for the new race.
+        ExternalHRService.shared.onHeartRate = nil
     }
 
     // MARK: - HealthKit

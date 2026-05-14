@@ -90,6 +90,22 @@ final class SensorSourceRegistry {
     /// attribution chip + the post-race provenance block.
     private(set) var airPodsModelName: String? = nil
 
+    /// §20 Path A — true when a paired external BLE HR strap
+    /// (Garmin in broadcast mode, Polar H10, Wahoo TICKR,
+    /// HRM-Pro Plus, etc.) is currently connected via
+    /// `ExternalHRService`. Distinct from "we have a pairing
+    /// record" (`UserProfile.pairedHRDeviceUUID` non-nil) —
+    /// this reflects the LIVE Bluetooth state, which can flake
+    /// during a race. The pre-race sensor check on TrainHubView
+    /// uses this to decide whether the live HR chip will have
+    /// a source on race start.
+    private(set) var hasExternalHR: Bool = false
+
+    /// Display name of the connected external BLE HR device,
+    /// or nil when none. Set by `ExternalHRService` on connect.
+    /// Used by the source-attribution chip + provenance block.
+    private(set) var externalHRDeviceName: String? = nil
+
     // MARK: - HR source provenance
 
     /// The most recent HR sample's source, as observed by the HR
@@ -101,8 +117,9 @@ final class SensorSourceRegistry {
 
     enum HRSource: Equatable, Hashable {
         case watch
-        case airPods(model: String)   // model from sourceRevision, e.g. "AirPods Pro 3"
-        case fused                    // both Watch + AirPods publishing within the same window
+        case airPods(model: String)         // model from sourceRevision, e.g. "AirPods Pro 3"
+        case externalBLE(displayName: String) // §20 Path A — Garmin, Polar, Wahoo, any HRS-broadcast device
+        case fused                            // multiple sources publishing within the same window
         case iPhone
         case unknown
 
@@ -112,6 +129,11 @@ final class SensorSourceRegistry {
         /// classifier rules. Defensive across the various names
         /// Apple uses across iOS versions ("Apple Watch", "Sarah's
         /// Apple Watch", "AirPods Pro 3", etc.).
+        ///
+        /// Note: external BLE devices (Garmin etc.) don't flow
+        /// through HK so they're never classified through this
+        /// path. ExternalHRService publishes `.externalBLE`
+        /// directly when a BLE sample arrives.
         static func classify(sourceName: String) -> HRSource {
             let lower = sourceName.lowercased()
             if lower.contains("apple watch") || lower == "watch" {
@@ -129,11 +151,12 @@ final class SensorSourceRegistry {
         /// Short display label for the in-line attribution chip.
         var shortLabel: String {
             switch self {
-            case .watch:                return "Apple Watch"
-            case .airPods(let model):   return model
-            case .fused:                return "Fused"
-            case .iPhone:               return "iPhone"
-            case .unknown:              return "—"
+            case .watch:                       return "Apple Watch"
+            case .airPods(let model):          return model
+            case .externalBLE(let name):       return name
+            case .fused:                       return "Fused"
+            case .iPhone:                      return "iPhone"
+            case .unknown:                     return "—"
             }
         }
 
@@ -144,6 +167,7 @@ final class SensorSourceRegistry {
             switch self {
             case .watch:        return "applewatch"
             case .airPods:      return "airpodspro"
+            case .externalBLE:  return "dot.radiowaves.left.and.right"
             case .fused:        return "arrow.triangle.merge"
             case .iPhone:       return "iphone"
             case .unknown:      return "heart"
@@ -318,6 +342,19 @@ final class SensorSourceRegistry {
         lastHRSource = source
     }
 
+    /// §20 Path A — record connect / disconnect of an external
+    /// BLE HR device (Garmin in broadcast mode, Polar H10, etc.).
+    /// Called by `ExternalHRService` on its peripheral lifecycle
+    /// callbacks. Drives `hasExternalHR` + `externalHRDeviceName`
+    /// which the TrainHub sensor row and Settings → Devices
+    /// section both read.
+    ///
+    /// On connect: pass the display name. On disconnect: pass nil.
+    func recordExternalHRConnection(_ deviceName: String?) {
+        externalHRDeviceName = deviceName
+        hasExternalHR = (deviceName != nil)
+    }
+
     // MARK: - Convenience
 
     /// True when at least one HR-capable device is currently
@@ -326,7 +363,7 @@ final class SensorSourceRegistry {
     /// "no Watch paired" because the Watch could be paired but
     /// off-wrist.
     var canTrackHR: Bool {
-        hasWatch || hasAirPodsHR
+        hasWatch || hasAirPodsHR || hasExternalHR
     }
 
     /// True when at least one motion-capable sensor is
