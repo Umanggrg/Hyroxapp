@@ -959,47 +959,84 @@ final class RaceViewModel {
         let segmentStart = split.startedAt
         let segmentEnd = split.endedAt
 
+        // §28b — series-first HR aggregates. When the in-app
+        // hrBuffer has samples in this segment's window, compute
+        // avg / max / entry / end / stdDev locally instead of
+        // round-tripping HK. Two reasons:
+        //   1. For §20 Path A (Garmin / external BLE strap)
+        //      users, HK has no race-density samples because
+        //      there's no HKWorkoutSession on the iPhone — the
+        //      buffer is the only authoritative source.
+        //   2. Even for Apple Watch users, the in-memory buffer
+        //      is faster, has no I/O latency, and matches the
+        //      exact density Trakrr captured during the race
+        //      (which can be denser than what HK eventually
+        //      stores).
+        //
+        // Calories and SpO2 stay HK-only — those aren't in the
+        // buffer (calories are Watch-derived, SpO2 needs Watch
+        // Series 6+ sensor). For Garmin users those fields will
+        // be nil; the UI hides them silently.
+        let seriesStats = hrStatsFromBuffer(start: segmentStart, end: segmentEnd)
+
         // `@MainActor` on the Task pins the whole closure to MainActor
         // after the parallel HealthKit queries resume — safe to mutate
         // the engine directly without an extra MainActor.run hop.
         Task { @MainActor [weak self] in
             guard let self else { return }
 
-            // Run all queries in parallel — HR aggregate, entry HR,
-            // end HR, and calories sum are independent. Sequential
-            // awaits would 4x the wall-clock latency before the
-            // station's stats appear on screen.
+            // Run HK queries in parallel — calories and SpO2 are
+            // always needed; the HR queries only fire when the
+            // in-app series didn't cover the window. async let
+            // composition keeps the wall-clock latency low when
+            // both paths are active for the same segment.
+            async let calories = HealthKitService.shared.activeCalories(
+                from: segmentStart,
+                to: segmentEnd
+            )
+            async let spo2Min = HealthKitService.shared.lowestOxygenSaturation(
+                from: segmentStart,
+                to: segmentEnd
+            )
+
+            // HR fallback queries — only fire when the in-app
+            // series didn't cover this segment. For Garmin users,
+            // seriesStats is always non-nil during an active race
+            // (or post-finish rehydrate, before teardown).
+            // Conditionally `async let` is awkward in Swift, so
+            // we run them and discard if seriesStats wins —
+            // negligible cost for Apple Watch users (queries are
+            // fast) and zero cost for Garmin users (HK returns
+            // empty).
             async let heartRate = HealthKitService.shared.heartRateStats(
                 from: segmentStart,
                 to: segmentEnd
             )
             async let entryHR = HealthKitService.shared.heartRate(at: segmentStart)
             async let endHR = HealthKitService.shared.heartRate(at: segmentEnd)
-            async let calories = HealthKitService.shared.activeCalories(
-                from: segmentStart,
-                to: segmentEnd
-            )
-            // HR std dev — pacing-quality signal computed from
-            // individual samples in the window. Parallel with the
-            // other queries; another HK round-trip but cheap when
-            // run concurrently.
             async let hrStdDev = HealthKitService.shared.heartRateStdDev(
                 from: segmentStart,
                 to: segmentEnd
             )
-            // SpO2 minimum — §13.8 Tier 4 anaerobic-threshold
-            // proxy. Watch Series 6+ only; older Watches return
-            // nil and the StationDetailView line silently hides.
-            async let spo2Min = HealthKitService.shared.lowestOxygenSaturation(
-                from: segmentStart,
-                to: segmentEnd
-            )
-            let hr = await heartRate
-            let entry = await entryHR
-            let end = await endHR
+
             let kcal = await calories
-            let stdDev = await hrStdDev
             let spo2 = await spo2Min
+            let hkHR = await heartRate
+            let hkEntry = await entryHR
+            let hkEnd = await endHR
+            let hkStdDev = await hrStdDev
+
+            // Coalesce — series wins when present, HK fills any
+            // gaps the series didn't cover (mid-race where the
+            // segment window had no samples, or a single short
+            // segment where the dedupe pass dropped everything).
+            let hr = (
+                avg: seriesStats?.avg ?? hkHR.avg,
+                max: seriesStats?.max ?? hkHR.max
+            )
+            let entry = seriesStats?.entry ?? hkEntry
+            let end = seriesStats?.end ?? hkEnd
+            let stdDev = seriesStats?.stdDev ?? hkStdDev
 
             // Skip the persist round-trip if HealthKit had nothing
             // for this segment — common for indoor sessions without
@@ -1041,18 +1078,33 @@ final class RaceViewModel {
             guard let self else { return }
             guard self.engine.splits.indices.contains(index) else { return }
 
+            // §28b — try the in-app series for recovery samples
+            // first. The buffer holds samples that arrive AFTER
+            // the segment closed (during the next segment or
+            // post-finish), so 30s/60s post-end samples are
+            // there too. Falls through to HK when no buffer
+            // sample is close enough to the target moment.
+            let recovery30FromBuffer = self.hrAtMomentFromBuffer(
+                segmentEnd.addingTimeInterval(30),
+                tolerance: 15
+            )
+            let recovery60FromBuffer = self.hrAtMomentFromBuffer(
+                segmentEnd.addingTimeInterval(60),
+                tolerance: 15
+            )
+
             async let recovery30 = HealthKitService.shared.heartRate(
                 at: segmentEnd.addingTimeInterval(30)
             )
             async let recovery60 = HealthKitService.shared.heartRate(
                 at: segmentEnd.addingTimeInterval(60)
             )
-            let r30 = await recovery30
-            let r60 = await recovery60
+            let r30 = recovery30FromBuffer ?? (await recovery30)
+            let r60 = recovery60FromBuffer ?? (await recovery60)
 
-            // Skip the persist if HealthKit had nothing — common
-            // when the user finished their workout and took the
-            // Watch off, or when phone reachability dropped.
+            // Skip the persist if neither source had anything —
+            // common when the user finished their workout and took
+            // the Watch off, or when phone reachability dropped.
             guard r30 != nil || r60 != nil else { return }
 
             self.engine.setRecoveryStats(
@@ -1585,6 +1637,73 @@ final class RaceViewModel {
             guard sampledAt.timeIntervalSince(last.sampledAt) >= 0.5 else { return }
         }
         hrBuffer.append(HRSample(sampledAt: sampledAt, bpm: bpm))
+    }
+
+    // §28b — derive HR aggregates (avg / max / entry / end /
+    // stdDev) for a window from the in-memory hrBuffer. Returns
+    // nil when no samples fall inside the window. Used by
+    // `attachSegmentStats` to compute per-station HR stats
+    // without round-tripping HK — essential for §20 Path A
+    // (Garmin / external BLE strap) users where HK has no
+    // race-density samples, and a nice latency win for Apple
+    // Watch users where the buffer matches or exceeds HK's
+    // density.
+    //
+    // `entry` is the earliest sample in window, `end` is the
+    // latest — a few-seconds approximation of HK's "at this
+    // exact moment" semantic, but close enough for the
+    // per-station physiology card and the recovery analytics
+    // that consume these fields.
+    //
+    // Sample standard deviation uses Bessel-corrected N-1
+    // denominator to match HealthKitService.heartRateStdDev's
+    // contract.
+    private func hrStatsFromBuffer(
+        start: Date,
+        end: Date
+    ) -> (avg: Double, max: Double, entry: Double, end: Double, stdDev: Double?)? {
+        let inWindow = hrBuffer.filter {
+            $0.sampledAt >= start && $0.sampledAt <= end
+        }
+        guard !inWindow.isEmpty else { return nil }
+
+        let bpms = inWindow.map(\.bpm)
+        let avg = bpms.reduce(0, +) / Double(bpms.count)
+        let maxBpm = bpms.max() ?? bpms[0]
+        let entry = inWindow.first!.bpm  // safe — checked !inWindow.isEmpty above
+        let endBpm = inWindow.last!.bpm
+
+        var stdDev: Double?
+        if bpms.count >= 2 {
+            let mean = avg
+            let variance = bpms.reduce(0.0) { acc, value in
+                acc + (value - mean) * (value - mean)
+            } / Double(bpms.count - 1)
+            stdDev = variance.squareRoot()
+        }
+
+        return (avg: avg, max: maxBpm, entry: entry, end: endBpm, stdDev: stdDev)
+    }
+
+    // §28b — single-moment HR lookup against the in-memory
+    // hrBuffer. Returns the closest sample within `tolerance`
+    // seconds of the target moment, or nil when nothing in
+    // range. Used by the post-segment recovery-HR capture
+    // (30s and 60s after segment end) so Garmin users see
+    // recovery scores without HK in the loop.
+    private func hrAtMomentFromBuffer(
+        _ moment: Date,
+        tolerance: TimeInterval = 30
+    ) -> Double? {
+        let candidates = hrBuffer.filter {
+            abs($0.sampledAt.timeIntervalSince(moment)) <= tolerance
+        }
+        guard !candidates.isEmpty else { return nil }
+        let closest = candidates.min { a, b in
+            abs(a.sampledAt.timeIntervalSince(moment)) <
+            abs(b.sampledAt.timeIntervalSince(moment))
+        }
+        return closest?.bpm
     }
 
     // MARK: - Live HR polling
