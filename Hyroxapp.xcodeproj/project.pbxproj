@@ -109,7 +109,6 @@
 				Models/Split.swift,
 				Models/Station.swift,
 				Shared/DuoSync/SerializedSplit.swift,
-				Shared/ExternalHRService.swift,
 				Shared/Haptics.swift,
 				Shared/RaceStats.swift,
 				Shared/Theme.swift,

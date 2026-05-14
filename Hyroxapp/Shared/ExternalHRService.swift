@@ -336,7 +336,13 @@ final class ExternalHRService: NSObject {
     ///   • Optional bytes: energy, RR-intervals (skipped)
     ///
     /// Returns nil for malformed payloads.
-    fileprivate static func parseHRMeasurement(_ data: Data) -> Double? {
+    ///
+    /// `nonisolated` because the CBPeripheralDelegate's
+    /// `didUpdateValueFor` callback (which is itself nonisolated
+    /// per the §8.1 delegate-bridge pattern) needs to call this
+    /// synchronously. Pure data math with no instance state
+    /// access — fine to be nonisolated.
+    fileprivate nonisolated static func parseHRMeasurement(_ data: Data) -> Double? {
         guard data.count >= 2 else { return nil }
         let flags = data[0]
         let is16BitFormat = (flags & 0x01) != 0
