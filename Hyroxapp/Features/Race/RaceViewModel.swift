@@ -1378,7 +1378,12 @@ final class RaceViewModel {
             if race.hrSourcePrimary == nil {
                 let source = SensorSourceRegistry.shared.lastHRSource
                 if source != .unknown {
-                    race.hrSourcePrimary = source.shortLabel
+                    // §30 — use persistedString (not shortLabel) so
+                    // .externalBLE round-trips through classify
+                    // correctly via the "BLE: " prefix. shortLabel
+                    // would write "Forerunner 265" which classify
+                    // can't recognize as a BLE source on read.
+                    race.hrSourcePrimary = source.persistedString
                 }
             }
 

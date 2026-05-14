@@ -124,17 +124,24 @@ final class SensorSourceRegistry {
         case unknown
 
         /// Map a `HKHeartRateSample.sourceRevision.source.name`
-        /// string to an HRSource case. Centralizes the substring
-        /// matching so every HR ingestion path uses the same
-        /// classifier rules. Defensive across the various names
-        /// Apple uses across iOS versions ("Apple Watch", "Sarah's
-        /// Apple Watch", "AirPods Pro 3", etc.).
-        ///
-        /// Note: external BLE devices (Garmin etc.) don't flow
-        /// through HK so they're never classified through this
-        /// path. ExternalHRService publishes `.externalBLE`
-        /// directly when a BLE sample arrives.
+        /// string (or our own `persistedString`) back to an
+        /// HRSource case. Centralizes the substring matching so
+        /// every HR ingestion path uses the same classifier
+        /// rules. Defensive across the various names Apple uses
+        /// across iOS versions ("Apple Watch", "Sarah's Apple
+        /// Watch", "AirPods Pro 3", etc.) plus the §20 Path A
+        /// `BLE: <name>` prefix we encode for external BLE HR
+        /// monitors (Garmin / Polar / Wahoo etc.) when persisting
+        /// onto `Race.hrSourcePrimary`.
         static func classify(sourceName: String) -> HRSource {
+            // §20 Path A — recognize our own persistence prefix
+            // first. The "BLE: " marker is something `persistedString`
+            // emits for `.externalBLE`; HealthKit never produces it,
+            // so a positive match here is unambiguous.
+            if sourceName.hasPrefix("BLE: ") {
+                let display = String(sourceName.dropFirst("BLE: ".count))
+                return .externalBLE(displayName: display)
+            }
             let lower = sourceName.lowercased()
             if lower.contains("apple watch") || lower == "watch" {
                 return .watch
@@ -146,6 +153,23 @@ final class SensorSourceRegistry {
                 return .iPhone
             }
             return .unknown
+        }
+
+        /// Round-trip-safe string for persistence into
+        /// `Race.hrSourcePrimary`. Lets `classify(sourceName:)`
+        /// reconstruct the case (with payload) at read time.
+        /// Distinct from `shortLabel` because external BLE
+        /// devices need a prefix marker — "Forerunner 265" alone
+        /// would re-classify as `.unknown`.
+        var persistedString: String {
+            switch self {
+            case .watch:                       return "Apple Watch"
+            case .airPods(let model):          return model
+            case .externalBLE(let name):       return "BLE: \(name)"
+            case .fused:                       return "Fused"
+            case .iPhone:                      return "iPhone"
+            case .unknown:                     return ""
+            }
         }
 
         /// Short display label for the in-line attribution chip.

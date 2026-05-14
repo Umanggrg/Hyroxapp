@@ -159,6 +159,15 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 Task { await SocialNotificationService.checkAndFire() }
+                // §30 — try to reconnect to the paired external BLE
+                // HR device on every foreground transition. iOS
+                // aggressively suspends CoreBluetooth in the
+                // background; after a long background stretch the
+                // peripheral connection often needs a kick. Bails
+                // silently when no pairing record exists. The
+                // service's attemptReconnectToPaired guards on its
+                // own state, so this is safe to call repeatedly.
+                ExternalHRService.shared.attemptReconnectToPaired()
             }
         }
         // Receive Quick Action taps from the AppDelegate. Routing
