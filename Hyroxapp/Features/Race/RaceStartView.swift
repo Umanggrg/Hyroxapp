@@ -163,7 +163,7 @@ struct RaceStartView: View {
 
                 heroBlock
 
-                Spacer(minLength: 24)
+                Spacer(minLength: 16)
 
                 if let event = nextEvent {
                     eventCountdownChip(for: event)
@@ -197,7 +197,7 @@ struct RaceStartView: View {
                 }
 
                 primaryCTA
-                    .padding(.bottom, 24)
+                    .padding(.bottom, 16)
             }
             .padding(.horizontal, 4)
 
@@ -223,6 +223,12 @@ struct RaceStartView: View {
                 Spacer()
             }
         }
+        // Tab bar hidden during pre-race — the Start CTA needs
+        // the full bottom edge, and the focused "ready to race"
+        // moment shouldn't compete with feed/history/profile/
+        // watch entry points. ContentView observes the
+        // preference and restores the bar on disappear.
+        .hideCustomTabBar()
         .onAppear {
             // Kick off the ambient CTA pulse on a small delay so the
             // initial render doesn't show the animation start.
@@ -351,23 +357,25 @@ struct RaceStartView: View {
     // primary CTA further down without adding real information. The
     // HYROX wordmark itself is the brand anchor; the caps strap
     // ("READY TO RACE") provides the contextual call-to-action
-    // already. Wordmark also dropped from 76pt → 60pt: at 76 the
-    // hero ate ~30% of the vertical space on a 6.1" iPhone, leaving
-    // the Start CTA and target row clustered at the bottom. 60pt
-    // still reads as a hero, frees ~80pt of vertical breathing
-    // room for the controls below.
+    // already. Wordmark tuned through three iterations:
+    // 76pt (v1) → 60pt (v2) → 48pt (v3). v3 was triggered by a
+    // real-device test where the Start CTA was clipped behind the
+    // custom tab bar on a 6.1" iPhone. Compressing the hero (and
+    // tightening the spacer below) reclaims ~30pt for the controls
+    // beneath without losing the hero feel — 48pt with letter-
+    // spacing still anchors the screen as the brand moment.
     private var heroBlock: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 4) {
             Text("READY TO RACE")
                 .font(.caption2.weight(.heavy))
                 .tracking(2.0)
                 .foregroundStyle(Color.accent)
 
             Text("HYROX")
-                .font(.system(size: 60, weight: .black, design: .rounded))
-                .tracking(5)
+                .font(.system(size: 48, weight: .black, design: .rounded))
+                .tracking(4)
                 .foregroundStyle(Color.textPrimary)
-                .shadow(color: Color.accent.opacity(0.3), radius: 20, x: 0, y: 0)
+                .shadow(color: Color.accent.opacity(0.3), radius: 16, x: 0, y: 0)
         }
     }
 

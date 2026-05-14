@@ -60,6 +60,17 @@ struct ContentView: View {
     // brand-new-user case (no follows yet → "Feed is quiet").
     @State private var selectedTab: Tab = .feed
 
+    // Cathedral-mode chrome control — true when a child view
+    // (RaceStartView or RaceView's in-progress phase) wants the
+    // bottom custom tab bar hidden so the in-race surface gets
+    // its full screen budget. Updated reactively via the
+    // `HideTabBarPreferenceKey` SwiftUI preference — children
+    // emit `.hideTabBar(true)` on appear, `.hideTabBar(false)`
+    // on disappear, and the OR-reduce in the preference key's
+    // `reduce` function means "any subview that asks to hide
+    // wins" without explicit coordination.
+    @State private var hideTabBar: Bool = false
+
     // Scene-phase observer drives the foreground social
     // notification check. Each transition into `.active`
     // (cold launch, returning from background) fires a
@@ -123,7 +134,20 @@ struct ContentView: View {
         // Appearance picker.
         .preferredColorScheme(profiles.first?.resolvedThemePreference.colorScheme)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            customTabBar
+            // Cathedral mode — child views can ask to hide the
+            // tab bar via the HideTabBarPreferenceKey. The
+            // EmptyView fallback collapses the inset to zero so
+            // the child surface uses the full screen height
+            // (Start Race button, in-race Next Station button,
+            // etc. all clear the bottom edge naturally).
+            if hideTabBar {
+                EmptyView()
+            } else {
+                customTabBar
+            }
+        }
+        .onPreferenceChange(HideTabBarPreferenceKey.self) { newValue in
+            hideTabBar = newValue
         }
         .onAppear(perform: bootstrap)
         // Foreground social notifications. Fires on every
@@ -623,4 +647,40 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
+}
+
+// MARK: - Cathedral chrome preference
+
+// Child views (RaceStartView, RaceView in-progress phase, future
+// FreeRunView in-progress, etc.) emit this preference to ask
+// ContentView to hide the custom tab bar so the in-race surface
+// gets the full screen budget.
+//
+// Why a preference key over a global observable: preferences
+// flow up the view tree exactly when SwiftUI reconciles them,
+// so the visibility tracks view lifecycle correctly (hide on
+// appear, restore on disappear) without manual onAppear /
+// onDisappear bookkeeping. Same pattern Apple uses internally
+// for navigation titles and toolbar items.
+//
+// Reduce: OR-combine — if ANY subview wants the bar hidden,
+// hide it. Means we don't have to coordinate across nested
+// presenters; whoever cares speaks up.
+struct HideTabBarPreferenceKey: PreferenceKey {
+    static var defaultValue: Bool = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) {
+        value = value || nextValue()
+    }
+}
+
+extension View {
+    /// Ask ContentView to hide the bottom custom tab bar while
+    /// this view is on screen. Call with `true` on a focused
+    /// surface (race start screen, in-race cathedral) and
+    /// `false` everywhere else. Stacks fine — multiple emitters
+    /// of `true` all map to "hidden" via the preference key's
+    /// OR-reduce.
+    func hideCustomTabBar(_ hide: Bool = true) -> some View {
+        preference(key: HideTabBarPreferenceKey.self, value: hide)
+    }
 }

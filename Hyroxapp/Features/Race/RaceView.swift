@@ -969,19 +969,26 @@ struct RaceView: View {
     // hero overlay (wireframe §03.4) and the post-race summary.
     @ViewBuilder
     private var finishedPhase: some View {
-        if isShowingFinishHero {
-            RaceFinishHeroView(
-                totalDuration: finishHeroTotalDuration,
-                pbDelta: finishHeroPBDelta,
-                onTap: dismissFinishHero
-            )
-            .transition(.opacity)
-        } else {
-            // RaceSummaryView controls its own bleed so the
-            // finish-moment backdrop reaches the edges.
-            RaceSummaryView(viewModel: viewModel)
+        Group {
+            if isShowingFinishHero {
+                RaceFinishHeroView(
+                    totalDuration: finishHeroTotalDuration,
+                    pbDelta: finishHeroPBDelta,
+                    onTap: dismissFinishHero
+                )
                 .transition(.opacity)
+            } else {
+                // RaceSummaryView controls its own bleed so the
+                // finish-moment backdrop reaches the edges.
+                RaceSummaryView(viewModel: viewModel)
+                    .transition(.opacity)
+            }
         }
+        // Tab bar hidden through the finish hero + summary so
+        // the post-race moment isn't interrupted by chrome.
+        // Reappears when the user taps Done and the engine
+        // resets to .notStarted (preRacePhase / Train hub).
+        .hideCustomTabBar()
     }
 
     // Two-tap-advance mode: between segments the user lands here.
@@ -990,6 +997,9 @@ struct RaceView: View {
         inRoxzoneView
             .padding(.horizontal, Layout.screenMargin)
             .transition(roxzoneTransition)
+            // Cathedral mode — bottom tab bar hides so the
+            // Start Next CTA owns the full bottom edge.
+            .hideCustomTabBar()
     }
 
     // Active in-progress cathedral phase.
@@ -997,6 +1007,11 @@ struct RaceView: View {
         inProgressView
             .padding(.horizontal, Layout.screenMargin)
             .transition(.opacity)
+            // Cathedral mode — bottom tab bar hides so the
+            // big advance CTA isn't crowded by Feed / History
+            // / Profile / Watch chrome. The race is the only
+            // thing on screen now.
+            .hideCustomTabBar()
     }
 
     // Roxzone slides in from below with a slight scale-up — reads
