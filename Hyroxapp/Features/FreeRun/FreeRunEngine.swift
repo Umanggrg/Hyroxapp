@@ -195,7 +195,6 @@ final class FreeRunEngine {
         // Update distance FIRST so the split-capture loop reads
         // the latest value. (If we updated after, the splits
         // would carry the prior cumulative as their "end".)
-        let oldDistance = distanceMetres
         distanceMetres = metres
 
         guard splitsToFire > 0 else { return }
@@ -205,35 +204,51 @@ final class FreeRunEngine {
         // doesn't tell us when EXACTLY each boundary was crossed
         // — it just gives us a snapshot of cumulative distance
         // at one moment. We approximate by assuming constant
-        // pace across the batch, which is fine for the common
-        // case (consecutive 1Hz updates) and acceptable for the
-        // rare case (a 0.6 mi catch-up burst — the splits land
-        // with timestamps a few seconds apart instead of being
-        // exact, but the durations integrate correctly because
-        // every successive split's startedAt is the prior
-        // split's endedAt).
+        // pace across the WHOLE since-last-split window: distance
+        // grew linearly from `lastSplitDistance` (at time
+        // `lastSplitEnd`) to `metres` (at time `date`), so the
+        // boundary at `splitBoundary` was crossed at:
+        //   lastSplitEnd + (date - lastSplitEnd) × fraction
+        // where:
+        //   fraction = (splitBoundary - lastSplitDistance)
+        //              / (metres - lastSplitDistance)
+        //
+        // Phase 26 fix: the original implementation used a
+        // BATCH-relative denominator (metres - oldDistance) for
+        // fraction while keeping a SINCE-LAST-SPLIT numerator
+        // (date - lastSplitEnd) for the time multiplier. When
+        // pedometer batches arrive in small ~5m increments (the
+        // normal case at 1-5s cadence), the fraction collapsed
+        // to a tiny number and splitEndAt got clamped well before
+        // the actual boundary crossing — observed live as
+        // 1:42 / 12:08 / 0:58 splits on a 34:35 run with ~11min
+        // mile pace, total split durations summing to 14:48
+        // instead of ~33:30. Switching to since-last-split
+        // denominator makes the assumed-constant-pace
+        // interpolation actually constant across the right
+        // window, regardless of batch granularity.
         guard case .inProgress(let runStartedAt) = phase else { return }
         let lastSplitEnd = splits.last?.endedAt ?? runStartedAt
         let lastSplitDistance = splits.last?.cumulativeDistanceMetres ?? 0
 
-        let totalElapsedThisBatch = date.timeIntervalSince(lastSplitEnd)
-        let totalDistanceThisBatch = metres - oldDistance
+        let totalElapsedSinceLastSplit = date.timeIntervalSince(lastSplitEnd)
+        let totalDistanceSinceLastSplit = metres - lastSplitDistance
 
-        // Defensive — totalDistanceThisBatch can be 0 if the
-        // monotonic guard above was bypassed somehow; we already
-        // returned in that case but Swift can't know.
-        guard totalDistanceThisBatch > 0 else { return }
+        // Defensive — denominator can be 0 if the monotonic
+        // guard above was bypassed somehow (or if we're
+        // somehow ahead of `metres` already). We've already
+        // returned in those cases but Swift can't prove it.
+        guard totalDistanceSinceLastSplit > 0 else { return }
+        guard totalElapsedSinceLastSplit > 0 else { return }
 
         for i in 1...splitsToFire {
             let splitBoundary = (priorWholeUnits + Double(i)) * unitSize
-            let distanceFromBatchStart = splitBoundary - lastSplitDistance
-            let interpolatedFraction = (splitBoundary - oldDistance) / totalDistanceThisBatch
+            let interpolatedFraction =
+                (splitBoundary - lastSplitDistance)
+                / totalDistanceSinceLastSplit
             let splitEndAt = lastSplitEnd
-                .addingTimeInterval(totalElapsedThisBatch * interpolatedFraction)
+                .addingTimeInterval(totalElapsedSinceLastSplit * interpolatedFraction)
             let splitStartAt = splits.last?.endedAt ?? runStartedAt
-            let segmentDistance = distanceFromBatchStart - (splits.last.map {
-                $0.cumulativeDistanceMetres - lastSplitDistance
-            } ?? 0)
 
             let split = FreeRunSplit(
                 index: splits.count,
@@ -244,7 +259,6 @@ final class FreeRunEngine {
                 heartRateAvgBPM: nil,
                 heartRateMaxBPM: nil
             )
-            _ = segmentDistance  // kept for clarity in the math; final value uses cumulative deltas
             splits.append(split)
         }
     }
