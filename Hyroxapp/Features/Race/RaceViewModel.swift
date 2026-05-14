@@ -1099,8 +1099,16 @@ final class RaceViewModel {
             async let recovery60 = HealthKitService.shared.heartRate(
                 at: segmentEnd.addingTimeInterval(60)
             )
-            let r30 = recovery30FromBuffer ?? (await recovery30)
-            let r60 = recovery60FromBuffer ?? (await recovery60)
+            // Explicit awaits before the ?? coalesce — Swift won't
+            // let `async let` variables be captured inside the
+            // autoclosure ?? expects on its right-hand side. Awaiting
+            // first gets the same parallelism benefit (both queries
+            // are already executing concurrently) and unblocks the
+            // buffer-first / HK-fallback resolution that follows.
+            let hkR30 = await recovery30
+            let hkR60 = await recovery60
+            let r30 = recovery30FromBuffer ?? hkR30
+            let r60 = recovery60FromBuffer ?? hkR60
 
             // Skip the persist if neither source had anything —
             // common when the user finished their workout and took
@@ -1630,13 +1638,19 @@ final class RaceViewModel {
     // zone-time gap calculation in HRZone.timeInZones(samples:)
     // to behave.
     //
-    // Gated on `engine.isRunning` so paused windows don't
-    // accumulate samples; the live chip can still display HR
-    // during a pause (that's fine) but the persisted series
+    // Gated on `engine.state == .inProgress` so paused windows
+    // don't accumulate samples; the live chip can still display
+    // HR during a pause (that's fine) but the persisted series
     // excludes the pause window, which matches how
     // `totalDuration` already accounts for time.
+    //
+    // RaceEngine exposes phase via the `state` enum directly,
+    // not an isRunning helper — the engine has isPaused /
+    // isFinished / isInRoxzone shortcuts but the running case is
+    // implied by `.inProgress`. Pattern-matching keeps the gate
+    // explicit.
     private func appendToHRBuffer(bpm: Double, sampledAt: Date) {
-        guard engine.isRunning else { return }
+        guard case .inProgress = engine.state else { return }
         guard bpm >= 30, bpm <= 230 else { return }
         if let last = hrBuffer.last {
             guard sampledAt.timeIntervalSince(last.sampledAt) >= 0.5 else { return }
