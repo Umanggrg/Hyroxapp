@@ -1558,4 +1558,182 @@ Right now every competitor HYROX app (ROXFIT, Intervals Pro, Garmin native, Stra
 
 Trakrr being the first to say *"bring your AirPods Pro 3 and we'll give you 85% of the HYROX coaching experience"* is a real wedge. Plus the three running-economy metrics (vertical oscillation, posture drift, ground contact) that even Watch-equipped competitors can't surface — because the wrist is the wrong place to measure them.
 
-It's not just a feature add. It's an addressable-market expansion + a defensible technical moat.  
+It's not just a feature add. It's an addressable-market expansion + a defensible technical moat.
+
+---
+
+## 20\. Garmin + External HR Monitor Integration
+
+A meaningful slice of HYROX athletes wear Garmins (Forerunner, Fenix, Epix, Instinct) and won't buy an Apple Watch. Today they can't use Trakrr's coaching layer at all — every HR-derived insight (zones, drift, recovery, efficiency, engine score, coaching cues, guardrails) requires HR samples on the wrist or in the ears. This section is the integration plan that opens Trakrr to Garmin-equipped athletes and, as a side effect, to anyone wearing a standards-compliant BLE chest strap (Polar H10, Wahoo TICKR, HRM-Pro Plus, etc.).
+
+### 20.1 — Three integration paths
+
+Garmin support isn't one decision; it's three independent ones, layered. Strava — which has the most mature Garmin integration of any consumer fitness app — implements all three. For Trakrr the sequencing matters more than the destination:
+
+| Path | What it is | What it unlocks | Effort | When to ship |
+| :---- | :---- | :---- | :---- | :---- |
+| **A** | CoreBluetooth + standard BLE Heart Rate Service GATT profile | Live HR during race + Free Run. Powers every HR-derived feature in §13.10 | ~1.5 weeks + Phase 28 (~3-4 days) | First — gates everything else |
+| **B** | Garmin Health API (server-to-server cloud sync) | Post-race enrichment with Garmin's running dynamics, pace curves, GPS, calories | 2-4 weeks dev + 1-6 months partner approval | After Path A demonstrates Garmin user adoption |
+| **C** | Native Connect IQ watch app (MonkeyC) | On-watch race UI parity with Apple Watch (race nav, advance, alert overlay) | 3-6 weeks initial + perpetual maintenance | Only after sustained Garmin user signal |
+
+**The lesson from Strava.** Paths complement rather than compete. Strava's cloud sync (their Path B equivalent) handles 95% of user value — link Garmin Connect once, workouts appear in the Strava feed minutes after the watch syncs. Their Connect IQ app (their Path C equivalent) exists for the specific subset who want segment alerts at the wrist; most Strava-on-Garmin users never install it.
+
+Trakrr's center of gravity is opposite Strava's. Strava's value is post-workout aggregation. Trakrr's value is during the race — live HR zones, coaching cues, drift detection, guardrails. So **Path A (live HR) is more critical for us than Strava's cloud sync was for them.** Path C is potentially more justifiable later, though — HYROX athletes glance at their wrist during runs more than Strava's average user — but only if real adoption data justifies the maintenance burden.
+
+### 20.2 — Path A: BLE HR broadcast (the wedge)
+
+Every modern Garmin watch ships with a built-in "Broadcast Heart Rate" feature. When enabled, the watch advertises itself as a standard BLE peripheral using the **Heart Rate Service GATT profile** (UUID `0x180D`, HR Measurement characteristic UUID `0x2A37`). Same standard Polar H10, Wahoo TICKR, HRM-Pro Plus, Suunto, Coros watches all speak. iOS handles it natively via `CoreBluetooth` — **no Garmin SDK, no developer account, no partner program**.
+
+**What we'd build (~1.5 weeks total):**
+
+- **`ExternalHRService`** (`@MainActor @Observable`) — CoreBluetooth wrapper. Scans for HRS-advertising peripherals, presents a discovery list, persists the user's pick as a paired device, subscribes to HR Measurement, publishes BPM samples through the same callback shape `HeadphoneMotionService` and the Watch transport already use. ~2 days.
+- **Pairing UI** — new `ExternalHRPairingSheet` accessible from Settings → Devices and TrainHubView's sensor row. Scan list, tap-to-pair, paired-device persistence on additive `UserProfile.pairedHRDeviceUUID: String?` + `pairedHRDeviceName: String?` fields. Re-pair flow when the device goes missing. ~2 days.
+- **`SensorSourceRegistry` extension** — add `.externalBLE(displayName: String)` to the existing HR source enum alongside `.appleWatch`, `.airpodsPro3`, `.fused`. Source attribution glyph (likely SF Symbol `dot.radiowaves.left.and.right`). Update `lastHRSource` ranking — chest strap > Garmin watch in broadcast > AirPods Pro 3 > Apple Watch optical on quality, but freshness still arbitrates within a 5-second window. ~2 days.
+- **Ingest wiring** — both `RaceViewModel.ingestHeartRate(_:)` and `FreeRunViewModel.ingestHeartRateBPM(_:at:)` already accept BPM+timestamp from arbitrary sources (Phase 27 made this universal). Just one more producer registered with the service. ~1 day.
+- **Background polish** — `bluetooth-central` UIBackgroundModes capability, reconnect-on-foreground logic, denied-permission UX, source provenance row on RaceSummary + FreeRunSummary. ~1 day.
+- **Real-device verification** — test against at least one BLE HR strap. ~1 day.
+
+Required Info.plist additions: `NSBluetoothAlwaysUsageDescription`. No new entitlements.
+
+**User-facing setup flow:**
+
+1. On the Garmin watch: settings → sensors → broadcast HR (or hold the watch face button → broadcast HR shortcut). Watch screen shows broadcasting state + small Bluetooth icon.
+2. In Trakrr: Settings → Devices → Pair external HR monitor → scan finds the watch by name → tap to pair → done.
+3. Going forward: Trakrr auto-reconnects on every race / Free Run start. No re-pairing needed unless the device changes.
+
+**Trade-offs to be upfront about in the pairing UI:**
+
+- Most Garmin watches disable their own workout recording while broadcasting HR. The athlete picks: record on Trakrr (with Garmin as HR source) OR record on Garmin (no Trakrr coaching). Not both.
+- Background BLE on iOS is fragile. If the athlete pockets the phone during a long sled push and the OS suspends CoreBluetooth, HR may drop until the screen wakes. Apple Watch HR doesn't have this issue because it routes through WCSession + WatchKit, which have different background guarantees.
+- HRS profile is HR-only. No pace, no cadence, no distance, no calories from Garmin via this path. (Distance still works — phone pedometer + GPS handles it.)
+- HRV is gone for most Garmin watches over HRS. Chest straps like Polar H10 do broadcast RR-intervals via the extended HRS characteristics — handle those if/when we add HRV-based features.
+- iPhone battery drain from continuous BLE is real (~10-15% over a 90-min race). Not deal-breaker, but surface in the pairing UI so it's not a surprise.
+
+**Companion phase — Phase 28 (in-app HR series for Race).** Path A delivers a live HR stream, but post-race analytics today re-query HealthKit for per-segment HR aggregates. With Garmin (no Apple Watch), HK isn't being written to at race-grade density. We need to mirror the Phase 27 pattern from Free Run onto Race: in-memory `[HRSample]` buffer on `RaceViewModel`, persisted to `Race.hrSeriesData: Data?` (additive externalStorage field, JSON-encoded `[FreeRunHRSample]` or a rename to a shared `HRSample` type), and per-split HR aggregates computed from the persisted series when present (falling through to HK queries for pre-Phase-28 races). ~3-4 days. **Path A is incomplete without Phase 28** — without it, the live coaching works but the post-race intelligence layer is degraded for Garmin users.
+
+### 20.3 — Path B: Garmin Health API (post-race enrichment)
+
+The cloud-to-cloud path Strava uses for 95% of their Garmin integration. When a Garmin watch syncs a workout to Garmin Connect (via Garmin Connect Mobile or WiFi), Garmin's webhook fires to our backend, which pulls the full workout payload (per-second pace curve, HR samples, GPS route, lap data, running dynamics like vertical oscillation and ground contact time, calories, training effect) and stores it linked to the athlete's account. Workout-matching logic correlates Garmin workouts to Trakrr races by overlapping time windows.
+
+**Prerequisites:**
+
+- Apply to the Garmin Health API partner program. Approval is selective — Garmin curates access to manage cloud load. Strava is a "Premier" partner; new applicants land in lower tiers initially. Process: weeks to months from application to approval.
+- Build a backend webhook receiver. Trakrr currently uses Supabase for auth + sync but has no general-purpose webhook infrastructure. We'd need an Edge Function (or equivalent) that authenticates the Garmin webhook callback, fetches the workout payload via OAuth-on-behalf-of, normalizes it, and writes to a `garmin_workouts` table linked to the Trakrr user.
+- Build the OAuth flow on iOS: "Link your Garmin Connect account to Trakrr."
+- Build workout-matching logic + post-hoc enrichment of the `Race` row (or attach the Garmin workout as a sibling record displayed alongside).
+
+**What it unlocks that Path A doesn't:**
+
+- True running dynamics — vertical oscillation, ground contact, vertical ratio, stride length — computed by the Garmin watch's onboard IMU. Strava-Garmin users see these in their feed; Trakrr-Garmin users would too.
+- Per-second pace curve from Garmin's GPS (more accurate than iPhone GPS during a race day where the phone may be in a pocket).
+- Calories computed via Garmin's TrainingPeaks-grade algorithms (more accurate than HR-only estimation).
+- Lap data — if the athlete pressed lap on their watch (which they typically wouldn't during HYROX, but the data's there for free runs).
+
+**What it doesn't unlock:**
+
+- Live coaching. Path B is strictly post-workout — workouts sync to Garmin Connect after the watch session ends, then to our backend. Useless for during-race cues.
+- Anything during the race itself.
+
+**Verdict:** worth pursuing in parallel with Path A — start the partner application clock immediately even if we don't build the backend right away. Ship the backend once partner approval lands AND Path A has demonstrated meaningful Garmin user adoption.
+
+### 20.4 — Path C: Connect IQ companion app (deferred)
+
+A native Garmin watch app written in MonkeyC, distributed via the Connect IQ Store, providing race UI parity with Trakrr's Apple Watch companion: three-page race nav, advance/pause/end controls, alert overlay (HOLD/SLOW/PUSH/REDLINE), segment transition moment.
+
+**Costs:**
+
+- Garmin developer account: free
+- Connect IQ SDK + simulator + VS Code extension: free
+- Connect IQ Store distribution: free, no listing fees, lighter approval than App Store
+- **Real-device test hardware: $250-450 for one Forerunner, $1500+ for cross-model coverage (Forerunner + Fenix + Venu).** This is the actual money cost.
+- MonkeyC ramp-up: 1-2 weeks for a competent developer (statically-typed, vaguely Pascal-flavored, not deeply weird but unfamiliar)
+- Initial app dev: 3-6 weeks for stripped-down Apple Watch parity
+- **Ongoing maintenance: ~10-20% of one developer's time perpetually** — SDK breaking changes, model-specific UI quirks, firmware-specific bug reports
+
+**iPhone-side architecture:**
+
+A new `GarminCompanionService` mirrors the existing `WatchCompanionService` — same message-passing shape, same `RaceStateSnapshot` payload shape (would need a JSON-serializable variant since Connect IQ messages cap at ~512 bytes), same action enum. The link uses Garmin's **Connect IQ Mobile SDK** — an iOS framework we'd embed as a dependency. Apps like Strava, Spotify, Bose, and IFTTT all use it. It abstracts the BLE channel that Garmin Connect Mobile already operates and exposes a discovery + message-passing API.
+
+**User-facing setup friction is the real cost.** For Path A alone, the user installs Trakrr and pairs a watch. Done. For Path C, the user must:
+
+1. Install **Trakrr** from the App Store
+2. Install **Trakrr CIQ** from the Connect IQ Store (on the watch)
+3. Install **Garmin Connect Mobile** on the iPhone (required for the Connect IQ Mobile SDK link to function, even if the user doesn't otherwise want it)
+4. Pair the watch through Garmin Connect Mobile via standard iOS Bluetooth settings
+5. Authorize Trakrr in Garmin Connect Mobile's permissions
+
+Three apps, multiple touchpoints, one experience. Strava users tolerate it because Strava is universal. For a niche HYROX app, that's real adoption friction.
+
+**Decision criteria for when to build Path C:**
+
+- Path A has shipped and we have at least 1000 Garmin-equipped Trakrr users actively training
+- Survey / qualitative signal that those users specifically want a wrist race surface (rather than being content with phone + HR strap)
+- Capacity to commit to perpetual maintenance — not a one-time build
+
+Until those conditions hit, Path C is speculation. Solo-built apps that ship two watch stacks neither of which is polished is the failure mode to avoid.
+
+### 20.5 — Sensor sourcing architecture extension
+
+The `SensorSourceRegistry` (§19.2) and the `DeviceProfile` enum extend cleanly:
+
+- New HR source variant: `.externalBLE(displayName: String)` alongside `.appleWatch`, `.airpodsPro3`, `.fused`.
+- New device-profile entries:
+  - `.externalHROnly` — iPhone + paired BLE HR strap, no Watch, no motion-capable AirPods
+  - `.fullWithExternal` — iPhone + Apple Watch + AirPods Pro 3 + BLE HR strap (rare but possible — athlete who wants chest-strap-grade HR alongside their Watch)
+- Fusion ranking: chest strap > Garmin watch in broadcast mode > AirPods Pro 3 > Apple Watch optical, but freshness arbitrates within a 5-second window (the existing rule).
+- Source attribution glyph picks an SF Symbol per source: `applewatch`, `airpodspro`, `dot.radiowaves.left.and.right` for external BLE.
+- Source provenance on RaceSummary / FreeRunSummary already iterates sources and renders a row per active source; just slot the new variant in.
+
+### 20.6 — Feature viability matrix (Garmin user, no Apple Watch)
+
+Assuming Path A + Phase 28 shipped, no Connect IQ app:
+
+| Feature category | iPhone + Garmin BLE | iPhone + Apple Watch | Difference |
+| :---- | :----: | :----: | :---- |
+| Race timer / station advance / roxzone / pace ghost / Live Activity | 🟢 | 🟢 | None |
+| Free Run timer / distance / splits | 🟢 | 🟢 | None |
+| Live HR + zone bar + zone label | 🟢 | 🟢 | None |
+| Live coaching cues (HOLD/SLOW/PUSH/REDLINE/RECOVER) | 🟢 | 🟢 | None |
+| Guardrails (per-segment HR ceilings) | 🟢 | 🟢 | None |
+| All §13.10 HR Intelligence post-race analytics (drift / recovery / efficiency / engine score) | 🟢 | 🟢 | None — both consume the same in-app HR series |
+| HYROX Score composite | 🟢 | 🟢 | None |
+| All social features (feed / follow / kudos / public profile) | 🟢 | 🟢 | None |
+| Watch race UI (3-page nav / alert overlay / segment transition) | 🔴 | 🟢 | Apple Watch only |
+| Hold-to-finish wrist gesture | 🔴 | 🟢 | Apple Watch only |
+| IMU rep counting (Wall Balls / Burpees / Lunges / Farmers) | 🔴 | 🟢 | Apple Watch only (§13.8 Tier 2) |
+| SpO2 per station | 🔴 | 🟢 | Apple Watch Series 6+ only |
+| Skin temperature | 🔴 | 🟢 | Apple Watch Series 8+/Ultra only |
+| Wrist ECG | 🔴 | 🟢 | Apple Watch Series 4+ only |
+| Overnight HRV → richer Readiness Banner (§13.8 Tier 3) | 🔴 | 🟢 | Apple Watch only (chest straps may carry RR-intervals but no overnight wear) |
+| Vertical oscillation, posture drift, ground contact | 🟡 | 🟡 | AirPods-driven; both surfaces same |
+| Live cadence | 🟡 | 🟡 | AirPods-driven; both surfaces same |
+| Voice cues | 🟢 | 🟢 | Phone speaker or AirPods, Watch not required |
+| Path B post-race enrichment (running dynamics from Garmin) | 🟢 (if shipped) | 🔴 | Garmin-only feature once Path B lands |
+
+**Bottom line:** ~90% feature parity. The lost 10% — wrist race surface, IMU rep counting, Watch-sensor-specific tiers (SpO2/temp/ECG/overnight HRV) — is well-defined and shippable as "Apple Watch users additionally get..."
+
+### 20.7 — Phased roadmap (Phase 28+)
+
+| Phase | Scope | Effort | Status | Gates |
+| :---- | :---- | :---- | :---- | :---- |
+| **28** | In-app HR series for Race — mirror Phase 27 onto `Race` model + `RaceViewModel`. Prerequisite for Path A's value on HYROX races. | ~3-4 days | ⚪ | None — can ship independent of Garmin work |
+| **29** | Path A: `ExternalHRService` + pairing UI + `SensorSourceRegistry` extension + ingest wiring. | ~1.5 weeks | ⚪ | Phase 28 shipped |
+| **30** | Path A polish — background mode, reconnect, source provenance row, multi-source fallover UX. | ~3-4 days | ⚪ | Phase 29 shipped |
+| **31** | Apply for Garmin Health API partner program. No code; just the application + paperwork. | ~1 day + 1-6 month wait | ⚪ | None — start clock immediately |
+| **32** | Path B: backend webhook receiver + OAuth + workout-matching + Race row enrichment. | ~3 weeks | ⚪ | Phase 31 approval + sustained Garmin user adoption signal from Phase 29-30 |
+| **33** | Path C decision gate — survey Garmin users on wrist race surface demand, evaluate build cost vs benefit. | ~1 week analysis | ⚪ | ≥1000 active Garmin users on Trakrr |
+| **34** | Path C: Trakrr CIQ MonkeyC app — race screen, advance, alert overlay. Distributed via Connect IQ Store. | ~3-6 weeks initial + perpetual maintenance | ⚪ | Phase 33 green-light |
+
+### 20.8 — Strategic positioning
+
+**The framing for App Store / marketing / website should be:**
+
+> *"Trakrr works with Apple Watch, Garmin, Polar, Wahoo, or any Bluetooth heart rate monitor. Apple Watch users additionally get the wrist race screen and automatic rep counting on Wall Balls."*
+
+This positions Trakrr as the most universal HYROX app while giving Apple Watch users a real extra-credit story. It's honest, broad, and explicitly captures the user-friction reality: an athlete with their existing kit (any modern smartwatch or chest strap) can use Trakrr today.
+
+**Comparison to Strava's positioning:** Strava says "compatible with 100+ devices" because their value is post-workout aggregation and they truly are device-agnostic. Trakrr's positioning is the same shape but tighter — we're a coaching platform, so we emphasize the live HR layer rather than the full feature set. The same "any BLE strap" pattern Strava uses in their device-pairing flow is what Trakrr ships in Path A.
+
+**Defensible moat against ROXFIT, Intervals Pro, and generic HYROX apps:** none of them have shipped Path A, let alone Paths B and C. Most assume Apple Watch (or Garmin's first-party Connect IQ workouts) and break for users with the wrong device. Path A is a real wedge that broadens Trakrr's addressable market by a meaningful multiple — every HYROX-format athlete with any HR source becomes a candidate user.
+
+**Sequencing discipline (the §13.11 promotion rule applied):** Path A goes into §4 v1+ scope once Phase 27 (continuous HR capture for Free Run) verifies clean on real device. Path B's application starts in parallel with Path A's dev. Path C stays in the §13 backlog as ⚪ idea-tier until adoption signal justifies the maintenance commitment. Don't promote out of order.  
