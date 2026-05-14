@@ -275,19 +275,21 @@ struct FreeRunView: View {
         )
     }
 
-    // §11 — Free Run HR + cadence card. Cathedral race-screen
-    // treatment ported over so the visual language matches
+    // §11 / §25 — Free Run HR + cadence card. Cathedral race-
+    // screen treatment ported over so the visual language matches
     // across surfaces. Renders:
     //   • Heart icon (tinted by current zone)
     //   • Big BPM number (zone-tinted, monospaced for digit
     //     stability as it ticks)
-    //   • Zone bar — 5 capsules (Z1-Z5), lit up to the
-    //     athlete's current zone in their zone colors. Same
-    //     5-bar visualization the Watch race page uses.
-    //   • HYROX zone label (Easy / Steady / Race / Hard /
-    //     Redline) + numeric Z-tag
     //   • Source attribution glyph (applewatch / airpodspro /
     //     fused) — same as the race screen's statCellHR
+    //   • Full-width HR zones bar — five rounded rectangles
+    //     (Z1-Z5), with caps Hyrox zone names (Easy / Steady /
+    //     Race / Hard / Redline) under each cell. The cell
+    //     matching the athlete's CURRENT zone fills with that
+    //     zone's color, the rest stay dimmed. Identical pattern
+    //     to RaceView.hrZonesBar so the HYROX race screen and
+    //     Free Run cathedral read in the exact same language.
     //   • Cadence sub-row when AirPods Pro 1+ are publishing
     //     spm via HeadphoneMotionService — auto-hides on
     //     iPhone-only / Watch-only / non-motion AirPods
@@ -302,8 +304,10 @@ struct FreeRunView: View {
             let zone = HRZone.zone(for: bpm, maxBPM: maxHeartRate)
             let source = SensorSourceRegistry.shared.lastHRSource
 
-            VStack(spacing: 10) {
+            VStack(spacing: 12) {
                 hrRow(bpm: bpm, zone: zone, source: source)
+
+                hrZonesBar(currentZone: zone)
 
                 if let spm = HeadphoneMotionService.shared.currentCadenceSPM {
                     cadenceRow(spm: spm)
@@ -318,8 +322,9 @@ struct FreeRunView: View {
         }
     }
 
-    // The HR row inside the card — heart + BPM on the left,
-    // zone bar + label on the right, source glyph trailing.
+    // First row of the HR card — heart + BPM on the left,
+    // source glyph trailing. Zone visualization moves into the
+    // dedicated full-width bar below.
     private func hrRow(
         bpm: Double,
         zone: HRZone,
@@ -342,13 +347,14 @@ struct FreeRunView: View {
 
             Spacer(minLength: 8)
 
-            VStack(alignment: .trailing, spacing: 4) {
-                zoneBar(currentZone: zone)
-                Text("Z\(zone.rawValue) · \(zone.hyroxLabel)")
-                    .font(.caption2.weight(.heavy))
-                    .tracking(0.4)
-                    .foregroundStyle(zone.color)
-            }
+            // Numeric Z-tag — small, retained alongside the
+            // bar's labels because the Z-number reads at a
+            // glance ("I'm in Z3") faster than scanning for the
+            // lit cell.
+            Text("Z\(zone.rawValue)")
+                .font(.caption.weight(.heavy))
+                .tracking(0.4)
+                .foregroundStyle(zone.color)
 
             // Source attribution glyph — same set used by the
             // race screen's statCellHR. Hidden before the
@@ -362,22 +368,46 @@ struct FreeRunView: View {
         }
     }
 
-    // 5-bar Z1-Z5 capsule visualization — lights up zones at
-    // or below the athlete's current zone in their canonical
-    // colors (Z1 blue → Z5 red). Capsules above the current
-    // zone stay dim. Same pattern as WatchRaceMainPage's
-    // zoneBar; ported here so the Free Run + race + Watch
-    // race surfaces all read in the same visual language.
-    private func zoneBar(currentZone: HRZone) -> some View {
-        HStack(spacing: 3) {
-            ForEach(HRZone.allCases, id: \.self) { zone in
-                Capsule()
-                    .fill(zone.rawValue <= currentZone.rawValue
-                          ? zone.color
-                          : Color.divider.opacity(0.4))
-                    .frame(width: 10, height: 10)
+    // Full-width HR zones bar — five rounded rectangles (Z1-Z5)
+    // stretched across the card width, with caps Hyrox zone
+    // names (Easy / Steady / Race / Hard / Redline) under each
+    // cell. The cell matching the athlete's CURRENT zone fills
+    // with that zone's color; the rest dim to 20% of the same
+    // color so the dial reads as a continuous gradient at low
+    // intensity.
+    //
+    // Mirrors RaceView.hrZonesBar 1:1 — the HYROX race screen
+    // and Free Run cathedral now share the exact same zone
+    // visualization (Phase 25). Spring animation on zone
+    // changes, gated by Reduce Motion.
+    private func hrZonesBar(currentZone: HRZone) -> some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 4) {
+                ForEach(HRZone.allCases, id: \.self) { zone in
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(zone == currentZone
+                              ? zone.color
+                              : zone.color.opacity(0.20))
+                        .frame(height: 10)
+                        .animation(
+                            reduceMotion ? .none : .smooth(duration: 0.4),
+                            value: currentZone
+                        )
+                }
+            }
+            HStack(spacing: 0) {
+                ForEach(HRZone.allCases, id: \.self) { zone in
+                    Text(zone.hyroxLabel)
+                        .font(.system(size: 9, weight: .heavy))
+                        .tracking(0.6)
+                        .foregroundStyle(zone == currentZone
+                                         ? zone.color
+                                         : Color.textTertiary)
+                        .frame(maxWidth: .infinity)
+                }
             }
         }
+        .accessibilityHidden(true) // already announced via the BPM text
     }
 
     // Cadence sub-row — small caps "CAD" label + spm number
