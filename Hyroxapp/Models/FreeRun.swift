@@ -90,7 +90,7 @@ final class FreeRun {
     // WCSession HR sample streamed from the Watch + every HK
     // poll fallback sample, in chronological order, deduped to
     // a 0.5s minimum interval. Encoded as JSON-Codable
-    // `[FreeRunHRSample]` so SwiftData stores it as a single
+    // `[HRSample]` so SwiftData stores it as a single
     // BLOB column (external storage to keep query performance
     // up — same as `photoData`).
     //
@@ -199,9 +199,9 @@ final class FreeRun {
     // the BLOB is nil (pre-Phase-27 runs) or decoding fails
     // (corrupt data — defensively swallowed so a single bad row
     // can't crash the History feed).
-    var hrSeries: [FreeRunHRSample] {
+    var hrSeries: [HRSample] {
         guard let data = hrSeriesData else { return [] }
-        return (try? JSONDecoder().decode([FreeRunHRSample].self, from: data)) ?? []
+        return (try? JSONDecoder().decode([HRSample].self, from: data)) ?? []
     }
 
     // Re-encode a new HR series and persist it. Called by
@@ -209,7 +209,7 @@ final class FreeRun {
     // buffer. Quiet on encode failure for the same defensive
     // reason — losing the dense series for one run is preferable
     // to a crash.
-    func setHRSeries(_ samples: [FreeRunHRSample]) {
+    func setHRSeries(_ samples: [HRSample]) {
         hrSeriesData = try? JSONEncoder().encode(samples)
     }
 

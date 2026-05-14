@@ -97,6 +97,31 @@ final class Race {
     // cleanly without a photo, same as `notes` / `name`.
     @Attribute(.externalStorage) var photoData: Data?
 
+    // §28 — Dense HR sample series captured during the race. Every
+    // sample ingested through RaceViewModel.ingestHeartRate(_:) (the
+    // single funnel for Watch WCSession stream, HK 5s poll fallback,
+    // and the future external BLE strap source from §20 Path A) gets
+    // appended to an in-memory buffer; the buffer is JSON-encoded
+    // and persisted here on `finishRace()`.
+    //
+    // Why this field exists alongside per-Split `heartRateAvgBPM` /
+    // `heartRateMaxBPM` aggregates: those aggregates rehydrate from
+    // HK via HKStatisticsQuery per segment window, which works only
+    // when HK has dense samples for that window. Garmin / external
+    // BLE strap users won't write samples to HK at race-grade
+    // density (no HKWorkoutSession from CoreBluetooth path). The
+    // in-app series is the only authoritative dense series in that
+    // case, and it's also a defense-in-depth for Apple Watch users
+    // when HK's storage behavior glitches.
+    //
+    // Pre-Phase-28 races decode with nil here — backward-compat
+    // additive migration, same pattern as `photoData` / `notes`.
+    // Downstream consumers (per-station rehydrate, zone-time on
+    // RaceSummary / RaceDetail, future Profile-level HR-curve
+    // analytics) prefer this series when non-empty and fall back
+    // to HK queries when empty.
+    @Attribute(.externalStorage) var hrSeriesData: Data?
+
     // Public URL of the race photo in Supabase Storage's
     // `race-photos` bucket. Set after a successful upload from
     // `RacePhotoSection`'s photo picker; nil for races without a
@@ -345,6 +370,25 @@ final class Race {
     var totalDuration: TimeInterval? {
         guard let endedAt else { return nil }
         return endedAt.timeIntervalSince(startedAt)
+    }
+
+    // §28 — decode the persisted HR sample series. Empty array
+    // when the BLOB is nil (pre-Phase-28 races) or decoding fails
+    // (corrupt data — defensively swallowed so a single bad row
+    // can't crash the History feed). Same shape as
+    // `FreeRun.hrSeries`.
+    var hrSeries: [HRSample] {
+        guard let data = hrSeriesData else { return [] }
+        return (try? JSONDecoder().decode([HRSample].self, from: data)) ?? []
+    }
+
+    // §28 — re-encode and persist a new HR series. Called by
+    // RaceViewModel.finishRace after flushing the in-memory
+    // buffer. Quiet on encode failure for the same defensive
+    // reason — losing the dense series for one race is preferable
+    // to a crash.
+    func setHRSeries(_ samples: [HRSample]) {
+        hrSeriesData = try? JSONEncoder().encode(samples)
     }
 
     // Reconstitute a `RaceEngine.State` from persisted fields so a resumed

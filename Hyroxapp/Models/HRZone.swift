@@ -171,7 +171,7 @@ enum HRZone: Int, CaseIterable, Sendable {
         return totals
     }
 
-    // §27 — aggregate a dense `FreeRunHRSample` series into
+    // §27 — aggregate a dense `HRSample` series into
     // time-in-zone totals. Each sample contributes the time
     // until the NEXT sample (capped at `maxGap` seconds to
     // defend against long gaps where the Watch dropped or
@@ -194,7 +194,7 @@ enum HRZone: Int, CaseIterable, Sendable {
     // edge case would inflate the final bucket slightly; not
     // worth defending against at the cost of every other call.
     static func timeInZones(
-        samples: [FreeRunHRSample],
+        samples: [HRSample],
         maxBPM: Int,
         end: Date? = nil,
         maxGap: TimeInterval = 30

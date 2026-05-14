@@ -47,6 +47,24 @@ final class RaceViewModel {
     // reading, those are historical per-segment aggregates.
     private(set) var currentHeartRateBPM: Double?
 
+    // §28 — in-memory HR sample buffer accumulated during the race.
+    // Every Watch WCSession sample (primary), HK 5s poll sample
+    // (fallback), and §20 Path A external BLE strap sample
+    // (Garmin / Polar / Wahoo) gets appended here, deduped to a
+    // 0.5s minimum interval. Flushed to `activeRace.setHRSeries(_:)`
+    // on finish so post-race analytics have a dense, accurate
+    // series instead of relying on HK's stored sample density
+    // (which is unreliable for outdoor optical-sensor runs and
+    // entirely absent for the BLE-strap-only configuration).
+    //
+    // Reset at start. Cleared at teardown. Not persisted mid-race —
+    // the cost of re-encoding a growing JSON blob on every HR
+    // sample would dwarf the value, and we never use the mid-race
+    // buffer for anything other than the post-race flush.
+    //
+    // Mirror of the FreeRunViewModel.hrBuffer pattern (§27).
+    private var hrBuffer: [HRSample] = []
+
     /// §19.4 Phase 10H — live cadence in steps-per-minute,
     /// derived from AirPods Pro 1+ / 4 / Max head motion via
     /// `HeadphoneMotionService`. Nil when AirPods aren't in
@@ -612,6 +630,10 @@ final class RaceViewModel {
         engine = RaceEngine(sequence: sequence)
         engine.start(at: now)
 
+        // §28 — reset the in-memory HR sample buffer at start so
+        // a prior session's samples can't bleed into this race.
+        hrBuffer = []
+
         let race = Race(
             startedAt: now,
             currentSegmentStartedAt: now,
@@ -793,6 +815,25 @@ final class RaceViewModel {
         persistActiveRace()
 
         if !wasFinished, engine.isFinished {
+            // §28 — flush the in-memory HR series onto the Race
+            // row before any of the downstream finish work that
+            // reads from it. saveFinishedRaceToHealthKit writes
+            // to HK using existing per-split aggregates, and
+            // rehydrateSegmentStatsAfterFinish re-queries HK to
+            // back-fill those aggregates — both happen below.
+            // Having the dense series persisted first means
+            // future post-race analytics (Profile-level HR curve,
+            // share card zone breakdown) can read it directly
+            // without depending on HK density. persistActiveRace
+            // is already called above by `engine.advance` writes
+            // through; the `setHRSeries` call mutates the same
+            // managed Race row, and the next SwiftData save (which
+            // happens during the HK rehydrate save path) picks
+            // up the new BLOB.
+            if let race = activeRace {
+                race.setHRSeries(hrBuffer)
+            }
+
             saveFinishedRaceToHealthKit()
 
             // Same as endSegmentRace: tell the Watch its workout
@@ -1097,6 +1138,10 @@ final class RaceViewModel {
         activeRace = nil
         stopHeartRatePolling()
         cancelCountdown()
+        // §28 — drop the in-memory HR buffer too. End-of-race
+        // already flushed it to the Race row above; this just
+        // clears the in-memory copy so a new race starts clean.
+        hrBuffer = []
     }
 
     // Drop any in-flight countdown — used by finishSession +
@@ -1131,6 +1176,14 @@ final class RaceViewModel {
         // closing-segment Split the same way advance does, so the
         // rep-counting stamp pattern fires identically.
         stampLatestRepCountOnJustClosedSplit()
+
+        // §28 — flush the HR series buffer onto the partial Race
+        // row. Same logic as the natural-finish path in advance().
+        // A partial race still represents real captured HR — the
+        // athlete just bailed before all 16 segments. The series
+        // belongs on the row so the zone breakdown and Engine
+        // Score reflect the work they actually did.
+        race.setHRSeries(hrBuffer)
 
         // Mirror engine state onto the Race row using the same path
         // a natural finish takes. This stamps `endedAt` and
@@ -1203,6 +1256,10 @@ final class RaceViewModel {
         activeRace = nil
         stopHeartRatePolling()
         cancelCountdown()
+        // §28 — drop the buffer on abandon. The Race row is being
+        // deleted entirely (abandoned races don't go to History),
+        // so the captured HR samples have nowhere to go.
+        hrBuffer = []
     }
 
     // MARK: - Persistence
@@ -1501,6 +1558,33 @@ final class RaceViewModel {
         // shows `applewatch` even when polling momentarily falls
         // back to HK between Watch pushes.
         SensorSourceRegistry.shared.recordHRSource(.watch)
+        // §28 — capture the sample into the in-app series buffer.
+        // Uses the Watch's original sample timestamp (not Date())
+        // so the persisted series reflects when the wrist captured
+        // it, not when WCSession delivered it.
+        appendToHRBuffer(bpm: update.bpm, sampledAt: update.sampledAt)
+    }
+
+    // §28 — single funnel for buffer appends. Dedupes to a 0.5s
+    // minimum interval (Watch streams at ~1Hz; HK poll fires every
+    // 5s; external BLE straps vary by manufacturer) so concurrent
+    // sources can't double-count. Out-of-order arrivals are
+    // dropped — the buffer must stay chronological for the
+    // zone-time gap calculation in HRZone.timeInZones(samples:)
+    // to behave.
+    //
+    // Gated on `engine.isRunning` so paused windows don't
+    // accumulate samples; the live chip can still display HR
+    // during a pause (that's fine) but the persisted series
+    // excludes the pause window, which matches how
+    // `totalDuration` already accounts for time.
+    private func appendToHRBuffer(bpm: Double, sampledAt: Date) {
+        guard engine.isRunning else { return }
+        guard bpm >= 30, bpm <= 230 else { return }
+        if let last = hrBuffer.last {
+            guard sampledAt.timeIntervalSince(last.sampledAt) >= 0.5 else { return }
+        }
+        hrBuffer.append(HRSample(sampledAt: sampledAt, bpm: bpm))
     }
 
     // MARK: - Live HR polling
@@ -1556,6 +1640,15 @@ final class RaceViewModel {
                             sourceName: result.sourceName
                         )
                         SensorSourceRegistry.shared.recordHRSource(source)
+                        // §28 — capture the polled sample into the
+                        // in-app series buffer too. HK doesn't hand
+                        // back the original sample timestamp via
+                        // `currentHeartRateWithSource`, so the best
+                        // we have is poll-fire time (≤5s stale).
+                        // Acceptable given the buffer's primary
+                        // role is dense zone-time aggregation, not
+                        // millisecond-precise per-sample analytics.
+                        self.appendToHRBuffer(bpm: bpm, sampledAt: Date())
                     }
                 }
                 // `try? await Task.sleep` — on cancellation, sleep

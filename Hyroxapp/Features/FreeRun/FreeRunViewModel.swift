@@ -72,7 +72,7 @@ final class FreeRunViewModel {
     // — the cost of re-encoding a growing JSON blob on every HR
     // sample would dwarf the value, and we never use the
     // mid-run buffer for anything other than the post-run flush.
-    private var hrBuffer: [FreeRunHRSample] = []
+    private var hrBuffer: [HRSample] = []
 
     // Convenience accessor — true while a run is in progress
     // (engine exists AND it's in .inProgress phase). View layer
@@ -649,7 +649,7 @@ final class FreeRunViewModel {
             guard sampledAt.timeIntervalSince(last.sampledAt) >= 0.5 else { return }
         }
 
-        hrBuffer.append(FreeRunHRSample(sampledAt: sampledAt, bpm: bpm))
+        hrBuffer.append(HRSample(sampledAt: sampledAt, bpm: bpm))
     }
 
     // MARK: - Post-finish HK rehydrate
