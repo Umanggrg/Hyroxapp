@@ -240,12 +240,12 @@ struct FreeRunLiveActivity: Widget {
     // (widget target doesn't include HRZone.swift).
     private func hrZoneColor(_ zone: Int?) -> Color {
         switch zone {
-        case 1: return Color(red: 0.36, green: 0.61, blue: 0.84)
-        case 2: return Color.success
-        case 3: return Color(red: 1.0, green: 0.84, blue: 0.04)
-        case 4: return Color.warning
-        case 5: return Color.accent
-        default: return Color.accent
+        case 1: return Color(red: 0.36, green: 0.61, blue: 0.84)  // 0x5B9BD5 — calm blue
+        case 2: return Color.success                              // green
+        case 3: return Color(red: 1.0, green: 0.84, blue: 0.04)   // 0xFFD60A — yellow
+        case 4: return Color.warning                              // orange
+        case 5: return Color(red: 1.0, green: 0.23, blue: 0.19)   // §31 — Z5 redline stays iOS systemRed (#FF3B30), NOT brand Volt lime
+        default: return Color(red: 1.0, green: 0.23, blue: 0.19)  // §31 — fallback to redline, not brand
         }
     }
 
@@ -408,12 +408,12 @@ private struct FreeRunLockScreenView: View {
 
     private func hrZoneColor(_ zone: Int?) -> Color {
         switch zone {
-        case 1: return Color(red: 0.36, green: 0.61, blue: 0.84)
-        case 2: return Color.success
-        case 3: return Color(red: 1.0, green: 0.84, blue: 0.04)
-        case 4: return Color.warning
-        case 5: return Color.accent
-        default: return Color.accent
+        case 1: return Color(red: 0.36, green: 0.61, blue: 0.84)  // 0x5B9BD5 — calm blue
+        case 2: return Color.success                              // green
+        case 3: return Color(red: 1.0, green: 0.84, blue: 0.04)   // 0xFFD60A — yellow
+        case 4: return Color.warning                              // orange
+        case 5: return Color(red: 1.0, green: 0.23, blue: 0.19)   // §31 — Z5 redline stays iOS systemRed (#FF3B30), NOT brand Volt lime
+        default: return Color(red: 1.0, green: 0.23, blue: 0.19)  // §31 — fallback to redline, not brand
         }
     }
 

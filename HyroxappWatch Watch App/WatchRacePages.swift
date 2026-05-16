@@ -414,12 +414,19 @@ struct WatchRaceMainPage: View {
     // Guardrail tint contract per §17.1:
     //   • silent (HR below approach) → textTertiary, low-key
     //   • approaching (within band)  → warning amber, "heads up"
-    //   • aboveCeiling (past ceiling) → accent coral, "stop pushing"
+    //   • aboveCeiling (past ceiling) → redline, "stop pushing"
+    //
+    // §31 Volt rebrand fix: aboveCeiling used to map to Color.accent
+    // back when the accent was coral. Coral worked as a danger signal.
+    // After accent moved to Volt lime, mapping aboveCeiling to brand
+    // would render the "stop pushing" guardrail in chartreuse — wrong
+    // semantic. Redline (the iOS systemRed token) carries the danger
+    // meaning regardless of brand, so it gets the slot.
     private func guardrailTint(for state: GuardrailState) -> Color {
         switch state {
         case .silent:        return Color.textTertiary
         case .approaching:   return Color.warning
-        case .aboveCeiling:  return Color.accent
+        case .aboveCeiling:  return Color.redline
         }
     }
 
@@ -892,7 +899,12 @@ struct WatchRaceHRPage: View {
             hr > 0
         else { return Color.textPrimary }
 
-        if hr >= ceiling   { return Color.accent }
+        // §31 — over-ceiling is a danger semantic, not a brand moment.
+        // Used to map to accent (coral) which doubled as both. After
+        // the Volt rebrand, accent is lime — wrong tint for "you've
+        // crossed your HR ceiling, stop pushing." Redline carries
+        // the danger meaning regardless of brand.
+        if hr >= ceiling   { return Color.redline }
         if hr >= approach  { return Color.warning }
         return Color.textPrimary
     }
