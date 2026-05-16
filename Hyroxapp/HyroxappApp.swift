@@ -55,6 +55,18 @@ struct HyroxappApp: App {
     var body: some Scene {
         WindowGroup {
             authGatedRoot
+                // §31 Volt rebrand — propagate the brand accent
+                // to SwiftUI's default-tinted controls (toolbar
+                // buttons, segmented controls, switches, picker
+                // selections, etc.). The AccentColor.colorset
+                // approach we tried initially generated a symbol
+                // that collided with Theme.swift's
+                // `static let accent`. The `.tint(_:)` modifier
+                // at the app root achieves the same outcome
+                // without the redeclaration error, and keeps
+                // Theme.swift as the single source of truth for
+                // the brand color.
+                .tint(Color.accent)
                 // Deep-link receiver. The Live Activity's
                 // `.widgetURL(URL(string: "trakr://race"))` lands
                 // here when a user taps the lock-screen card or
