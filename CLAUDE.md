@@ -1737,4 +1737,59 @@ This positions Trakrr as the most universal HYROX app while giving Apple Watch u
 
 **Defensible moat against ROXFIT, Intervals Pro, and generic HYROX apps:** none of them have shipped Path A, let alone Paths B and C. Most assume Apple Watch (or Garmin's first-party Connect IQ workouts) and break for users with the wrong device. Path A is a real wedge that broadens Trakrr's addressable market by a meaningful multiple — every HYROX-format athlete with any HR source becomes a candidate user.
 
-**Sequencing discipline (the §13.11 promotion rule applied):** Path A goes into §4 v1+ scope once Phase 27 (continuous HR capture for Free Run) verifies clean on real device. Path B's application starts in parallel with Path A's dev. Path C stays in the §13 backlog as ⚪ idea-tier until adoption signal justifies the maintenance commitment. Don't promote out of order.  
+**Sequencing discipline (the §13.11 promotion rule applied):** Path A goes into §4 v1+ scope once Phase 27 (continuous HR capture for Free Run) verifies clean on real device. Path B's application starts in parallel with Path A's dev. Path C stays in the §13 backlog as ⚪ idea-tier until adoption signal justifies the maintenance commitment. Don't promote out of order.
+
+---
+
+## 21\. Pre-launch production-readiness checklist
+
+A founder put it well: "Vibe coding tricked me into thinking I shipped a product. The demo was clean. The UI was sharp. The deploy worked. I genuinely thought I was done. Then real users showed up." Trakrr is in that exact moment now — features substantially complete, on TestFlight internal, looking shippable. This section is the honest audit of what's actually under the polished surface, and what to harden before flipping the switch to App Store public.
+
+Trakrr is in a stronger position than most apps at this stage because Supabase + Vercel + Apple handle 7 of the 11 production layers as managed services. The four that need explicit work are: CI/CD (no automated build pipeline), RLS coverage (unverified across all tables), error tracking (none), and database index audit (unverified for hot queries).
+
+### 21.1 — Eleven-layer audit (current state)
+
+| Layer | Trakrr today | Verdict |
+| :---- | :---- | :---- |
+| **Auth and permissions** | Supabase Auth + Sign in with Apple. `AuthService` real. Sessions restore on launch. Sign-out + account deletion (RPC cascades through follows, duo_races, races, photos, profiles, auth.users). | 🟢 shipped |
+| **Hosting and deployment** | App Store Connect with TestFlight internal active. Web on Vercel. Supabase managed. | 🟢 shipped |
+| **Cloud and compute** | Supabase fully managed Postgres + Realtime + Storage. No custom compute yet. | 🟢 shipped via PaaS |
+| **CI/CD and version control** | Git in use. **No automated build pipeline.** Every release is manual Xcode archive → Organizer upload. Works for solo, breaks the moment collaborators arrive or hotfixes are needed. | 🟡 **gap** |
+| **Security / RLS** | RLS policies written for explicitly-shipped SQL (`duo_races.sql`, `delete_user_account.sql`). **Unverified across other tables** (profiles, races, follows, reactions, comments, free_runs, etc.). One missing `ENABLE ROW LEVEL SECURITY` flag on a user-data table is a public data leak. | 🟡 **needs audit** |
+| **Rate limiting** | Supabase built-in tier limits. No custom limits because no custom endpoints yet. Becomes real when Garmin Path B webhook receiver ships. | 🟢 adequate for current scope |
+| **Caching and CDN** | Vercel CDN (web). Supabase Storage CDN (race photos). SwiftData on-device cache. AsyncImage auto-caches. Phase 27/28 in-app HR series persists locally so we don't re-query HK. | 🟢 shipped |
+| **Load balancing / scaling** | Vercel auto-scales. Supabase auto-scales within tier. iOS app is client-side. | 🟢 shipped via PaaS |
+| **Error tracking and logs** | **None.** No Sentry, Crashlytics, Bugsnag, or anything. Apple's default crash reporting catches *some* crashes if users opted in to diagnostic sharing. Every `do { } catch { }` silently swallows failures. First production crash report will arrive via user email, not a dashboard. | 🔴 **single weakest layer** |
+| **Database hardening** | Migrations are additive (good discipline). `duo_races` has indexes. **Unverified for hot queries** — `races WHERE user_id = X ORDER BY created_at DESC` likely needs `(user_id, created_at DESC)` composite index. Without it, a user with 500+ races sees History take 2s+ by year three. | 🟡 **needs audit** |
+| **Availability and recovery** | Supabase point-in-time recovery on paid tiers (7-day window). SwiftData on-device is the offline fallback — every race lives locally. No formal RTO/RPO doc. No backup-restore drill. | 🟡 adequate via PaaS, undocumented |
+
+### 21.2 — Must-have before public launch (priority order)
+
+Five focused items. Maybe 5-6 hours of total work, spread across two evenings. Resist the urge to ship more features (Tier 2 IMU rep counting, leaderboards, Coach Mode) until these are done. The current users will be the first who hit these gaps, and they're the ones whose word-of-mouth determines whether the next 1000 users arrive.
+
+| Phase | Item | Why it matters | Effort |
+| :---- | :---- | :---- | :---- |
+| **34** | Sentry (or Apple MetricKit + structured logger) wired into the iOS target | The instant something breaks for a real user, you see it on a dashboard instead of waiting for an email. Catches RLS rejections, Supabase sync errors, HealthKit auth declines, Live Activity rejections — all the silent failures we suppress today. | ~2 hrs |
+| **35** | Supabase RLS audit — verify every user-data table has RLS enabled AND a policy filtering by `auth.uid()` | Single missing policy on `races` lets any logged-in user query every other user's races. Open Supabase Dashboard → Authentication → Policies, verify line by line. | ~30 min |
+| **36** | Database index audit — `EXPLAIN ANALYZE` on the 3 hottest queries, add composite indexes where missing | History feed + Profile race-count + future leaderboard query. Without indexes the queries degrade gracefully for the first 100 users then collapse at scale. | ~1 hr |
+| **37** | GitHub Action: `xcodebuild build` on every push to main, fail loudly on broken builds | Catches "I edited a file and forgot to test it" before it reaches TestFlight. Doesn't need to deploy — just needs to flag broken commits. | ~1 hr |
+| **38** | App Store privacy nutrition label audit — every data type collected (HR samples, location, photos, etc.) declared correctly | Apple is increasingly strict about this; mismatches trigger rejected submissions and require resubmit + re-review. | ~30 min |
+
+### 21.3 — Should-have for first few months post-launch
+
+| Phase | Item | When |
+| :---- | :---- | :---- |
+| **39** | dSYM upload to Sentry on each archive — symbolicated stack traces vs. raw memory addresses | When you have 100+ active users on TestFlight |
+| **40** | StoreKit `requestReview()` strategy — gated on completion of ≥3 races so we ask happy users, not frustrated ones | First public release |
+| **41** | Backup-restore drill on Supabase — once a quarter, verify you can restore from a snapshot | After first paying / power-user cohort exists |
+| **42** | Automated screenshot regression tests via `XCUITest` or Snapshot Testing | Once App Store screenshots are public |
+| **43** | Supabase Edge Function for Garmin Path B webhook receiver (Phase 32) — auth-verify the webhook signature, rate-limit it | Only if/when Path A demonstrates Garmin user adoption |
+| **44** | Formal RTO/RPO documentation + disaster recovery plan | Pre-Series-A or pre-significant-revenue moment |
+
+### 21.4 — The discipline
+
+Vibe coding got Trakrr from idea to "feature complete" in months when it would have taken years the traditional way. That's real and worth celebrating. But the post is right: the demo-to-product gap is exactly where most indie apps die.
+
+The decision rule for the next few weeks: **before any new feature ships, the must-have row above gets done.** Sentry is hours of work; one user crash report after launch is a frantic week of investigation without it. RLS audit is 30 minutes; one data leak is a public incident and a story you don't want to be writing.
+
+Don't promote anything from §21.3 into §21.2 lightly. Don't promote anything from §13 backlog into §4 scope until §21.2 is green. The pattern is: feature-complete → harden → launch → iterate. We're between steps 1 and 2 right now.  
