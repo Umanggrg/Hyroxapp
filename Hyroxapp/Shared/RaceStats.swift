@@ -3735,7 +3735,7 @@ enum RaceStats {
             case .slow:    return 0xFF9F0A  // iOS systemOrange
             case .redline: return 0xFF3B30  // iOS systemRed
             case .recover: return 0x32D74B  // iOS systemGreen
-            case .push:    return 0xFF4530  // brand coral
+            case .push:    return 0xD4FF00  // §31 Volt lime — brand accent
             case .workout: return 0x000000  // banner not shown
             case .none:    return 0x000000  // banner not shown
             }

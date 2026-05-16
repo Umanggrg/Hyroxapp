@@ -290,8 +290,9 @@ Defined once in a `Theme.swift` extension on `Color`:
 - `Color.textPrimary` — off-white, `#F5F5F7`  
 - `Color.textSecondary` — `#8E8E93`  
 - `Color.textTertiary` — `#636366`  
-- `Color.accent` — HYROX-inspired coral/red, `#FF3B30`  
-- `Color.accentDim` — muted accent for secondary actions, `#FF3B30` at 60% opacity  
+- `Color.accent` — Volt lime, `#D4FF00` (§31 rebrand off the prior coral, which was too close to Strava's `#FC4C02`)  
+- `Color.accentDim` — muted accent for secondary actions, `#D4FF00` at 60% opacity  
+- `Color.onAccent` — near-black `#0A0A0B` for text/glyphs sitting ON the accent. Brand contract: black-on-lime is the canonical primary CTA look (white-on-lime fails WCAG contrast)  
 - `Color.success` — `#32D74B` (PBs, splits beating targets, positive deltas)  
 - `Color.warning` — `#FF9F0A` (slow splits, negative deltas)  
 - `Color.divider` — `#2C2C2E` (hairline borders, card separators)

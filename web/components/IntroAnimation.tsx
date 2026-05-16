@@ -173,8 +173,8 @@ export function IntroAnimation() {
                       top: `${bootLineY}%`,
                       opacity: bootLineOpacity,
                       background:
-                        "linear-gradient(90deg, transparent, #FF3B30 50%, transparent)",
-                      boxShadow: "0 0 16px 2px rgba(255,59,48,0.7)",
+                        "linear-gradient(90deg, transparent, #D4FF00 50%, transparent)",
+                      boxShadow: "0 0 16px 2px rgba(212,255,0,0.7)",
                     }}
                   />
                 </div>

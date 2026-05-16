@@ -77,7 +77,7 @@ export function WatchAndDuo() {
                 y1="1"
                 x2="100"
                 y2="1"
-                stroke="#FF3B30"
+                stroke="#D4FF00"
                 strokeWidth="1"
                 strokeDasharray="4 4"
                 opacity="0.5"

@@ -39,23 +39,41 @@ extension Color {
 
     // Accent & semantic
     //
-    // **v1 design-system shift:** the coral moved 8° hotter from the
-    // iOS-system-red `#FF3B30` to `#FF4530`. Same hex is "destructive"
-    // (stop / cancel / delete) for half our users — keeping it as the
-    // brand accent meant the focusing tool kept reading as a warning.
-    // The new hex burns the same emotional warmth but disambiguates
-    // from system red. Audit budget: coral covers <12% of any surface.
+    // **§31 Volt rebrand:** primary moved from coral red (`#FF4530`)
+    // to Nike-Volt lime (`#D4FF00`). The coral had a Strava confusion
+    // problem — their `#FC4C02` and our `#FF4530` were ~18° apart on
+    // the hue wheel, indistinguishable at a glance, and the
+    // "Trakrr looks like Strava" perception was carrying through to
+    // positioning conversations.
     //
-    // The system-red `#FF3B30` now lives as the `redline` state color
-    // below — exactly where "danger" semantics belong (the Watch
-    // takeover overlay for over-redline HR).
+    // Volt lime is the right move for three reasons:
+    //   1. No fitness app owns it. Strava owns coral. Whoop owns
+    //      green-on-black. Garmin owns deep blue. Apple Fitness owns
+    //      the ring trio. Lime is genuinely available.
+    //   2. It aligns with the brand positioning Trakrr is actually
+    //      building toward — performance science, Engine Score, live
+    //      coaching. The Volt energy reads as "output and speed,"
+    //      not "social activity feed."
+    //   3. It pairs beautifully with the dark-first design system.
+    //      Coral on dark reads as warm/social; lime on dark reads
+    //      as electric/intense.
     //
-    // success/warning + new state tokens shift slightly: the dark
-    // variants are tuned for OLED black, the light variants are nudged
-    // darker so they stay legible on warm off-white. Same hue, different
-    // value step.
-    static let accent    = Color(hex: 0xFF4530)
-    static let accentDim = Color(hex: 0xFF4530, opacity: 0.6)
+    // Audit budget: lime covers <12% of any surface. Same scarcity
+    // rule the coral followed.
+    //
+    // **`onAccent` flip:** white-on-coral was readable. White-on-lime
+    // fails WCAG. Primary CTAs flip to black-on-lime, which is the
+    // canonical Nike Volt button look anyway — high-contrast,
+    // unmistakably "tap me." Documented separately below.
+    //
+    // The old system-red `#FF3B30` still lives as the `redline` state
+    // color below — exactly where "danger" semantics belong (the
+    // Watch takeover overlay for over-redline HR).
+    //
+    // success/warning + new state tokens stay where they were: success
+    // green for PBs, warning amber for slow splits, etc.
+    static let accent    = Color(hex: 0xD4FF00)
+    static let accentDim = Color(hex: 0xD4FF00, opacity: 0.6)
     static let success   = Color(lightHex: 0x1FA82A, darkHex: 0x32D74B)
     static let warning   = Color(lightHex: 0xC4720A, darkHex: 0xFF9F0A)
 
@@ -87,15 +105,20 @@ extension Color {
     static let recover = Color(hex: 0x3A82F7)
     static let push    = Color(hex: 0xBFFF3E)
 
-    // FIXED off-white for labels that sit ON the coral accent
-    // (primary CTAs, hold-to-finish, gradient buttons). Brand
-    // contract: white-on-coral is the canonical button look in
-    // both modes. Without this fixed token, light-mode users see
-    // near-black warm text on coral which reads as muted /
-    // unfinished even though it has enough contrast. Use this
-    // anywhere the background is `Color.accent` or a coral
+    // §31 Volt rebrand: FIXED near-black for labels that sit ON the
+    // Volt-lime accent (primary CTAs, hold-to-finish, gradient
+    // buttons). Brand contract: **black-on-lime** is the canonical
+    // button look in both modes. White-on-lime fails WCAG contrast
+    // (luminance ratio ~1.5:1); near-black hits >12:1.
+    //
+    // Pre-rebrand this was white-on-coral. The token kept the same
+    // name (`onAccent`) so every call site stayed correct after the
+    // semantic flip — they all already mean "the text color that
+    // sits on the brand accent" without committing to which color.
+    //
+    // Use this anywhere the background is `Color.accent` or a Volt
     // gradient — NOT `Color.textPrimary`.
-    static let onAccent = Color(hex: 0xFFFFFF)
+    static let onAccent = Color(hex: 0x0A0A0B)
 
     // Hairlines & separators — light-mode value pulled in line with
     // the v1 audit (`#E4DFD4` ≈ `#E5E1D8`, but matches the design
