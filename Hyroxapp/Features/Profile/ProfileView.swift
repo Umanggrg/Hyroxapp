@@ -469,6 +469,18 @@ struct ProfileView: View {
                 icon: "flag.checkered",
                 accent: true
             )
+            // §38 Whoop pattern 3 + 5 — weekly recap card.
+            // Sits at the top of Next Up because it answers
+            // "how was your last 7 days?" before the readiness
+            // banner answers "how should you train today?".
+            // The two are complementary: recap is rearward,
+            // readiness is forward. Hidden when athlete has
+            // zero finished races (no signal to recap).
+            WeeklyRecapCard(
+                races: races,
+                maxHR: maxHR,
+                nextRaceEvent: upcomingEvents.first
+            )
             if ReadinessBanner.shouldShow(in: races, maxHR: maxHR) {
                 ReadinessBanner(races: races, maxHR: maxHR)
             }
