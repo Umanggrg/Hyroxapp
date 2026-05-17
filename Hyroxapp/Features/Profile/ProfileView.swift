@@ -235,6 +235,14 @@ struct ProfileView: View {
             .navigationDestination(for: Race.self) { race in
                 RaceDetailView(race: race)
             }
+            // §34 nav-stack fix — mirror the HistoryView pattern.
+            // Split → StationDetailView is registered HERE, at the
+            // NavigationStack root, not inside RaceDetailView.
+            // See the comment in HistoryView's navigationDestination
+            // stack for the full reasoning.
+            .navigationDestination(for: Split.self) { split in
+                StationDetailView(split: split)
+            }
             // MonthlyRecap is a value-type Hashable struct, so it
             // works directly as a navigation value. The destination
             // pushes the full recap screen + share button.

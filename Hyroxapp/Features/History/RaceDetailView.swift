@@ -162,14 +162,16 @@ struct RaceDetailView: View {
                 : race.name
         )
         .hyroxDarkNavigationBar(inline: true)
-        // Tapping any split row pushes a per-station deep dive.
-        // Registered here because RaceDetailView is the surface
-        // where the nav originates; HistoryView / ProfileView
-        // already register Race.self separately for their own
-        // race-detail navigations.
-        .navigationDestination(for: Split.self) { split in
-            StationDetailView(split: split)
-        }
+        // Split → StationDetailView registration lives on the
+        // ROOT NavigationStack (HistoryView and ProfileView), NOT
+        // on RaceDetailView. Registering navigationDestination on
+        // a non-root view in a NavigationStack triggers a SwiftUI
+        // double-push: the destination renders correctly but a
+        // duplicate of the current view stacks on top of it,
+        // requiring a back-tap to reveal the new screen. The
+        // canonical fix per Apple's docs is to put every
+        // type-based destination on the same view as the
+        // NavigationStack itself.
         .toolbar {
             #if !os(macOS)
             // Share menu on the trailing edge — Strava-style affordance

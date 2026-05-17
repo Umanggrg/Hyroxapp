@@ -120,6 +120,20 @@ struct HistoryView: View {
                 // the History feed.
                 FreeRunSummaryView(run: run)
             }
+            // §34 nav-stack fix — Split → StationDetailView
+            // registered here at the NavigationStack root, not
+            // inside RaceDetailView. Registering a type-based
+            // destination on a child of the stack (RaceDetailView)
+            // caused SwiftUI to double-push: tapping a station
+            // pushed StationDetailView correctly but a duplicate
+            // RaceDetailView stacked on top of it, so the user
+            // had to hit back once to reveal the station detail.
+            // Apple's docs are explicit about this — every type-
+            // based navigationDestination must live on the same
+            // view as the NavigationStack itself.
+            .navigationDestination(for: Split.self) { split in
+                StationDetailView(split: split)
+            }
             // State-driven nav destinations for the wireframe §04.1
             // List/Calendar modes — those modes use button-callback
             // navigation rather than NavigationLink wrappers. When
