@@ -548,7 +548,62 @@ final class FreeRunViewModel {
                 locationTypeRaw: locationType.rawValue
             )
         )
+
+        // §39 — Wire the Watch → iPhone distance callback. With
+        // this in place, the Watch's wrist-side
+        // HKLiveWorkoutBuilder streams cumulative-distance
+        // samples to the iPhone at ~1Hz, and we feed them
+        // directly into the engine. The engine's monotonic filter
+        // (`guard metres > distanceMetres`) lets the larger Watch
+        // value naturally win over the iPhone's zero-or-near-zero
+        // pedometer samples when the phone is stationary (on the
+        // treadmill console, in a locker, etc.).
+        //
+        // Pre-§39 behavior: phone-only pedometer → ran 1mi on a
+        // treadmill with the phone parked → 0.00 mi displayed.
+        // Walking with the phone in hand was the only way to
+        // make the counter move. Fixed here by reading the
+        // wrist's pedometer + GPS fusion via HK's running-activity
+        // session.
+        WatchCompanionService.shared.onDistance = { [weak self] update in
+            guard let self else { return }
+            self.ingestWatchDistance(
+                update.cumulativeMetres,
+                at: update.sampledAt
+            )
+        }
         #endif
+    }
+
+    // §39 — Single funnel for Watch-sourced cumulative-distance
+    // samples. Mirrors the `ingestHeartRateBPM` pattern (single
+    // method called by both live + queued WCSession transports
+    // and any other future distance source).
+    //
+    // Feeds `engine.recordDistance(at:metres:)` directly. The
+    // engine handles three concerns for us:
+    //   1. Monotonic invariant — drops out-of-order or stale
+    //      samples, including iPhone-pedometer updates that
+    //      arrive smaller than the Watch's last value.
+    //   2. Split boundary capture — fires auto-splits when the
+    //      cumulative distance crosses each mile / km boundary.
+    //   3. Phase gate — only accepts updates while the run is
+    //      in `.inProgress`, so a queued sample arriving after
+    //      the run ended doesn't pollute totals.
+    //
+    // After accepting the sample, persist the run so the new
+    // distance + any newly-captured splits land in SwiftData and
+    // get mirrored to the Watch snapshot + Live Activity.
+    func ingestWatchDistance(_ metres: Double, at sampledAt: Date = Date()) {
+        guard let engine, engine.isRunning else { return }
+        let priorDistance = engine.distanceMetres
+        engine.recordDistance(at: sampledAt, metres: metres)
+        // Only persist if the engine actually accepted the
+        // sample — recordDistance silently no-ops on non-monotonic
+        // updates, and we don't want to re-publish the snapshot
+        // for a rejected sample.
+        guard engine.distanceMetres > priorDistance else { return }
+        persistActiveRun()
     }
 
     private func pauseDistanceSource() {
@@ -591,6 +646,12 @@ final class FreeRunViewModel {
         WatchCompanionService.shared.sendControl(
             .endFreeRunWorkout(at: Date())
         )
+        // §39 — Clear the distance callback so a stale closure
+        // capturing this viewmodel doesn't keep firing into a
+        // torn-down state. A queued transferUserInfo distance
+        // sample arriving after end() would otherwise try to
+        // recordDistance on a nil engine.
+        WatchCompanionService.shared.onDistance = nil
         #endif
     }
 

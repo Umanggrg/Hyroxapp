@@ -119,6 +119,15 @@ final class WatchWorkoutManager: NSObject {
         if let energy = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned) {
             types.insert(energy)
         }
+        // §39 — distance auth so HKLiveWorkoutBuilder's statistics()
+        // can return sumQuantity() for the cumulative wrist
+        // pedometer + GPS fusion during Free Runs. Without read
+        // access here, builder.statistics(for: .distanceWalkingRunning)
+        // returns nil and the Free Run distance stays stuck at the
+        // iPhone-only pedometer source.
+        if let distance = HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning) {
+            types.insert(distance)
+        }
         return types
     }
 
@@ -129,6 +138,12 @@ final class WatchWorkoutManager: NSObject {
         }
         if let energy = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned) {
             types.insert(energy)
+        }
+        // §39 — distance write so finishWorkout can attach the
+        // accumulated distance samples to the saved HKWorkout
+        // (Activity ring credit + Apple Fitness Distance metric).
+        if let distance = HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning) {
+            types.insert(distance)
         }
         return types
     }
@@ -340,6 +355,16 @@ final class WatchWorkoutManager: NSObject {
     // re-fires on every value write even if the value is equal).
     private var lastPublishedSampleEnd: Date = .distantPast
 
+    // §39 — analogous gates for distance publishing. Distance is a
+    // cumulative quantity (HKStatistics.sumQuantity), so we de-dup
+    // by the metres value rather than a sample timestamp — when no
+    // motion was detected between two collection events, the sum
+    // stays flat and we skip the publish. Throttle prevents
+    // flooding WCSession during burst deliveries.
+    private var lastDistancePublishedAt: Date = .distantPast
+    private var lastPublishedDistanceMetres: Double = 0
+    private static let minDistancePublishInterval: TimeInterval = 0.5
+
     // Tear down the manager's references after the session has fully
     // ended. Called from the delegate's didChangeTo:.ended branch.
     private func clearWorkoutHandles() {
@@ -353,6 +378,11 @@ final class WatchWorkoutManager: NSObject {
         // its end-date happens to be before the previous race's
         // last sample (clock skew across day boundaries, etc).
         self.lastPublishedSampleEnd = .distantPast
+        // §39 — same reset for the distance gates so a fresh run
+        // doesn't get blocked by the previous run's high-water
+        // metres.
+        self.lastDistancePublishedAt = .distantPast
+        self.lastPublishedDistanceMetres = 0
         // Clear the live HR display value so the Watch UI doesn't
         // hold a stale reading from the just-finished race when
         // the next one starts.
@@ -420,6 +450,63 @@ final class WatchWorkoutManager: NSObject {
 
         let update = WatchHeartRateUpdate(bpm: bpm, sampledAt: sampledAt)
         WatchRaceClient.shared.publishHeartRate(update)
+    }
+
+    // §39 — extract cumulative distance from the live builder's
+    // `distanceWalkingRunning` statistics and forward it to the
+    // iPhone so Free Runs can show real distance when the phone
+    // is stationary (on the treadmill console, in a locker, etc.)
+    // and only the Watch is moving.
+    //
+    // Distance is a CUMULATIVE quantity type, so HKStatistics
+    // exposes it via `sumQuantity` (not mostRecentQuantity — that
+    // returns the latest individual delta sample, not the running
+    // total). HKLiveWorkoutBuilder accumulates the deltas
+    // automatically for `.running` activity sessions.
+    //
+    // De-dup: skip when the cumulative value hasn't advanced
+    // since the last publish (athlete is standing still — no
+    // need to spam the WCSession channel with identical totals).
+    // Throttle: same 0.5s minimum interval HR uses, scaled
+    // generously since distance updates are inherently less
+    // bursty than HR.
+    fileprivate func publishLatestDistanceIfNeeded(
+        from builder: HKLiveWorkoutBuilder
+    ) {
+        guard let distanceType = HKObjectType.quantityType(
+            forIdentifier: .distanceWalkingRunning
+        ) else {
+            return
+        }
+        guard let stats = builder.statistics(for: distanceType),
+              let sum = stats.sumQuantity() else {
+            return
+        }
+
+        let metres = sum.doubleValue(for: .meter())
+
+        // De-dup: only publish when the cumulative total has
+        // actually grown. Use a 1m floor to absorb sensor noise
+        // (HK occasionally emits sub-metre re-publishes that don't
+        // represent real progress).
+        guard metres > lastPublishedDistanceMetres + 1 else { return }
+
+        // Throttle gate AFTER the de-dup so a stationary athlete
+        // doesn't burn the throttle window on zero-delta samples.
+        let now = Date()
+        guard now.timeIntervalSince(lastDistancePublishedAt)
+            >= Self.minDistancePublishInterval else {
+            return
+        }
+
+        lastDistancePublishedAt = now
+        lastPublishedDistanceMetres = metres
+
+        let update = WatchDistanceUpdate(
+            cumulativeMetres: metres,
+            sampledAt: stats.endDate
+        )
+        WatchRaceClient.shared.publishDistance(update)
     }
 }
 
@@ -519,18 +606,35 @@ extension WatchWorkoutManager: HKLiveWorkoutBuilderDelegate {
         _ workoutBuilder: HKLiveWorkoutBuilder,
         didCollectDataOf collectedTypes: Set<HKSampleType>
     ) {
-        guard let hrType = HKObjectType.quantityType(forIdentifier: .heartRate) else {
-            return
-        }
-        guard collectedTypes.contains(hrType) else { return }
+        let hrType = HKObjectType.quantityType(forIdentifier: .heartRate)
+        let distanceType = HKObjectType.quantityType(
+            forIdentifier: .distanceWalkingRunning
+        )
 
-        // Hop to MainActor to read manager state (lastHRPublishedAt)
-        // and to call into WatchRaceClient.shared on its expected
-        // actor. The builder reference is captured locally — it's
-        // safe to use across the hop because HKLiveWorkoutBuilder
+        let hasHR = hrType.map { collectedTypes.contains($0) } ?? false
+        let hasDistance = distanceType.map { collectedTypes.contains($0) } ?? false
+
+        guard hasHR || hasDistance else { return }
+
+        // Hop to MainActor to read manager state and to call
+        // into WatchRaceClient.shared on its expected actor.
+        // The builder reference is captured locally — it's safe
+        // to use across the hop because HKLiveWorkoutBuilder
         // serializes its own sample queries.
         Task { @MainActor in
-            self.publishLatestHeartRateIfNeeded(from: workoutBuilder)
+            if hasHR {
+                self.publishLatestHeartRateIfNeeded(from: workoutBuilder)
+            }
+            // §39 — distance for Free Runs. The race path's
+            // .functionalStrengthTraining sessions don't collect
+            // distance (no distanceWalkingRunning samples), so
+            // this branch is a no-op for races. For Free Runs
+            // (.running activity), the builder accumulates
+            // distance from the wrist's pedometer + GPS fusion
+            // and we forward the cumulative total to the phone.
+            if hasDistance {
+                self.publishLatestDistanceIfNeeded(from: workoutBuilder)
+            }
         }
     }
 

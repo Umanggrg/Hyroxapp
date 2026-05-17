@@ -121,6 +121,42 @@ final class WatchRaceClient: NSObject {
         }
     }
 
+    // §39 — push a cumulative-distance sample to the paired iPhone
+    // during a Free Run. Called from `WatchWorkoutManager`'s
+    // `HKLiveWorkoutBuilderDelegate` whenever the
+    // `distanceWalkingRunning` total advances.
+    //
+    // Same dual-path delivery as `publishHeartRate`:
+    //   • sendMessage when iPhone is reachable (live)
+    //   • transferUserInfo when not (queued background delivery)
+    //
+    // The receiving side feeds the value into
+    // `FreeRunEngine.recordDistance(at:metres:)`. The engine's
+    // existing monotonic filter (`guard metres > distanceMetres`)
+    // makes this safe even though the iPhone's CMPedometer is
+    // ALSO feeding the same engine: once the Watch's higher
+    // value lands, any later phone-pedometer samples are
+    // dropped silently. Watch wins by being bigger, no explicit
+    // arbitration logic needed.
+    func publishDistance(_ update: WatchDistanceUpdate) {
+        let session = WCSession.default
+        guard session.activationState == .activated else { return }
+
+        let dict = update.toDictionary()
+
+        if session.isReachable {
+            session.sendMessage(
+                dict,
+                replyHandler: nil,
+                errorHandler: { error in
+                    print("[WatchClient] publishDistance sendMessage FAILED — \(error.localizedDescription)")
+                }
+            )
+        } else {
+            session.transferUserInfo(dict)
+        }
+    }
+
     // Push a rep-count update to the paired iPhone during a rep-
     // counting station (Phase 1 — wall balls). Called from
     // `WatchRepCountingService` on its ~1Hz throttle, AND from

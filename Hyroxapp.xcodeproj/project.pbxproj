@@ -116,6 +116,7 @@
 				Shared/WatchSync/RaceStateSnapshot.swift,
 				Shared/WatchSync/WatchAction.swift,
 				Shared/WatchSync/WatchControl.swift,
+				Shared/WatchSync/WatchDistanceUpdate.swift,
 				Shared/WatchSync/WatchHeartRateUpdate.swift,
 				Shared/WatchSync/WatchRepCountUpdate.swift,
 			);

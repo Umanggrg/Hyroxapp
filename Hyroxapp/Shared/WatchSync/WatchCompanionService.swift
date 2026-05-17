@@ -65,6 +65,22 @@ final class WatchCompanionService: NSObject {
     // continues to populate `currentHeartRateBPM` as a fallback.
     var onHeartRate: (@MainActor @Sendable (WatchHeartRateUpdate) -> Void)?
 
+    // §39 — callback invoked on MainActor when the Watch publishes
+    // a cumulative-distance sample during a Free Run. Set by
+    // FreeRunViewModel for the active-run lifetime; the handler
+    // forwards the value into the engine via
+    // `recordDistance(at:metres:)`. Solves the treadmill bug —
+    // when the iPhone is sitting stationary on the treadmill
+    // console, its CMPedometer reports zero metres, but the
+    // Watch on the user's wrist sees real motion. With this
+    // callback wired, the wrist-grade distance feeds the engine
+    // and the iPhone pedometer's zero updates are silently
+    // dropped by the engine's monotonic filter.
+    //
+    // Inactive for HYROX races — those use .functionalStrengthTraining
+    // activity, which doesn't collect distanceWalkingRunning.
+    var onDistance: (@MainActor @Sendable (WatchDistanceUpdate) -> Void)?
+
     // §13.8 Tier 2 — callback invoked on MainActor when the Watch
     // publishes a rep-count update during a rep-counting station
     // (Phase 1 — wall balls). Set by RaceView for the active-race
@@ -312,6 +328,17 @@ extension WatchCompanionService: WCSessionDelegate {
             return
         }
 
+        // §39 — Free Run distance samples from the Watch's
+        // HKLiveWorkoutBuilder. Fires only during Free Runs
+        // (.running activity collects distanceWalkingRunning);
+        // HYROX races don't produce these.
+        if let distanceUpdate = WatchDistanceUpdate(dictionary: message) {
+            Task { @MainActor in
+                Self.shared.onDistance?(distanceUpdate)
+            }
+            return
+        }
+
         // §13.8 Tier 2 — rep count updates during wall balls
         // (Phase 1). Same throttled-publish cadence as HR (~1Hz),
         // routed through the same MainActor handler pattern.
@@ -357,6 +384,19 @@ extension WatchCompanionService: WCSessionDelegate {
         if let hrUpdate = WatchHeartRateUpdate(dictionary: userInfo) {
             Task { @MainActor in
                 Self.shared.onHeartRate?(hrUpdate)
+            }
+            return
+        }
+
+        // §39 — queued distance fallback. The Watch publishes
+        // every distance sample via transferUserInfo when the
+        // iPhone isn't reachable (locked / pocketed). Late
+        // delivery is fine because the engine de-dups by
+        // monotonic comparison — a queued sample arriving after
+        // a fresher one is simply ignored.
+        if let distanceUpdate = WatchDistanceUpdate(dictionary: userInfo) {
+            Task { @MainActor in
+                Self.shared.onDistance?(distanceUpdate)
             }
             return
         }
