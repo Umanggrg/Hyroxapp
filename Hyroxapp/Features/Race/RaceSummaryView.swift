@@ -182,10 +182,14 @@ struct RaceSummaryView: View {
                                history: allFinishedRaces,
                                maxHR: maxHeartRate
                            ) {
-                            Text("Engine \(Int(engine.overall.rounded())) · \(engine.tier.displayName)")
-                                .font(.caption.weight(.heavy))
-                                .monospacedDigit()
-                                .foregroundStyle(engineTint(engine.tier))
+                            // §36 — tappable label opens the
+                            // tap-to-explain sheet with the 4
+                            // sub-score breakdown + suggested
+                            // focus. Same visual treatment as the
+                            // prior bare Text() label, plus a small
+                            // info-circle glyph signaling the
+                            // affordance.
+                            EngineScoreTappableLabel(score: engine, isAthleteRollup: false)
                         }
 
                         // Race-wide HR aggregate — duration-weighted

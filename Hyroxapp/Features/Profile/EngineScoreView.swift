@@ -24,9 +24,24 @@ struct EngineScoreView: View {
     let races: [Race]
     let maxHR: Int
 
+    // §36 Whoop pattern 7 — sheet state for the tap-to-explain
+    // affordance. Tapping the card anywhere opens the bottom
+    // sheet with the 4 sub-score breakdown, the math, and a
+    // weakest-sub-score-driven suggested focus line. Sheet is
+    // scoped to this view so the binding doesn't leak into
+    // ProfileView's state.
+    @State private var isExplainSheetPresented = false
+
     var body: some View {
         if let score = RaceStats.engineScore(across: races, maxHR: maxHR) {
             card(score: score)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    isExplainSheetPresented = true
+                }
+                .sheet(isPresented: $isExplainSheetPresented) {
+                    EngineScoreExplainSheet(score: score, isAthleteRollup: true)
+                }
         } else {
             EmptyView()
         }
