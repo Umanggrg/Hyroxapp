@@ -50,8 +50,12 @@ struct HyroxScoreView: View {
             // color drives the score tint so the eye lands on
             // both the number and its meaning at once.
             HStack(alignment: .firstTextBaseline, spacing: 12) {
+                // §35 Whoop pattern 1 — bumped from 64pt to 72pt.
+                // Single-number doctrine: this is THE Profile
+                // headline, give it the visual weight that says
+                // "look here first."
                 Text("\(score.overall)")
-                    .font(.system(size: 64, weight: .heavy, design: .rounded))
+                    .font(.system(size: 72, weight: .heavy, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(tierColor(for: score.tier))
 

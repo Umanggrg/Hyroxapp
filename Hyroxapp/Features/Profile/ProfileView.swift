@@ -766,6 +766,18 @@ struct ProfileView: View {
             .padding(.horizontal, 4)
 
             HyroxScoreView(races: races, division: division, maxHR: maxHR)
+
+            // §35 Whoop pattern 4 — causal narrative card.
+            // Renders one line beneath the HYROX Score that
+            // names WHAT changed and WHY, comparing the most
+            // recent race to the prior baseline. Self-hides
+            // when the athlete has fewer than 2 finished
+            // races (no baseline to compare against).
+            HyroxScoreDriverCard(
+                races: races,
+                division: division,
+                maxHR: maxHR
+            )
         }
     }
 

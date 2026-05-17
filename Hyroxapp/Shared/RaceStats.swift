@@ -2710,6 +2710,93 @@ enum RaceStats {
         )
     }
 
+    // §35 Whoop pattern 4 — causal narrative for the HYROX Score.
+    //
+    // The HYROX Score number on Profile is a static rollup —
+    // useful but mute. Without context, athletes see "843" and
+    // wonder "is that good? did it move? why?" The narrative
+    // engine answers all three in one sentence by comparing
+    // current state to a one-race-prior baseline and naming the
+    // sub-score that moved most.
+    //
+    // Three tones:
+    //   • Improving (delta ≥ +6) — celebrates the driver
+    //   • Regressing (delta ≤ −6)  — flags the regression source
+    //   • Steady   (|delta| < 6)   — frames the strongest dim
+    //
+    // Returns nil when:
+    //   • Athlete has fewer than 2 finished races (no baseline)
+    //   • HYROX Score can't be computed
+    struct HyroxScoreDriver {
+        let delta: Int                   // overall change
+        let driverLabel: String          // "Engine" / "Performance" / "Balance" / "Consistency"
+        let driverDelta: Int             // delta for the driver dimension
+        let narrative: String            // one-line story
+    }
+
+    static func hyroxScoreDriver(
+        across races: [Race],
+        division: Division,
+        maxHR: Int
+    ) -> HyroxScoreDriver? {
+        let finished = races
+            .filter { $0.isFinished }
+            .sorted { ($0.endedAt ?? $0.startedAt) < ($1.endedAt ?? $1.startedAt) }
+
+        guard finished.count >= 2 else { return nil }
+        guard let current = hyroxScore(across: finished, division: division, maxHR: maxHR) else {
+            return nil
+        }
+        // Baseline = score as it stood BEFORE the most recent
+        // finished race. Captures "what changed with this race."
+        let prior = Array(finished.dropLast())
+        guard let priorScore = hyroxScore(across: prior, division: division, maxHR: maxHR) else {
+            return nil
+        }
+
+        let delta = current.overall - priorScore.overall
+
+        // Pick the sub-dimension that moved most (by absolute
+        // value). Ties broken by declaration order — Performance
+        // is the most-volatile dimension so it'd win most ties
+        // naturally.
+        let movements: [(String, Int)] = [
+            ("Performance", current.performanceScore - priorScore.performanceScore),
+            ("Engine", current.engineScore - priorScore.engineScore),
+            ("Balance", current.balanceScore - priorScore.balanceScore),
+            ("Consistency", current.consistencyScore - priorScore.consistencyScore),
+        ]
+        let driver = movements.max { abs($0.1) < abs($1.1) } ?? movements[0]
+
+        let driverSigned = driver.1 >= 0 ? "+\(driver.1)" : "\(driver.1)"
+        let narrative: String
+
+        if delta >= 6 {
+            narrative = "Up \(delta) since last race. \(driver.0) is the driver (\(driverSigned))."
+        } else if delta <= -6 {
+            narrative = "Off \(abs(delta)) vs last race. Watch \(driver.0) (\(driverSigned))."
+        } else {
+            // Holding steady — frame as the strongest dimension
+            // proportional to its max (Performance /500, Engine
+            // /200, Balance + Consistency /150).
+            let proportional: [(String, Double)] = [
+                ("Performance", Double(current.performanceScore) / 500),
+                ("Engine", Double(current.engineScore) / 200),
+                ("Balance", Double(current.balanceScore) / 150),
+                ("Consistency", Double(current.consistencyScore) / 150),
+            ]
+            let strongest = proportional.max { $0.1 < $1.1 }?.0 ?? "Performance"
+            narrative = "Holding steady. \(strongest) is your strongest dimension right now."
+        }
+
+        return HyroxScoreDriver(
+            delta: delta,
+            driverLabel: driver.0,
+            driverDelta: driver.1,
+            narrative: narrative
+        )
+    }
+
     // MARK: - Pre-race finish predictor
 
     // §17.5 — pre-race AI finish-time estimation. Different
