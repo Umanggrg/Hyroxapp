@@ -97,6 +97,35 @@ final class Race {
     // cleanly without a photo, same as `notes` / `name`.
     @Attribute(.externalStorage) var photoData: Data?
 
+    // §37 Whoop pattern 6 — pre-race journal fields. Athletes
+    // tap through a 3-question sheet before the race starts:
+    // sleep last night, stress this week, anything sore.
+    // Captured here so post-race + cross-race analytics can
+    // surface patterns like "your back-half pace drops 14% on
+    // poor-sleep weeks" or "races logged with high stress show
+    // 9% slower transitions." All three fields are optional —
+    // the journal sheet is skippable, and any individual
+    // question can be left blank.
+    //
+    // Sleep / stress stored as raw strings (the picker values
+    // — "poor"/"ok"/"good"/"great" and "low"/"moderate"/"high")
+    // so SwiftData lightweight migration stays additive-safe.
+    // No raw-string-to-enum classifier yet because consumers
+    // today are display-only; the analytics layer that turns
+    // these into insights will add the enum mapping when it
+    // ships.
+    //
+    // `preSoreNotes` is free-form text — body parts, prior
+    // injuries, anything qualitative. Short by convention but
+    // not enforced.
+    //
+    // All three default to nil so pre-Phase-37 races decode
+    // cleanly without a journal, matching the additive-schema
+    // discipline this codebase has held since v0.1.
+    var preSleepRating: String? = nil
+    var preStressLevel: String? = nil
+    var preSoreNotes: String? = nil
+
     // §28 — Dense HR sample series captured during the race. Every
     // sample ingested through RaceViewModel.ingestHeartRate(_:) (the
     // single funnel for Watch WCSession stream, HK 5s poll fallback,

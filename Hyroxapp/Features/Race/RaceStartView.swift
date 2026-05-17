@@ -138,6 +138,17 @@ struct RaceStartView: View {
     // Drives the target-time picker sheet.
     @State private var isTargetPickerPresented = false
 
+    // §37 — pre-race journal sheet state. Tapping the primary
+    // Start Race CTA presents the journal first; on Continue or
+    // Skip the journal captures sleep/stress/sore notes and
+    // forwards them into viewModel.startRaceWithCountdown which
+    // stamps them on the new Race row.
+    //
+    // The journal is skippable end-to-end — Skip in the top-left
+    // of the sheet calls onContinue(nil, nil, nil) and dismisses,
+    // and the race starts identically to the pre-Phase-37 flow.
+    @State private var isJournalPresented = false
+
     // Athlete's finish-time goal for the next race they start.
     // Defaults to 1:30:00 — the canonical HYROX target finish — so the
     // common case (elite/competitive athlete) is zero-config. Setting
@@ -287,6 +298,27 @@ struct RaceStartView: View {
             TargetDurationPickerSheet(
                 duration: $targetDuration,
                 isPresented: $isTargetPickerPresented
+            )
+        }
+        // §37 — pre-race journal sheet. Presented when the
+        // athlete taps the primary Start Race CTA (see
+        // hostStartButton). Skip or Continue both forward to
+        // startRaceWithCountdown — Skip passes nil for all
+        // three fields, Continue passes whatever was tapped.
+        .sheet(isPresented: $isJournalPresented) {
+            PreRaceJournalSheet(
+                onContinue: { sleep, stress, sore in
+                    viewModel.startRaceWithCountdown(
+                        targetDuration: targetDuration,
+                        countdownEnabled: countdownEnabled,
+                        defaultPrivate: defaultRacePrivate,
+                        liveActivityEnabled: liveActivityEnabled,
+                        kind: kind,
+                        preSleepRating: sleep,
+                        preStressLevel: stress,
+                        preSoreNotes: sore
+                    )
+                }
             )
         }
         .sheet(isPresented: $isPairingPresented) {
@@ -492,19 +524,15 @@ struct RaceStartView: View {
     private var hostStartButton: some View {
         Button {
             Haptics.impact(.heavy)
-            viewModel.startRaceWithCountdown(
-                targetDuration: targetDuration,
-                countdownEnabled: countdownEnabled,
-                defaultPrivate: defaultRacePrivate,
-                liveActivityEnabled: liveActivityEnabled,
-                // §14 — pass through the kind set by whichever
-                // Train hub card pushed us here (.race or
-                // .simulation). The primary CTA is the host's
-                // path for the full 16-segment sequence; the
-                // custom-workout sheet has its own startRace call
-                // above that always tags .training.
-                kind: kind
-            )
+            // §37 — gate the actual race start behind the pre-
+            // race journal sheet. On Continue or Skip the
+            // journal hands back nullable values and we call
+            // startRaceWithCountdown with them. The sheet's
+            // .onContinue closure is wired in the .sheet
+            // modifier below. Pre-Phase-37 behavior (instant
+            // race start) restored end-to-end via the Skip
+            // button at the top-left of the journal.
+            isJournalPresented = true
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "flag.checkered")

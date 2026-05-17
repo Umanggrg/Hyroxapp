@@ -529,7 +529,10 @@ final class RaceViewModel {
         countdownEnabled: Bool,
         defaultPrivate: Bool = false,
         liveActivityEnabled: Bool = true,
-        kind: RaceKind = .race
+        kind: RaceKind = .race,
+        preSleepRating: String? = nil,
+        preStressLevel: String? = nil,
+        preSoreNotes: String? = nil
     ) {
         guard !isCountingDown, !isRacing else { return }
 
@@ -546,7 +549,10 @@ final class RaceViewModel {
                 targetDuration: targetDuration,
                 defaultPrivate: defaultPrivate,
                 liveActivityEnabled: liveActivityEnabled,
-                kind: kind
+                kind: kind,
+                preSleepRating: preSleepRating,
+                preStressLevel: preStressLevel,
+                preSoreNotes: preSoreNotes
             )
             return
         }
@@ -576,7 +582,10 @@ final class RaceViewModel {
                 targetDuration: targetDuration,
                 defaultPrivate: defaultPrivate,
                 liveActivityEnabled: liveActivityEnabled,
-                kind: kind
+                kind: kind,
+                preSleepRating: preSleepRating,
+                preStressLevel: preStressLevel,
+                preSoreNotes: preSoreNotes
             )
         }
     }
@@ -622,7 +631,10 @@ final class RaceViewModel {
         targetDuration: TimeInterval? = nil,
         defaultPrivate: Bool = false,
         liveActivityEnabled: Bool = true,
-        kind: RaceKind = .race
+        kind: RaceKind = .race,
+        preSleepRating: String? = nil,
+        preStressLevel: String? = nil,
+        preSoreNotes: String? = nil
     ) {
         guard !sequence.isEmpty else { return }
 
@@ -650,6 +662,16 @@ final class RaceViewModel {
         // the athlete tapped. Default `.race` covers the Race Mode
         // path + any legacy call sites that haven't been updated.
         race.kind = kind
+
+        // §37 — stamp the pre-race journal fields onto the Race
+        // row. Any of the three can be nil if the athlete skipped
+        // the journal or skipped individual questions. Setting
+        // them post-init (rather than threading through the Race
+        // initializer) matches the same pattern isPrivate + kind
+        // already use.
+        race.preSleepRating = preSleepRating
+        race.preStressLevel = preStressLevel
+        race.preSoreNotes = preSoreNotes
         // Clear the pendingKind stash — the race has started, so
         // any future startRaceWithCountdown call will re-set this
         // afresh. (Defensive: a stale value here can't hurt since
