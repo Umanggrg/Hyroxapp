@@ -255,105 +255,41 @@ struct ContentView: View {
 
     // MARK: - Custom tab bar
     //
-    // 5-slot bar with a coral circular FAB in slot 3 (Race).
+    // 5-slot flat bar. All tabs read with the same visual weight —
+    // glyph + caps label, tinted Volt when active, secondary text
+    // when not. Race uses a checkered flag glyph that signals
+    // headline action without protruding from the bar.
+    //
     // Sits in `.safeAreaInset` so it reserves space below the
     // TabView's child content — child views can scroll all the
     // way down without sliding under the bar.
     //
-    // Each slot is a Button that writes to `selectedTab`. The
-    // active slot reads as coral; inactive slots are
-    // secondary-text. The Race FAB is always coral-filled
-    // regardless of active state — it IS the brand moment.
+    // §40 — flattened from the earlier center-FAB design (coral
+    // circle protruding above slot 3). Athletes found the floating
+    // disc visually inconsistent against the rest of the system tab
+    // bar grammar; the flat row reads as five peers, which matches
+    // how the app actually behaves (every tab is a top-level
+    // destination, none is privileged at the routing layer).
     private var customTabBar: some View {
-        // ZStack instead of HStack so the FAB can sit on top of the
-        // bar's tinted background and visibly protrude above it
-        // without the surrounding HStack reserving extra layout
-        // height for the protrusion (a plain `.offset(y:)` inside an
-        // HStack moves the view visually but the HStack's own
-        // background still clips at the original frame edge — that
-        // was the source of the "button not visible properly" bug:
-        // the FAB's top arc was visually behind the hairline divider
-        // and the bg tint, making it read as half-eaten).
-        //
-        // ZStack layers (bottom → top):
-        //   1. Tab-bar bg + hairline (full width, anchored to bottom)
-        //   2. The 4 standard tab items in an HStack, with a spacer
-        //      slot in the center where the FAB lives
-        //   3. The FAB itself, painted last so it sits cleanly above
-        //      the hairline, the bg tint, and any neighbor labels.
-        ZStack(alignment: .top) {
-            // Layer 1+2: bar background + 4 tab items. A top
-            // spacer reserves vertical space the FAB will
-            // visually occupy when it protrudes — without it,
-            // `.safeAreaInset(edge: .bottom)` only reserves the
-            // bar's intrinsic height (~50pt) for scrolling
-            // children, and the FAB's protruding top arc covers
-            // the last row of any scrollable content. The 36pt
-            // top spacer expands the inset so scrollable bodies
-            // end well clear of the FAB.
-            VStack(spacing: 0) {
-                Color.clear
-                    .frame(height: 36)
-                Rectangle()
-                    .fill(Color.divider)
-                    .frame(height: 0.5)
-                HStack(spacing: 0) {
-                    tabBarItem(.feed,    systemImage: "house",                 label: "Feed")
-                    tabBarItem(.history, systemImage: "list.bullet.rectangle", label: "History")
-                    // Center spacer slot — same width as a tab item
-                    // so the surrounding HStack maths out cleanly,
-                    // and the FAB rendered above this slot lands in
-                    // the geometric center of the bar.
-                    Color.clear
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 1)
-                    tabBarItem(.profile, systemImage: "person.crop.circle",    label: "Profile")
-                    tabBarItem(.watch,   systemImage: "applewatch",            label: "Watch")
-                }
-                .padding(.horizontal, 8)
-                .padding(.top, 10)
-                .padding(.bottom, 6)
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(Color.divider)
+                .frame(height: 0.5)
+            HStack(spacing: 0) {
+                tabBarItem(.feed,    systemImage: "house",                 label: "Feed")
+                tabBarItem(.history, systemImage: "list.bullet.rectangle", label: "History")
+                tabBarItem(.race,    systemImage: "flag.checkered",        label: "Race")
+                tabBarItem(.profile, systemImage: "person.crop.circle",    label: "Profile")
+                tabBarItem(.watch,   systemImage: "applewatch",            label: "Watch")
             }
-            .background(
-                // Tinted bg covers ONLY the bar's intrinsic strip
-                // (hairline + tab items) — the 36pt FAB-clearance
-                // spacer above stays transparent so the FAB's
-                // halo can fade naturally over scrolling content
-                // beneath, not over a solid bg.
-                VStack(spacing: 0) {
-                    Color.clear.frame(height: 36)
-                    Color.background
-                        .ignoresSafeArea(.container, edges: .bottom)
-                }
-            )
-
-            // Layer 3: FAB, painted on top of the bar. Vertically
-            // offset upward so most of the disc protrudes above the
-            // bar baseline (classic Strava / Material FAB). The
-            // offset value of −44 puts the FAB's vertical midpoint
-            // ~6pt above the bar's top edge, so roughly two-thirds
-            // of the disc reads as "floating" above the bar and the
-            // remaining third tucks into the bar's tinted bg. With
-            // a 60pt disc + 76pt halo, that's a clear, glanceable
-            // protrusion that the previous −8 offset wasn't
-            // achieving (it left the FAB looking half-eaten by the
-            // bar's hairline divider).
-            HStack {
-                Spacer()
-                raceFAB
-                Spacer()
-            }
-            .offset(y: -44)
+            .padding(.horizontal, 8)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
         }
-        // The ZStack's intrinsic height is whatever the bar VStack
-        // wants. The FAB's offset is purely visual; it does NOT
-        // expand the safeAreaInset slot, which is what we want — the
-        // child views below behave as if the bar is just the
-        // 4-tab-item-tall strip. The FAB happens to render visually
-        // above that strip, painted on top of the child content
-        // beneath it (with a tap-through-safe Z-order; the FAB's
-        // gradient is opaque coral and the icon glyph is white, so
-        // there's no transparency issue).
+        .background(
+            Color.background
+                .ignoresSafeArea(.container, edges: .bottom)
+        )
     }
 
     private func tabBarItem(
@@ -377,85 +313,6 @@ struct ContentView: View {
         .buttonStyle(.plain)
         .accessibilityLabel(label)
         .accessibilityAddTraits(isActive ? .isSelected : [])
-    }
-
-    // Center Race FAB. Sits in slot 3, visually elevated above
-    // the bar baseline so it reads as the primary action — the
-    // "thing this app is for." Wireframe spec: coral filled
-    // circle, soft accent halo, no label text below (the icon
-    // carries the meaning).
-    private var raceFAB: some View {
-        Button {
-            selectedTab = .race
-        } label: {
-            ZStack {
-                // Outer halo ring — a slightly larger, lower-alpha
-                // coral circle behind the main FAB. Reads as
-                // stadium light and makes the button feel like it
-                // belongs to the brand "race moment" rather than
-                // a plain tab item. Pulled out as its own circle
-                // (instead of just a shadow) so the protruding
-                // edge stays crisp against the tab-bar bg.
-                Circle()
-                    .fill(Color.accent.opacity(0.18))
-                    .frame(width: 76, height: 76)
-
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.accent, Color.accent.opacity(0.85)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 60, height: 60)
-                    // Ring stroke at the gradient's outer edge —
-                    // separates the coral from the halo on light
-                    // mode so the disc reads as a discrete object
-                    // and not a wash.
-                    .overlay(
-                        Circle()
-                            .stroke(Color.accent.opacity(0.4), lineWidth: 1)
-                            .frame(width: 60, height: 60)
-                    )
-
-                Image(systemName: "flag.checkered")
-                    .font(.system(size: 24, weight: .heavy))
-                    .foregroundStyle(Color.onAccent)
-                    // Active-tab badge — a subtle inner ring
-                    // appears when the user is on the Race tab so
-                    // the FAB matches the rest of the tab bar's
-                    // selection language.
-                    .scaleEffect(selectedTab == .race ? 1.08 : 1.0)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: selectedTab)
-            }
-            // Coral spotlight + drop shadow. Two stacked shadows:
-            // the lifted-button shadow (black for elevation) and the
-            // brand coral glow (warm for moment). Tuned per mode —
-            // dialed back on warm light bg so it doesn't read as a
-            // bleed.
-            .shadow(
-                color: Color.black.opacity(
-                    (profiles.first?.resolvedThemePreference.colorScheme == .light)
-                        ? 0.18 : 0.4
-                ),
-                radius: 10,
-                x: 0,
-                y: 4
-            )
-            .shadow(
-                color: Color.accent.opacity(
-                    (profiles.first?.resolvedThemePreference.colorScheme == .light)
-                        ? 0.25 : 0.55
-                ),
-                radius: 18,
-                x: 0,
-                y: 0
-            )
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Race")
-        .accessibilityAddTraits(selectedTab == .race ? .isSelected : [])
     }
 
     // First-launch setup: ensure templates exist, ensure a UserProfile
