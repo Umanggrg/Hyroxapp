@@ -960,16 +960,15 @@ Mostly accelerometer-driven; the most "this hurt the next run" station in HYROX.
 - 🤖 *Post-push HR entering next run* — already partially shipped via §13.10 \#5 recovery; this surfaces it on the station card directly.
 - *Headline example*: "Sled push 18s · 2 wall hits at 35m · forward lean held for 80% of effort · cost Run 3 +0:14."
 
-#### Sled Pull (50m) — grip + cycle rhythm
+#### Sled Pull (50m) — continuous effort, not a rep station
 
-Rhythmic enough that arm-pull cycles are clean for IMU detection.
+Originally framed as rhythmic pull-counting (hand-over-hand cycles), but the technique varies too much in practice — some athletes do clear hand-over-hand pulls, others bulk-grab and tug, others sit back and walk the sled in. IMU rep counting would be inconsistent across athletes and probably wrong more often than right. **Treat as continuous-effort like Sled Push, not as a rep station.**
 
-- 🔧 *Pull count* (rhythmic hand-over-hand cycles on Watch IMU).
-- 🔧 *Pulls per minute*, 🔧 *avg distance per pull*.
-- 🤖 *Grip endurance curve* — "pulls per 30s" decay slope tells you whether grip held or failed.
-- 🤖 *Reset behavior* — time walking the rope back, total resets.
-- 🔧 *Hand dominance* — gyro tilt detects which arm leads each pull.
-- *Headline example*: "Sled pull 22s · 14 pulls · grip held flat (no decay) — pull is currently a strength."
+- 🤖 *Total time*, 🤖 *split-per-12.5m*, 🤖 *peak m/s*, 🤖 *avg m/s* — pacing across the 50m.
+- 🤖 *Time-stuck count* — moments the rope wasn't moving > 1s (grip reset, walked back, etc.).
+- 🤖 *"Effort phases"* — the IMU detects sustained pulling vs reset/walking; surface as a phase-timeline chart ("pulled 0-12m · reset 12-15m · pulled 15-50m").
+- ⌨️ *Load entered by user*; race-day weight projection already in place.
+- *Headline example*: "Sled pull 22s · 1 reset at 30m · steady m/s — pull was a strength today."
 
 #### Burpee Broad Jumps (80m) — rep dynamics + decay slope
 
