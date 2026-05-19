@@ -260,18 +260,25 @@ final class WatchRepCountingService {
 
     /// Positive Z peak for the drive-up phase after a lunge knee
     /// drop. Lunges have smaller vertical amplitude than burpees
-    /// or wall balls (the body doesn't fully rise) — the watch
-    /// arm swings forward as the leg drives, producing a softer
-    /// 0.4-0.7g positive Z. 0.35g floor is permissive but the
-    /// negative-trough latch keeps false positives low.
-    private static let lungePositivePeak: Double = 0.35
+    /// or wall balls (the body doesn't fully rise) but a real
+    /// lunge — sandbag-loaded, deep knee bend, full drive — pushes
+    /// well above +0.5g at the recovery apex. The previous
+    /// 0.35g floor was tight enough to false-positive on the
+    /// walking-arm swing between reps (athletes step forward
+    /// during the 100m carry); raised to 0.5g in §49 follow-up
+    /// after a review caught the walking-confusion risk.
+    private static let lungePositivePeak: Double = 0.5
 
-    /// Negative Z trough for the knee-drop phase. Lunges produce
-    /// a ~-0.3 to -0.5g vertical dip on the descent. -0.2g floor
-    /// is tighter than wall balls' -0.4g because lunge motion is
-    /// less pronounced — but the alternating cycle keeps the
-    /// signal predictable enough for this threshold to hold.
-    private static let lungeNegativeTrough: Double = -0.2
+    /// Negative Z trough for the knee-drop phase. Sandbag-loaded
+    /// knee drops produce a real ~-0.4 to -0.6g vertical dip.
+    /// The previous -0.2g floor was within the range of an
+    /// ambient walking heel-strike (athletes walk forward between
+    /// lunges with a sandbag) — tightened to -0.35g in §49
+    /// follow-up so background gait can't satisfy the trough
+    /// gate. Combined with the +0.5g peak threshold this
+    /// requires a real loaded knee drop AND a real drive-up
+    /// before a rep registers.
+    private static let lungeNegativeTrough: Double = -0.35
 
     /// Minimum interval between counted lunges. Typical HYROX
     /// pace is ~50 lunges in 100m at ~2.5s/lunge; sprint training
@@ -610,13 +617,24 @@ final class WatchRepCountingService {
     ///   2. Push-up phase. Z hovers near zero for 500-1500ms.
     ///   3. Jump up + forward. Sharp positive Z spike at the
     ///      drive apex — typically +1.5 to +2.5g.
-    ///   4. Land. Brief negative spike that's filtered by the
-    ///      refractory window (1.5s).
+    ///   4. Land. Brief negative spike that re-latches
+    ///      `crossedNegative=true` immediately. This is fine —
+    ///      it just means the next rep's drop-to-floor is
+    ///      reinforcing a gate that's already armed. The
+    ///      refractory window (1.5s) is what actually prevents
+    ///      double-counting; it filters reps, not the latch.
     ///
     /// The latch (`crossedNegative`) requires the drop-to-floor
     /// phase to register before the jump-up peak can fire,
-    /// preventing the landing impulse from being miscounted as
-    /// the start of a new rep.
+    /// preventing a stray upward wrist motion (mid-walking, mid-
+    /// setup) from being miscounted as a rep.
+    ///
+    /// Sprint-cadence note: training reps under 1.5s apart are
+    /// silently dropped by the refractory. Race pace is ~5s/rep
+    /// so this is a non-issue in practice; if sprint-cadence
+    /// training matters later, lower `burpeeMinInterval` or
+    /// switch the latch-clear to fire only on successful
+    /// registration.
     private func processMotionBurpeeJump(_ motion: CMDeviceMotion) {
         let z = motion.userAcceleration.z
         let now = Date()
