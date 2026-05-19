@@ -308,28 +308,63 @@ final class WatchRepCountingService {
 
     // MARK: - Tuning constants (continuous-effort steps, §51)
 
-    /// Positive Z peak for a step impulse. Walking/driving gait
-    /// produces small impulses on each heel strike — typically
-    /// +0.2 to +0.4g. 0.2g floor catches the gentlest gait
-    /// (slow farmers carry under load) while filtering ambient
-    /// wrist micro-motion between steps.
-    private static let stepPositivePeak: Double = 0.2
+    /// Step tuning is station-aware because the three
+    /// continuous-effort stations have very different wrist-
+    /// motion signatures:
+    ///   • Farmers Carry — clean walking gait with natural arm
+    ///     swing (or arm carrying weight at the side). Watch
+    ///     oscillates ±0.2-0.4g per step. Permissive
+    ///     thresholds catch every step.
+    ///   • Sled Pull — walking backward dragging rope, arm-pull
+    ///     motion. Similar amplitude to FC.
+    ///   • Sled Push — wrists LOCKED on the sled handles, only
+    ///     micro-oscillation. False positives on the gentle
+    ///     bracing sway would dominate if we used the same
+    ///     soft thresholds, inflating step counts and bogus
+    ///     stuck-phase math. Sled push needs a much stricter
+    ///     gate.
+    ///
+    /// §51 follow-up after review caught this — split into a
+    /// "gait" track (FC + sled pull) and a "loaded push"
+    /// track (sled push only). Refractory also bumped on the
+    /// push track because the cadence is naturally slower
+    /// (~3-4 steps/sec max under load).
+    private struct StepTuning {
+        let positivePeak: Double
+        let negativeTrough: Double
+        let minInterval: TimeInterval
+    }
 
-    /// Negative Z trough requirement before the next peak counts.
-    /// Each step has a brief recovery dip before the next impact.
-    /// -0.1g is permissive but the refractory window does most
-    /// of the heavy lifting; the latch just prevents the same
-    /// impact's recovery from registering as a second step.
-    private static let stepNegativeTrough: Double = -0.1
+    /// Gait track — Farmers Carry + Sled Pull. Clean walking /
+    /// pulling rhythm with real wrist oscillation per step.
+    private static let stepTuningGait = StepTuning(
+        positivePeak: 0.2,
+        negativeTrough: -0.1,
+        minInterval: 0.15
+    )
 
-    /// Minimum interval between counted steps. Sprint running
-    /// caps at ~5 steps/sec (200ms/step); under load that drops
-    /// to ~3 steps/sec. 150ms floor is permissive enough for
-    /// sprint cadence in farmers carry while filtering
-    /// signal-noise oscillations on a single step's impact
-    /// curve. Sled push / pull gait is much slower (~0.5-1s
-    /// per step) so this floor never binds for those stations.
-    private static let stepMinInterval: TimeInterval = 0.15
+    /// Loaded-push track — Sled Push only. Wrist locked on
+    /// handles, barely oscillates; need stricter thresholds to
+    /// filter out the bracing micro-sway that would otherwise
+    /// trip the latch on every cycle.
+    private static let stepTuningLoadedPush = StepTuning(
+        positivePeak: 0.3,
+        negativeTrough: -0.2,
+        minInterval: 0.25
+    )
+
+    /// Resolve the right step-tuning constants for whichever
+    /// station the service is currently scoring.
+    private var activeStepTuning: StepTuning {
+        guard let raw = currentStationRaw,
+              let station = Station(rawValue: raw) else {
+            return Self.stepTuningGait
+        }
+        switch station {
+        case .sledPush: return Self.stepTuningLoadedPush
+        default:        return Self.stepTuningGait
+        }
+    }
 
     // MARK: - Motion managers
 
@@ -749,12 +784,13 @@ final class WatchRepCountingService {
     /// rep timestamps; the station type determines how the
     /// post-race surface interprets them.
     private func processMotionStep(_ motion: CMDeviceMotion) {
+        let tuning = activeStepTuning
         let z = motion.userAcceleration.z
         let now = Date()
-        if z < Self.stepNegativeTrough {
+        if z < tuning.negativeTrough {
             crossedNegative = true
-        } else if crossedNegative && z > Self.stepPositivePeak {
-            if now.timeIntervalSince(lastRepRegisteredAt) >= Self.stepMinInterval {
+        } else if crossedNegative && z > tuning.positivePeak {
+            if now.timeIntervalSince(lastRepRegisteredAt) >= tuning.minInterval {
                 registerRep(at: now)
             }
             crossedNegative = false

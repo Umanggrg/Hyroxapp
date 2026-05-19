@@ -35,9 +35,16 @@ struct StationContinuousEffortSection: View {
     // MARK: - Body
 
     var body: some View {
+        // ≥8 steps required before rendering — fewer than that
+        // on a sled push (50m, walking under load) is more
+        // likely to be a noise-triggered detection than a real
+        // step sequence. FC + Sled Pull will routinely produce
+        // 20+ steps so this gate is rarely binding for them.
+        // §51 follow-up after review flagged the false-positive
+        // risk on sled push specifically.
         if isContinuousEffort,
            let offsets = split.repTimestampOffsets,
-           offsets.count >= 4 {
+           offsets.count >= 8 {
             VStack(alignment: .leading, spacing: 12) {
                 ProfileSectionHeader(
                     title: sectionTitle,
@@ -213,6 +220,12 @@ struct StationContinuousEffortSection: View {
     }
 
     private func meanPaceMps() -> Double {
+        // split.duration is the station window ONLY — roxzone
+        // (transition) time lives on a sibling field
+        // (roxzoneSeconds) and is excluded from this calc.
+        // Future edits to roxzone bookkeeping must preserve
+        // that invariant or this pace number will silently
+        // shift.
         guard split.duration > 0, stationDistanceMetres > 0 else { return 0 }
         return stationDistanceMetres / split.duration
     }
