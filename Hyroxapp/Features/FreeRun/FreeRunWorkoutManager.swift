@@ -24,7 +24,7 @@ import WatchConnectivity
 //     (≤50m horizontal accuracy and ≤10s stale), distance integrates
 //     from the CL-derived deltas, overriding the pedometer's estimate
 //     for the more accurate GPS reading.
-//   • HKWorkoutSession + HKLiveWorkoutBuilder (iOS 17.0+) — phone-side
+//   • HKWorkoutSession + HKLiveWorkoutBuilder (iOS 26.0+) — phone-side
 //     workout context. CRITICAL for AirPods Pro 3 HR — Apple's docs are
 //     explicit that in-ear PPG samples only flow into HealthKit while a
 //     supported HKWorkoutSession is active (Watch's OR iPhone's, doesn't
@@ -32,11 +32,17 @@ import WatchConnectivity
 //     paired Apple Watch sees zero HR data even though the sensor on
 //     their ear is sensing it perfectly.
 //
-//     The earlier comment claimed iOS 26+ was required — that was an
-//     incorrect read of Apple's docs. HKWorkoutSession + HKLiveWorkoutBuilder
-//     are iOS 17.0+ on iPhone (the AirPods Pro 3 hardware itself shipped
-//     with iOS 26, but the workout-session API has been available since
-//     iOS 17). Restored in §41 to fix the AirPods-only test case.
+//     Availability: iPhone-side HKLiveWorkoutBuilder requires iOS 26.0+
+//     (an earlier Phase 41 comment claimed iOS 17.0+; that was wrong —
+//     the Xcode SDK rejects HKLiveWorkoutBuilder usage on iOS targets
+//     below 26.0). Practical impact: zero. AirPods Pro 3 hardware
+//     itself requires iOS 26.0 to pair, so anyone in the "AirPods Pro
+//     3 + no Watch" case is already on iOS 26+. iOS 17-25 users fall
+//     back to the pre-§41 behavior: no iPhone-side session, no AirPods
+//     Pro 3 HR — but they couldn't have AirPods Pro 3 anyway. The
+//     stored session / builder slots use Any? typing to dodge the
+//     type-level availability error; cast inside `if #available(iOS 26,
+//     *)` blocks at every use site.
 //
 //   • The session ALSO buys us a real HKWorkout written to Apple Health
 //     on finish — Activity ring credit + an entry in the Fitness app —
@@ -117,10 +123,17 @@ final class FreeRunWorkoutManager: NSObject {
     // its in-ear PPG samples flow into HealthKit. Lazy — only spun
     // up when no paired Watch exists (the Watch owns the session in
     // that case).
+    //
+    // §48 — Stored as Any? to dodge the type-level availability
+    // error on HKLiveWorkoutBuilder (iOS 26.0+ on iPhone). Cast
+    // inside `if #available(iOS 26.0, *)` blocks at every use site.
+    // HKWorkoutSession is iOS 17.0+ but we keep both in Any? for
+    // consistency — the iPhone session is meaningless without the
+    // builder for sample collection anyway, so both gate together.
     #if canImport(HealthKit)
     private let healthStore = HKHealthStore()
-    private var iPhoneWorkoutSession: HKWorkoutSession?
-    private var iPhoneWorkoutBuilder: HKLiveWorkoutBuilder?
+    private var iPhoneWorkoutSession: Any?  // HKWorkoutSession when iOS 26+
+    private var iPhoneWorkoutBuilder: Any?  // HKLiveWorkoutBuilder when iOS 26+
     // Throttle + de-dup for HR samples extracted from the builder's
     // stats. Same pattern WatchWorkoutManager uses on the wrist.
     private var lastBuilderHRPublishedAt: Date = .distantPast
@@ -310,6 +323,10 @@ final class FreeRunWorkoutManager: NSObject {
         startDate: Date
     ) {
         #if canImport(HealthKit)
+        // §48 — iPhone-side HKLiveWorkoutBuilder requires iOS 26.0+.
+        // On older iOS, the AirPods Pro 3 hardware itself isn't
+        // supported either, so the practical user impact is zero.
+        guard #available(iOS 26.0, *) else { return }
         guard HKHealthStore.isHealthDataAvailable() else { return }
         // Skip when the Watch app is installed — the Watch owns the
         // workout session in that case (started via
@@ -375,13 +392,15 @@ final class FreeRunWorkoutManager: NSObject {
 
     private func pauseIPhoneWorkoutSession() {
         #if canImport(HealthKit)
-        iPhoneWorkoutSession?.pause()
+        guard #available(iOS 26.0, *) else { return }
+        (iPhoneWorkoutSession as? HKWorkoutSession)?.pause()
         #endif
     }
 
     private func resumeIPhoneWorkoutSession() {
         #if canImport(HealthKit)
-        iPhoneWorkoutSession?.resume()
+        guard #available(iOS 26.0, *) else { return }
+        (iPhoneWorkoutSession as? HKWorkoutSession)?.resume()
         #endif
     }
 
@@ -390,7 +409,8 @@ final class FreeRunWorkoutManager: NSObject {
     // discards (abandon path).
     private func endIPhoneWorkoutSession(finalize: Bool, at endDate: Date) {
         #if canImport(HealthKit)
-        guard let session = iPhoneWorkoutSession else { return }
+        guard #available(iOS 26.0, *) else { return }
+        guard let session = iPhoneWorkoutSession as? HKWorkoutSession else { return }
         pendingIPhoneFinalize = finalize
         session.end()
         print("[FreeRunPhoneHK] end requested at=\(endDate) finalize=\(finalize)")
@@ -417,6 +437,7 @@ final class FreeRunWorkoutManager: NSObject {
     // closure firing reasonable. De-duped by sample-end timestamp so
     // a re-publish for the same underlying sample (didCollectDataOf
     // fires for every data type, not just HR) doesn't double-update.
+    @available(iOS 26.0, *)
     fileprivate func publishLatestBuilderHRIfNeeded(
         from builder: HKLiveWorkoutBuilder
     ) {
@@ -483,9 +504,17 @@ final class FreeRunWorkoutManager: NSObject {
     }
 }
 
-// MARK: - HKWorkoutSessionDelegate + HKLiveWorkoutBuilderDelegate (§41)
+// MARK: - HKWorkoutSessionDelegate + HKLiveWorkoutBuilderDelegate (§41 / §48)
+//
+// Whole-extension availability annotation: HKLiveWorkoutBuilder
+// is iOS 26.0+ on iPhone, and both delegate protocols + their
+// callback parameter types reference it. Gating the extensions
+// keeps the rest of FreeRunWorkoutManager available on iOS 17+
+// (CMPedometer / GPS / HK polling path) while the delegate
+// surface only exists on iOS 26+.
 
 #if canImport(HealthKit)
+@available(iOS 26.0, *)
 extension FreeRunWorkoutManager: HKWorkoutSessionDelegate {
 
     // Fires on every session state transition. We only act on `.ended`
@@ -502,7 +531,7 @@ extension FreeRunWorkoutManager: HKWorkoutSessionDelegate {
         guard toState == .ended else { return }
 
         Task { @MainActor in
-            guard let builder = self.iPhoneWorkoutBuilder else {
+            guard let builder = self.iPhoneWorkoutBuilder as? HKLiveWorkoutBuilder else {
                 print("[FreeRunPhoneHK] state .ended but no builder — clearing handles")
                 self.clearIPhoneWorkoutHandles()
                 return
@@ -545,6 +574,7 @@ extension FreeRunWorkoutManager: HKWorkoutSessionDelegate {
     }
 }
 
+@available(iOS 26.0, *)
 extension FreeRunWorkoutManager: HKLiveWorkoutBuilderDelegate {
 
     // Fires when the builder collects new samples. We filter for HR
