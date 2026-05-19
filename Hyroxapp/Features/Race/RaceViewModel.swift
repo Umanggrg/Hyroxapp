@@ -1594,20 +1594,26 @@ final class RaceViewModel {
     // stroke), and surface pacing-consistency analytics that
     // the running-count alone can't power.
     //
-    // Catch-up pattern mirrors ingestRepCount: walk splits in
-    // reverse, find the most-recent split with matching
-    // stationRaw, stamp repTimestampOffsets if still nil. Don't
-    // clobber a previously-stamped value (paranoid against
-    // duplicate batch delivery via the dual sendMessage +
-    // transferUserInfo transports).
+    // Match strategy: walk splits in reverse and pick the most
+    // recent CLOSED split (endedAt <= batch.sampledAt) with
+    // matching stationRaw. The "already closed at batch send
+    // time" filter is the key defense against custom workouts
+    // that repeat an erg — without it, a queued transferUserInfo
+    // batch from the FIRST rowing segment could land after the
+    // SECOND rowing segment also closed, and the naive most-
+    // recent-match would stamp segment-1's timestamps onto
+    // segment-2's split. Constraining to splits closed before
+    // the batch was sampled keeps stale batches scoped to their
+    // own segment.
     //
     // Offsets are computed relative to the matched split's
     // startedAt so the Split contract (offsets, not absolute
     // dates) is preserved. Out-of-window timestamps — those
     // outside [split.startedAt, split.endedAt] — are filtered
-    // out as defensive defense against clock skew or batched-
-    // delivery races where the Watch's stop() happens slightly
-    // after the iPhone's advance.
+    // out as defensive defense against clock skew. Already-
+    // stamped splits are skipped (no clobber on duplicate
+    // delivery via the dual sendMessage + transferUserInfo
+    // transports).
     func ingestRepTimestamps(_ batch: WatchRepTimestampsBatch) {
         let age = Date().timeIntervalSince(batch.sampledAt)
         guard age < Self.watchRepStaleThreshold else { return }
@@ -1617,6 +1623,16 @@ final class RaceViewModel {
         for index in splits.indices.reversed() {
             let split = splits[index]
             guard split.station.rawValue == batch.stationRaw else { continue }
+            // Skip splits that were still in progress when this
+            // batch was published — those will get THEIR OWN
+            // batch published when they eventually close. This
+            // is the custom-workout-repeated-erg guard: it
+            // ensures a delayed batch for segment N doesn't
+            // stamp onto segment N+1 of the same station.
+            // 250ms slack accommodates the round-trip jitter
+            // between Watch's stop() timestamp and the iPhone's
+            // advance() timestamp landing on Split.endedAt.
+            guard split.endedAt.timeIntervalSince(batch.sampledAt) <= 0.25 else { continue }
             // Already stamped — don't clobber.
             guard split.repTimestampOffsets == nil else { break }
 
