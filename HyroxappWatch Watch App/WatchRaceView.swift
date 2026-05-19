@@ -1139,23 +1139,27 @@ struct WatchRaceView: View {
         return station.rawValue
     }
 
-    // Stations the IMU rep-counting service can score. Two
+    // Stations the IMU rep-counting service can score. Four
     // profiles ship today:
-    //   • Wall Balls   — Z-axis peak with negative-trough latch
-    //                    (Phase 13).
-    //   • Rowing /     — Magnitude-based peak detection with
-    //     SkiErg         valley/peak cycle gate (Phase 46). The
-    //                    same detector serves both ergs because
-    //                    the cycle shape is similar enough.
+    //   • Wall Balls       — Z-axis peak with negative-trough
+    //                        latch (Phase 13).
+    //   • Rowing / SkiErg  — Magnitude-based peak detection with
+    //                        valley/peak cycle gate (Phase 46).
+    //                        Same detector for both ergs.
+    //   • Burpee BJ        — Z-axis latch with bigger amplitudes
+    //                        + longer refractory (Phase 49).
+    //   • Sandbag Lunges   — Z-axis latch with softer thresholds
+    //                        (Phase 49). Phase 50 will add gyro-
+    //                        based L/R asymmetry detection.
     //
-    // Burpees + Sandbag Lunges sit behind their own per-station
-    // motion signatures in §13.8 Tier 2 follow-up work. Sled
-    // push + sled pull + farmers carry are continuous-effort
+    // Sled push + sled pull + farmers carry are continuous-effort
     // stations (not rep-based) and go through a separate
-    // instrumentation track.
+    // instrumentation track (cadence / wall-hits / activity
+    // threshold), not rep counting.
     static func isRepCountable(_ station: Station) -> Bool {
         switch station {
-        case .wallBalls, .rowing, .skiErg:
+        case .wallBalls, .rowing, .skiErg,
+             .burpeeBroadJumps, .sandbagLunges:
             return true
         default:
             return false

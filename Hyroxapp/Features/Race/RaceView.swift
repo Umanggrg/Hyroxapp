@@ -1875,17 +1875,20 @@ struct RaceView: View {
 
     private func repCellLabel(for station: Station?) -> String {
         switch station {
-        case .rowing:   return "STROKES"
-        case .skiErg:   return "PULLS"
-        default:        return "REPS"
+        case .rowing:           return "STROKES"
+        case .skiErg:           return "PULLS"
+        case .sandbagLunges:    return "LUNGES"
+        // Burpees + Wall Balls share the generic "REPS" vocab.
+        default:                return "REPS"
         }
     }
 
     private func repCellAccessibility(for station: Station?) -> String {
         switch station {
-        case .rowing:   return "strokes counted"
-        case .skiErg:   return "pulls counted"
-        default:        return "reps counted"
+        case .rowing:           return "strokes counted"
+        case .skiErg:           return "pulls counted"
+        case .sandbagLunges:    return "lunges counted"
+        default:                return "reps counted"
         }
     }
 

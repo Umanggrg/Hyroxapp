@@ -140,9 +140,13 @@ struct WatchRaceMainPage: View {
             return "REPS"
         }
         switch station {
-        case .rowing:   return "STROKES"
-        case .skiErg:   return "PULLS"
-        default:        return "REPS"
+        case .rowing:           return "STROKES"
+        case .skiErg:           return "PULLS"
+        case .sandbagLunges:    return "LUNGES"
+        // Burpees + Wall Balls both use the generic "REPS"
+        // vocab — neither has a more sport-accurate alternative
+        // that reads cleanly at chip size.
+        default:                return "REPS"
         }
     }
 
@@ -154,9 +158,11 @@ struct WatchRaceMainPage: View {
             return "dumbbell.fill"
         }
         switch station {
-        case .rowing:   return "figure.rower"
-        case .skiErg:   return "figure.skiing.crosscountry"
-        default:        return "dumbbell.fill"
+        case .rowing:           return "figure.rower"
+        case .skiErg:           return "figure.skiing.crosscountry"
+        case .burpeeBroadJumps: return "figure.jumprope"
+        case .sandbagLunges:    return "figure.cooldown"
+        default:                return "dumbbell.fill"
         }
     }
 

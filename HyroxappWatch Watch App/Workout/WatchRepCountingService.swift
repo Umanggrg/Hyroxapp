@@ -117,6 +117,21 @@ final class WatchRepCountingService {
         /// Both have ~2s rhythmic cycles with smooth magnitude
         /// peaks; same thresholds work across them.
         case rowingStroke
+        /// Burpee broad jumps (§49). Multi-phase rep cycle —
+        /// sharp negative Z trough on the drop-to-floor, sustained
+        /// near-zero plateau during the push-up, then sharp
+        /// positive Z spike on the jump up + forward. Much bigger
+        /// amplitudes than wall balls (jumping is more violent
+        /// than overhead pressing), longer cycle (~2-4s).
+        case burpeeJump
+        /// Sandbag lunges (§49). Alternating L/R lunge cycles
+        /// at ~2-3s/rep. Vertical Z dip on the knee-drop, return
+        /// to neutral on the drive back up. Smaller amplitude
+        /// than burpees but the alternation cadence is what
+        /// makes the signal countable. Phase 50 will layer
+        /// gyro-based L/R asymmetry detection on this profile;
+        /// for now we just count cycles.
+        case lunge
     }
 
     private var activeProfile: DetectorProfile?
@@ -216,6 +231,55 @@ final class WatchRepCountingService {
     /// faster but the same floor holds.
     private static let rowingMinInterval: TimeInterval = 1.0
 
+    // MARK: - Tuning constants (burpee broad jumps, §49)
+
+    /// Positive Z peak threshold for the jump-up phase. Burpee
+    /// broad jumps produce big positive Z spikes when the
+    /// athlete drives up from the floor + launches forward —
+    /// ~1.5-2.5g typical at the apex. 1.0g floor catches the
+    /// weaker cumulative-fatigue reps while filtering background
+    /// motion between cycles.
+    private static let burpeePositivePeak: Double = 1.0
+
+    /// Negative Z trough threshold for the drop-to-floor phase.
+    /// Hitting the ground in a burpee produces a sharp negative
+    /// impulse (~-1.5 to -2.5g depending on form aggression).
+    /// -1.0g floor stays above background squat / setup motion.
+    /// Sharper than wall balls (-0.4g) because the drop is more
+    /// violent than a wall-ball squat.
+    private static let burpeeNegativeTrough: Double = -1.0
+
+    /// Minimum interval between counted burpees. Race pace is
+    /// roughly 16 burpee-broad-jumps in 80m at ~5s/rep average,
+    /// but training reps can be faster. 1.5s floor catches sprint
+    /// cadence (~40 burpees/min) without double-counting the
+    /// jump-then-land oscillation as two reps.
+    private static let burpeeMinInterval: TimeInterval = 1.5
+
+    // MARK: - Tuning constants (sandbag lunges, §49)
+
+    /// Positive Z peak for the drive-up phase after a lunge knee
+    /// drop. Lunges have smaller vertical amplitude than burpees
+    /// or wall balls (the body doesn't fully rise) — the watch
+    /// arm swings forward as the leg drives, producing a softer
+    /// 0.4-0.7g positive Z. 0.35g floor is permissive but the
+    /// negative-trough latch keeps false positives low.
+    private static let lungePositivePeak: Double = 0.35
+
+    /// Negative Z trough for the knee-drop phase. Lunges produce
+    /// a ~-0.3 to -0.5g vertical dip on the descent. -0.2g floor
+    /// is tighter than wall balls' -0.4g because lunge motion is
+    /// less pronounced — but the alternating cycle keeps the
+    /// signal predictable enough for this threshold to hold.
+    private static let lungeNegativeTrough: Double = -0.2
+
+    /// Minimum interval between counted lunges. Typical HYROX
+    /// pace is ~50 lunges in 100m at ~2.5s/lunge; sprint training
+    /// can hit ~2s/lunge. 1.2s floor catches sprint cadence
+    /// without double-counting the in-step shuffle some athletes
+    /// do between reps.
+    private static let lungeMinInterval: TimeInterval = 1.2
+
     // MARK: - Motion managers
 
     #if canImport(CoreMotion)
@@ -277,6 +341,10 @@ final class WatchRepCountingService {
             profile = .wallBalls
         case .rowing, .skiErg:
             profile = .rowingStroke
+        case .burpeeBroadJumps:
+            profile = .burpeeJump
+        case .sandbagLunges:
+            profile = .lunge
         default:
             return false
         }
@@ -404,15 +472,22 @@ final class WatchRepCountingService {
 
     #if canImport(CoreMotion)
     private func processMotion(_ motion: CMDeviceMotion) {
-        // Dispatch by profile. The two detectors share zero state
-        // — wall-ball uses Z + negative-trough latch; rowing uses
-        // magnitude + valley/peak gate — so the two branches stay
-        // independent. Adding a third profile is a third branch.
+        // Dispatch by profile. Wall-ball, burpee, and lunge use
+        // Z-axis + negative-trough latch with different thresholds;
+        // rowing/ski uses magnitude + valley/peak gate. The three
+        // latch-based detectors share the same `crossedNegative`
+        // / `lastZ` / `lastRepRegisteredAt` state because they're
+        // mutually exclusive at runtime (only one profile is
+        // active at a time).
         switch activeProfile {
         case .wallBalls:
             processMotionWallBalls(motion)
         case .rowingStroke:
             processMotionRowingStroke(motion)
+        case .burpeeJump:
+            processMotionBurpeeJump(motion)
+        case .lunge:
+            processMotionLunge(motion)
         case nil:
             // Motion can land in the brief window between start()
             // returning false and the caller noticing. Silent.
@@ -522,6 +597,67 @@ final class WatchRepCountingService {
                 strokeGate = .seekingValley
             }
         }
+    }
+
+    /// §49 — Burpee broad jump detector. Same Z-axis negative-
+    /// trough latch pattern as wall balls but with bigger
+    /// amplitudes (jumping is more violent than overhead pressing)
+    /// and a longer refractory window (slower cycle).
+    ///
+    /// Cycle anatomy:
+    ///   1. Athlete drops to floor (chest-down). Sharp negative
+    ///      Z impulse from the impact — typically -1.5 to -2.5g.
+    ///   2. Push-up phase. Z hovers near zero for 500-1500ms.
+    ///   3. Jump up + forward. Sharp positive Z spike at the
+    ///      drive apex — typically +1.5 to +2.5g.
+    ///   4. Land. Brief negative spike that's filtered by the
+    ///      refractory window (1.5s).
+    ///
+    /// The latch (`crossedNegative`) requires the drop-to-floor
+    /// phase to register before the jump-up peak can fire,
+    /// preventing the landing impulse from being miscounted as
+    /// the start of a new rep.
+    private func processMotionBurpeeJump(_ motion: CMDeviceMotion) {
+        let z = motion.userAcceleration.z
+        let now = Date()
+        if z < Self.burpeeNegativeTrough {
+            crossedNegative = true
+        } else if crossedNegative && z > Self.burpeePositivePeak {
+            if now.timeIntervalSince(lastRepRegisteredAt) >= Self.burpeeMinInterval {
+                registerRep(at: now)
+            }
+            crossedNegative = false
+        }
+        lastZ = z
+    }
+
+    /// §49 — Sandbag lunge detector. Same negative-trough latch
+    /// pattern but with softer thresholds because lunges involve
+    /// less vertical excursion than burpees or wall balls.
+    ///
+    /// Cycle anatomy:
+    ///   1. Knee drop (descent of the lunging leg). Soft negative
+    ///      Z dip — typically -0.3 to -0.5g.
+    ///   2. Drive back up. Watch arm sweeps slightly forward as
+    ///      the leg straightens, producing a 0.4-0.7g positive Z.
+    ///   3. Step / pause before next rep.
+    ///
+    /// Phase 50 will layer gyro roll tracking on this profile to
+    /// classify each rep as left-lead or right-lead (asymmetry
+    /// detection — the killer coaching insight for this station).
+    /// Phase 49 just counts cycles.
+    private func processMotionLunge(_ motion: CMDeviceMotion) {
+        let z = motion.userAcceleration.z
+        let now = Date()
+        if z < Self.lungeNegativeTrough {
+            crossedNegative = true
+        } else if crossedNegative && z > Self.lungePositivePeak {
+            if now.timeIntervalSince(lastRepRegisteredAt) >= Self.lungeMinInterval {
+                registerRep(at: now)
+            }
+            crossedNegative = false
+        }
+        lastZ = z
     }
     #endif
 
