@@ -44,9 +44,15 @@ struct StationLungeDetailSection: View {
     // MARK: - Body
 
     var body: some View {
+        // ≥12 reps required for a stable asymmetry signal —
+        // that's ~6 samples per leg, enough for the mean to
+        // converge against rep-to-rep noise. Erg sections gate
+        // at 4 (~100 stroke samples for rowing, very stable);
+        // lunges typically ship 40-50 reps in race form so 12
+        // is achieved by the 100m mark even at slow pace.
         if split.station == .sandbagLunges,
            let offsets = split.repTimestampOffsets,
-           offsets.count >= 4 {
+           offsets.count >= 12 {
             VStack(alignment: .leading, spacing: 12) {
                 ProfileSectionHeader(
                     title: "Lunge Output",
@@ -254,20 +260,36 @@ struct StationLungeDetailSection: View {
         }
     }
 
-    /// Cycle time per rep for the two alternating groups. Group A
-    /// = first rep + every other rep; Group B = second rep +
-    /// every other rep. Cycle time within a group is the average
-    /// time between two consecutive reps OF THAT GROUP — so
-    /// group-A cycle time covers two physical lunges (the one
-    /// from this side AND the one from the other side that
-    /// happened in between).
+    /// Per-leg cycle time, computed from the consecutive
+    /// per-rep deltas of the full offsets array.
     ///
-    /// To make the numbers comparable to "time spent per rep,"
-    /// halve them — that's the per-lunge cycle time on that
-    /// side. The delta is reported AT that halved scale.
+    /// The key insight: the delta from rep N → rep N+1 is the
+    /// time SPENT on rep N+1 — i.e., the cycle time for the
+    /// leg that just stepped to make rep N+1. Reps alternate
+    /// L/R, so:
+    ///   • Even-indexed deltas (deltas[0], deltas[2], deltas[4]…)
+    ///     are the cycle times for reps 2, 4, 6… — the alternate
+    ///     leg (the one that stepped second).
+    ///   • Odd-indexed deltas (deltas[1], deltas[3], deltas[5]…)
+    ///     are the cycle times for reps 3, 5, 7… — the
+    ///     first-lead leg returning to action.
+    ///
+    /// The first-lead leg's rep 1 has no delta (it's the
+    /// starting offset), so we have one fewer first-lead sample
+    /// than alternate samples at odd total counts. Mean over
+    /// whatever samples each group has.
+    ///
+    /// §50 follow-up: previous version computed deltas WITHIN a
+    /// single group's offsets (rep-2-to-rep-2 distance, halved
+    /// to estimate per-leg time). That halving collapsed the
+    /// asymmetry to ~0 because each same-group delta covers a
+    /// full alternating cycle (this leg + other leg + this leg),
+    /// so dividing by 2 gives the AVERAGE of both legs, not the
+    /// per-leg time. The corrected math below assigns each delta
+    /// to the leg that just stepped.
     private struct AsymmetryReport {
-        let groupACycleSec: Double  // per-lunge time, first-lead group
-        let groupBCycleSec: Double  // per-lunge time, alternate group
+        let groupACycleSec: Double  // first-lead leg, per-rep cycle time
+        let groupBCycleSec: Double  // alternate leg, per-rep cycle time
         let deltaSec: Double        // groupA - groupB (signed)
     }
 
@@ -275,24 +297,32 @@ struct StationLungeDetailSection: View {
         guard offsets.count >= 4 else {
             return AsymmetryReport(groupACycleSec: 0, groupBCycleSec: 0, deltaSec: 0)
         }
-        let groupA = offsets.enumerated()
-            .filter { $0.offset % 2 == 0 }
-            .map(\.element)
-        let groupB = offsets.enumerated()
+        // deltas[i] = time from rep (i+1) to rep (i+2) = cycle
+        // time spent on rep (i+2). Reps are 1-indexed for
+        // mental clarity; offsets[i] is the time of rep (i+1).
+        let deltas = zip(offsets.dropFirst(), offsets).map { $0 - $1 }
+
+        // Even-indexed deltas correspond to reps 2, 4, 6… — the
+        // ALTERNATE leg. Odd-indexed deltas correspond to reps
+        // 3, 5, 7… — the FIRST-LEAD leg making its return.
+        let firstLeadDeltas = deltas.enumerated()
             .filter { $0.offset % 2 == 1 }
             .map(\.element)
+        let alternateDeltas = deltas.enumerated()
+            .filter { $0.offset % 2 == 0 }
+            .map(\.element)
 
-        // Per-group consecutive deltas — time between two reps
-        // OF THAT GROUP. Halve to get per-lunge time on that side.
-        let aDeltas = zip(groupA.dropFirst(), groupA).map { $0 - $1 }
-        let bDeltas = zip(groupB.dropFirst(), groupB).map { $0 - $1 }
-        let aCycle = aDeltas.isEmpty ? 0 : (aDeltas.reduce(0, +) / Double(aDeltas.count)) / 2
-        let bCycle = bDeltas.isEmpty ? 0 : (bDeltas.reduce(0, +) / Double(bDeltas.count)) / 2
+        let firstLeadCycle = firstLeadDeltas.isEmpty
+            ? 0
+            : firstLeadDeltas.reduce(0, +) / Double(firstLeadDeltas.count)
+        let alternateCycle = alternateDeltas.isEmpty
+            ? 0
+            : alternateDeltas.reduce(0, +) / Double(alternateDeltas.count)
 
         return AsymmetryReport(
-            groupACycleSec: aCycle,
-            groupBCycleSec: bCycle,
-            deltaSec: aCycle - bCycle
+            groupACycleSec: firstLeadCycle,
+            groupBCycleSec: alternateCycle,
+            deltaSec: firstLeadCycle - alternateCycle
         )
     }
 

@@ -249,8 +249,16 @@ struct StationBurpeeDetailSection: View {
         let halfDuration = split.duration / 2
         let first = offsets.filter { $0 < halfDuration }
         let second = offsets.filter { $0 >= halfDuration }
-        let firstCycle = first.isEmpty ? 0 : halfDuration / Double(first.count)
-        let secondCycle = second.isEmpty ? 0 : halfDuration / Double(second.count)
+        // True cycle time within a half = mean gap between
+        // consecutive reps in that half. The previous version
+        // computed halfDuration / count, which is "average reps
+        // per half-time" — not the same as cycle time when reps
+        // cluster early or late. The correct shape is the same
+        // as the asymmetry math: zip consecutive offsets, take
+        // deltas, average. Fewer than 2 reps in a half = no
+        // delta computable; report 0 in that edge case.
+        let firstCycle = cycleTime(in: first)
+        let secondCycle = cycleTime(in: second)
         let delta = secondCycle - firstCycle
         let prefix = delta > 0 ? "+" : ""
         return PacingSplit(
@@ -258,6 +266,15 @@ struct StationBurpeeDetailSection: View {
             secondHalfCycleSec: secondCycle,
             deltaCopy: String(format: "\(prefix)%.1f", delta)
         )
+    }
+
+    /// Mean cycle time within a slice of rep offsets — average
+    /// of consecutive deltas. Returns 0 for fewer than 2 reps
+    /// (no delta computable).
+    private func cycleTime(in offsets: [TimeInterval]) -> Double {
+        guard offsets.count >= 2 else { return 0 }
+        let deltas = zip(offsets.dropFirst(), offsets).map { $0 - $1 }
+        return deltas.reduce(0, +) / Double(deltas.count)
     }
 
     /// Decay classification from the bucket spread. CV of bucket
