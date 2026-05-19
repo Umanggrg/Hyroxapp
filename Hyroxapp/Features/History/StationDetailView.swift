@@ -142,6 +142,16 @@ struct StationDetailView: View {
                     StationWorkOutputCard(split: split)
                         .applyScrollAppearTransition()
 
+                    // §47b — Erg-specific deep dive. Stroke / pull
+                    // count, cadence-per-100m curve, DPS, first-half
+                    // / second-half pacing delta, consistency
+                    // classification. Hides on every non-erg
+                    // station and on ergs without per-stroke
+                    // timestamps (pre-Phase-47 races, no Watch, or
+                    // the IMU detector didn't fire).
+                    StationErgDetailSection(split: split)
+                        .applyScrollAppearTransition()
+
                     // §43 — HR deep-dive layer. Hides itself when
                     // hrSeries is empty (pre-Phase-28 race) or the
                     // station window has <4 samples to chart. The
