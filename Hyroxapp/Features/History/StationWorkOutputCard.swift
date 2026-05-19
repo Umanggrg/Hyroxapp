@@ -205,15 +205,21 @@ struct StationWorkOutputCard: View {
                 unit: "kg"
             ))
         }
-        // Reps tile — only for stations where the rep count is
-        // the primary work unit, AND only when it wasn't
-        // already encoded in the cadence tile (Wall Balls).
-        // Showing both "Reps 100" and "Cadence 23 rpm" on Wall
-        // Balls is redundant.
+        // Rep count tile — only for stations where the count is
+        // the primary work unit, AND only when it wasn't already
+        // encoded in the cadence tile (Wall Balls, where cadence
+        // already implies the rep count). §46 adds rowing +
+        // SkiErg to the auto-counted set, so the label adapts to
+        // station vocabulary: rowing → "STROKES", skiErg →
+        // "PULLS", default → "REPS". Without this, the post-
+        // race tile would render "REPS 312" on a rowing card
+        // even though the live race screen + Watch chip both
+        // used "STROKES" — breaking the vocabulary contract on
+        // the most-glanced post-race surface.
         if split.station != .wallBalls,
            let reps = split.repsCompleted, reps > 0 {
             tiles.append(OutputTile(
-                label: "REPS",
+                label: repCountLabel(for: split.station),
                 value: "\(reps)",
                 unit: nil
             ))
@@ -227,6 +233,20 @@ struct StationWorkOutputCard: View {
         }
 
         return tiles
+    }
+
+    // §46 — sport-accurate label for the rep-count tile. Mirrors
+    // the live-race vocab on RaceView / Watch so the post-race
+    // surface doesn't accidentally say "REPS 312" on a rowing
+    // card. Wall Balls doesn't pass through here (cadence tile
+    // owns the count instead) so we never hit a vocabulary
+    // mismatch on that station.
+    private func repCountLabel(for station: Station) -> String {
+        switch station {
+        case .rowing:   return "STROKES"
+        case .skiErg:   return "PULLS"
+        default:        return "REPS"
+        }
     }
 
     // MARK: - Specific tile builders

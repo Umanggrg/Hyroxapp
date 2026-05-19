@@ -145,6 +145,17 @@ final class WatchRepCountingService {
 
     private var strokeGate: StrokeGate = .seekingValley
 
+    /// Timestamp of the most recent transition INTO `.seekingPeak`.
+    /// Powers the stale-gate timeout: if the gate sits in
+    /// `.seekingPeak` for too long without a real stroke arriving,
+    /// we re-arm to `.seekingValley`. Defends against the
+    /// pause-then-twitch false positive — athlete stops rowing
+    /// mid-segment (drink, adjust handle), magnitude drops below
+    /// valley once, then an ambient wrist motion >0.35g later
+    /// would otherwise register as a stroke. With the timeout,
+    /// the gate disengages instead.
+    private var gateArmedAt: Date = .distantPast
+
     // Last few magnitude samples for smoothing — accelerometer
     // noise at 200Hz is significant and a single-sample
     // threshold check produces jitter. 3-sample moving average
@@ -152,6 +163,14 @@ final class WatchRepCountingService {
     // without lagging meaningfully (15ms at 200Hz).
     private var magnitudeRing: [Double] = []
     private static let magnitudeRingSize: Int = 3
+
+    /// How long the gate is allowed to sit in `.seekingPeak`
+    /// without registering a stroke before we re-arm. 4s is
+    /// long enough to clear the slowest reasonable rowing
+    /// cadence (~16 spm = 3.75s/stroke) but short enough that
+    /// a paused athlete's first ambient wrist motion doesn't
+    /// land a phantom stroke seconds later.
+    private static let rowingGateTimeout: TimeInterval = 4.0
 
     // MARK: - Tuning constants (wall balls)
 
@@ -282,8 +301,10 @@ final class WatchRepCountingService {
         lastZ = 0
         // Rowing-stroke state — start gate in "seeking valley"
         // so the very first sample doesn't false-positive if
-        // it happens to be above the peak threshold.
+        // it happens to be above the peak threshold. gateArmedAt
+        // gets a real value on the first valley→peak transition.
         strokeGate = .seekingValley
+        gateArmedAt = .distantPast
         magnitudeRing.removeAll()
 
         // Try the high-rate batched API first. It requires an
@@ -367,6 +388,7 @@ final class WatchRepCountingService {
         crossedNegative = false
         lastZ = 0
         strokeGate = .seekingValley
+        gateArmedAt = .distantPast
         magnitudeRing.removeAll()
     }
 
@@ -465,8 +487,20 @@ final class WatchRepCountingService {
             // oscillation re-triggering immediately.
             if smoothed < Self.rowingValleyThreshold {
                 strokeGate = .seekingPeak
+                gateArmedAt = now
             }
         case .seekingPeak:
+            // Stale-gate timeout — if we've been waiting for a
+            // peak too long, athlete probably stopped rowing
+            // (drink, handle adjust, etc.). Re-arm to
+            // seekingValley so the next genuine cycle has to
+            // re-establish valley → peak from scratch. Without
+            // this, the first wrist twitch above 0.35g during
+            // a pause would register as a phantom stroke.
+            if now.timeIntervalSince(gateArmedAt) > Self.rowingGateTimeout {
+                strokeGate = .seekingValley
+                return
+            }
             // Refractory window AND magnitude floor must both be
             // satisfied — the period gate alone isn't enough
             // because rowing peaks are slightly less sharp than
