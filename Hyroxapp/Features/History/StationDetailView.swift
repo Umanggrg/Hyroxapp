@@ -96,19 +96,19 @@ struct StationDetailView: View {
         personalBest == split
     }
 
-    // §43 — find the parent race for this split by matching the
-    // split's timestamps against each race's splits. Used to
-    // pull `race.hrSeries` (the dense 1Hz HR timeline persisted
-    // post-Phase-28) into the HR analysis section. Returns nil
-    // for orphan splits — shouldn't happen in practice but the
-    // section hides itself in that case rather than crashing.
-    //
-    // Race-scope filter is the parent's [startedAt, endedAt]
-    // window, so this loop is O(races) not O(races × splits).
+    // §43 — find the parent race for this split. Uses the
+    // canonical splits-contain lookup (Split.id is the station
+    // rawValue, unique within a race) — same pattern other
+    // call sites in this file use for the same problem. The
+    // date-window alternative is fragile around roxzone
+    // bookkeeping + optional Race.endedAt during the
+    // briefly-finalizing window; this is the proven shape.
+    // Returns nil for orphan splits — shouldn't happen in
+    // practice and the HR analysis section hides itself in
+    // that case rather than crashing.
     private var parentRace: Race? {
         allFinishedRaces.first { race in
-            split.startedAt >= race.startedAt
-                && (race.endedAt.map { split.endedAt <= $0 } ?? false)
+            race.splits.contains(where: { $0.id == split.id })
         }
     }
 

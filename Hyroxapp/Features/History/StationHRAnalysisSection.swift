@@ -342,7 +342,15 @@ struct StationHRAnalysisSection: View {
             .padding(.horizontal, 4)
 
             HStack(alignment: .top, spacing: 6) {
-                ForEach(Array(recentAttempts.enumerated()), id: \.offset) { _, attempt in
+                // ForEach keys on `startedAt` for stable identity
+                // across data shifts — a new race landing while
+                // the view is visible would otherwise re-key by
+                // array position and animate the wrong columns.
+                // Split conforms to Identifiable but its `id` is
+                // the station rawValue (unique within ONE race,
+                // not across attempts), so we can't use \.self
+                // or \.id here.
+                ForEach(recentAttempts, id: \.startedAt) { attempt in
                     attemptColumn(attempt: attempt, isCurrent: attempt == split)
                 }
             }
