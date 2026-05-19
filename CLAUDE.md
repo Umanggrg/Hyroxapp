@@ -918,28 +918,35 @@ The list below is what extends *on top* of that. All ⚪ unless noted.
 
 **Suggested implementation shape**: shared `StationDetailBaseSection` (the existing surface) + a `StationDetailStationSpecificSection` that switches on `Station` and pulls in a dedicated view per station. Rowing and Wall Balls deserve the most real estate; Farmers Carry the least.
 
-**Source legend**: 🤖 sensor-auto-derivable today · 🔧 sensor-auto-derivable after adjacent rep-counting work (§13.8 Tier 2) · 📡 requires Concept2 PM5 BT pairing (§17.6 v2 backlog) · ⌨️ manual user entry. Most are 🤖 from already-captured signal.
+**Source legend**: 🤖 sensor-auto-derivable today from Watch IMU / AirPods / iPhone signal · 🔧 sensor-auto-derivable after adjacent rep-counting work (§13.8 Tier 2) · ⌨️ manual user entry. Most are 🤖 from already-captured signal.
 
-#### Rowing (1000m) — the queen of erg data
+**Sensor scope (locked):** Trakrr derives everything from the athlete's existing kit — Apple Watch IMU + heart-rate, AirPods head motion, iPhone HK + CMPedometer, optional external BLE HR strap (Garmin / Polar / Wahoo). **No erg-side hardware integration** — Concept2 PM5 / Concept2 BT pairing was on the v2 backlog for stroke-count + watts data but was explicitly dropped to keep the sensor surface universal: every athlete with HYROX-grade kit already has the devices Trakrr needs, and asking them to also pair an erg's monitor would gate the deepest insights behind gear they may not own. Erg stations (Row, SkiErg) get rhythm-grade metrics from Watch IMU instead of power-grade metrics from the PM5 — DPS, stroke rate, consistency, drive-to-recovery ratio. Watts + drag factor are out of scope.
 
-Decades of sport-specific metrics, mostly unsurfaced because the live builder doesn't expose them.
+#### Rowing (1000m) — rhythm-grade metrics from Watch IMU
 
-- 🤖 *Stroke count*, 🤖 *stroke rate (spm)*, 🤖 *distance per stroke (DPS — gold-standard efficiency metric)*, 🤖 *split-per-500m*, 🔧 *drive-to-recovery ratio (DRR)*.
-- 📡 *Average watts*, 📡 *peak watts*, 📡 *watts per stroke*, 📡 *drag factor*.
-- 🤖 *Pace curve over the 1000m*, 🤖 *stroke-rate curve*, 📡 *watts curve*.
-- 🤖 *Stroke-rate consistency score (CV)*, 🤖 *DRR drift across the row*, 🤖 *"did you negative-split?" headline*, ⌨️ *drag-factor reminder ("you said 105 — was the slider actually there?")*.
+Concept2 PM5 BT pairing was on the v2 backlog for power-grade data (watts, drag factor) but was explicitly dropped. Watch IMU pattern recognition gives us rhythm + efficiency metrics — DPS and stroke rate carry most of the coaching value anyway.
+
+- 🤖 *Stroke count* (rhythmic Z-axis accel cycles on the Watch IMU, ~2s period).
+- 🤖 *Stroke rate (spm)*, 🤖 *distance per stroke (DPS — gold-standard efficiency metric, computed as 1000m / strokes)*, 🤖 *split-per-500m* (already shipped via Phase 44 Work Output card).
+- 🔧 *Drive-to-recovery ratio (DRR)* — drive phase length vs recovery phase length per stroke cycle; needs Watch IMU pattern recognition that's adjacent to §13.8 Tier 2 rep counting.
+- 🤖 *Stroke rate curve over the 1000m* — sparkline of spm by 100m segment.
+- 🤖 *Stroke-rate consistency score (CV)*, 🤖 *first-half vs second-half stroke rate delta* — "did you hold cadence?" signal.
+- 🤖 *Negative-split detection* — second 500m faster than first.
 - *Headline example*: "1000m in 3:42 · DPS 9.4m · held 28 spm for 80% of the row · negative split by 4s."
+
+Out of scope (require PM5 pairing): watts (avg / peak / per stroke), drag factor, watts curve. Athletes who want those numbers can read them off the erg's monitor — we don't replicate the PM5 display.
 
 #### SkiErg (1000m) — symmetric to rowing, different mechanics
 
-Same erg framework, but upper-body-dominant so the coaching angles differ.
+Same rhythm-grade framework as Row, but upper-body-dominant so the coaching angles differ.
 
 - 🤖 *Pull count*, 🤖 *pull rate (ppm)*, 🤖 *distance per pull*, 🤖 *split-per-500m*.
-- 📡 *Watts (avg + peak + per pull)*, 📡 *drag factor*.
-- 🤖 *Pull rate curve*, 📡 *watts curve*, 🤖 *fatigue ramp over the 1000m*.
+- 🤖 *Pull rate curve over the 1000m*, 🤖 *fatigue ramp* — pulls per 100m, slowing across the effort.
 - 🤖 *Arm-vs-bodyweight engagement proxy* — head-motion roll on AirPods correlates with leg drive; flat roll → all-arms (inefficient).
 - 🤖 *Upper-body endurance score* across races — does the second 500m decay improve over training cycles?
 - *Headline example*: "SkiErg fades 12% in the second 500m — top opportunity. Your top-row athletes fade 4%."
+
+Out of scope (would require PM5 pairing): watts, drag factor.
 
 #### Sled Push (50m) — pace + impulse + grit
 
@@ -1021,14 +1028,14 @@ Once we have 5+ races worth of station-specific data, the Profile gets compellin
 
 #### Sequencing notes
 
-Most metrics above are derivable from signal we already capture — only Concept2 stroke data (rowing / ski) and rep counting on the non-Wall-Ball stations require new sensor work. Rowing pairing is §17.6 v2 backlog; rep counting on Wall Balls is shipped (§13.8 Tier 2) and burpees / lunges / FC sit behind it in the same roadmap.
+Every metric above is derivable from signal we already capture or from §13.8 Tier 2 rep-counting expansion. Concept2 PM5 pairing was explicitly dropped from the roadmap — every athlete with HYROX-grade kit already has the devices Trakrr needs, and erg-side hardware integration would gate the deepest insights behind gear they may not own. The intentional consequence: erg stations (Row, SkiErg) get rhythm-grade metrics (DPS, stroke rate, consistency) instead of power-grade (watts, drag factor). DPS is the gold-standard rowing efficiency metric anyway, so the coaching value is mostly preserved.
 
 Highest-leverage to deepen first (my read, not committed):
 
-1. **Wall Balls + Rowing** as the headline pair — most data, most "wait, my app sees that?" moments.
+1. **Wall Balls + Rowing** as the headline pair — most data, most "wait, my app sees that?" moments. Both built on Watch IMU pattern recognition (Wall Balls detector already shipped via §13.8 Tier 2; Row stroke detection is the natural next IMU classifier).
 2. **Sled Push** next — owns the post-push → next-run recovery angle that's the HYROX-specific differentiator nobody else surfaces.
 3. **Sled Pull + Burpees + Lunges** as a batch — share the IMU rep-counting infrastructure.
-4. **SkiErg + Farmers Carry** last — least sport-specific signal until Concept2 pairing lands for the erg.
+4. **SkiErg + Farmers Carry** last — rhythm-grade signal once Rowing's IMU classifier ships and can be adapted to SkiErg's pull cycle.
 
 ---
 
@@ -1403,8 +1410,8 @@ Later-stage features that extend Trakrr from a standalone app into a platform. A
 
 - ⚪ **Coach Mode** — coaches see their athletes' data live during races/training. Requires: coach account type, athlete↔coach relationship model, live data streaming via Supabase Realtime. Coach's iPhone shows a multi-athlete dashboard: each athlete's current segment, elapsed time, HR, pace delta, coaching alerts fired. Post-race: coach sees all their athletes' full analytics. This is the B2B play — HYROX-affiliated gyms and coaches pay for coach accounts while athletes stay free.  
     
-- ⚪ **Concept2 / SkiErg Bluetooth pairing** — connect directly to Concept2 ergometers (SkiErg, RowErg) via Bluetooth for precise stroke data, distance, pace, and power. Concept2's PM5 monitor supports Bluetooth broadcasting of workout data. This replaces estimated stroke counts from Watch IMU with exact data on the two erg-based stations. Requires: `CoreBluetooth` framework, Concept2 Bluetooth protocol parsing. Surfaces: exact distance/pace on post-race erg station cards, power curve data for advanced analytics.  
-    
+- ❌ **Concept2 / SkiErg Bluetooth pairing** — REJECTED. Was on the v2 backlog as a way to get precise stroke data, watts, and drag factor from Concept2 ergometers via PM5 Bluetooth broadcast. Dropped in §45 to keep the sensor surface universal — every HYROX athlete already owns a Watch / AirPods / iPhone, but most do NOT own a Concept2 erg (they use whichever erg their gym has). Gating the deepest rowing insights behind hardware athletes may not have would have created a permanent two-tier user experience. Erg stations (Row, SkiErg) get rhythm-grade metrics from Watch IMU pattern recognition instead — DPS, stroke rate, consistency, drive-to-recovery ratio. Athletes who want watts can read them off the erg's monitor; we don't replicate the PM5 display.  
+
 - ⚪ **Chest strap HR integration** — support external Bluetooth HR monitors (Polar H10, Garmin HRM-Pro Plus) for clinical-grade heart rate during races and training. Wrist-based optical HR on Apple Watch is good but degrades during high-intensity irregular motion (sled push, burpees) — chest straps maintain accuracy. HealthKit handles this transparently if the athlete pairs their chest strap to their iPhone/Watch, but Trakrr should detect and prefer external HR sources when available, and surface "HR source: Polar H10" in the data provenance. Matters for: accurate efficiency scores, reliable coaching alerts, trustworthy recovery metrics.  
     
 - ⚪ **Video form analysis** — use iPhone camera \+ on-device Core ML to analyze movement form on station exercises. Post-workout: athlete records a set of wall balls, sled push, etc. The app analyzes: squat depth on wall balls, hip hinge on sled push, stride length on lunges. Surfaces: form score per station, visual overlay showing joint angles, comparison against ideal form. This is a v2+ feature that requires significant ML training data. Initial implementation could be simpler: just recording and timestamping video clips linked to specific stations, with form analysis added later.  
