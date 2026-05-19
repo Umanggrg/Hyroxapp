@@ -132,6 +132,25 @@ final class WatchRepCountingService {
         /// gyro-based L/R asymmetry detection on this profile;
         /// for now we just count cycles.
         case lunge
+        /// Continuous-effort stations (§51) — sled push, sled
+        /// pull, farmers carry. Not rep-based: the athlete is
+        /// walking / driving forward continuously, and the
+        /// meaningful signal is STEP CADENCE rather than rep
+        /// count. We detect each step via a small Z-axis latch
+        /// (smaller amplitudes than wall balls or burpees;
+        /// gait impulses are gentle), then the iPhone side
+        /// derives "stuck phases" — gaps > 2s between
+        /// consecutive steps — from the published timestamps.
+        ///
+        /// Reuses the WatchRepTimestampsBatch pipeline as-is:
+        /// step timestamps ride the same channel as rep
+        /// timestamps, and the iPhone stamps them onto
+        /// `Split.repTimestampOffsets`. The semantic difference
+        /// (steps vs reps) lives entirely in the post-race
+        /// detail surface — StationContinuousEffortSection
+        /// reads the offsets as steps, the rep stations'
+        /// sections read them as reps.
+        case continuousEffort
     }
 
     private var activeProfile: DetectorProfile?
@@ -287,6 +306,31 @@ final class WatchRepCountingService {
     /// do between reps.
     private static let lungeMinInterval: TimeInterval = 1.2
 
+    // MARK: - Tuning constants (continuous-effort steps, §51)
+
+    /// Positive Z peak for a step impulse. Walking/driving gait
+    /// produces small impulses on each heel strike — typically
+    /// +0.2 to +0.4g. 0.2g floor catches the gentlest gait
+    /// (slow farmers carry under load) while filtering ambient
+    /// wrist micro-motion between steps.
+    private static let stepPositivePeak: Double = 0.2
+
+    /// Negative Z trough requirement before the next peak counts.
+    /// Each step has a brief recovery dip before the next impact.
+    /// -0.1g is permissive but the refractory window does most
+    /// of the heavy lifting; the latch just prevents the same
+    /// impact's recovery from registering as a second step.
+    private static let stepNegativeTrough: Double = -0.1
+
+    /// Minimum interval between counted steps. Sprint running
+    /// caps at ~5 steps/sec (200ms/step); under load that drops
+    /// to ~3 steps/sec. 150ms floor is permissive enough for
+    /// sprint cadence in farmers carry while filtering
+    /// signal-noise oscillations on a single step's impact
+    /// curve. Sled push / pull gait is much slower (~0.5-1s
+    /// per step) so this floor never binds for those stations.
+    private static let stepMinInterval: TimeInterval = 0.15
+
     // MARK: - Motion managers
 
     #if canImport(CoreMotion)
@@ -352,6 +396,8 @@ final class WatchRepCountingService {
             profile = .burpeeJump
         case .sandbagLunges:
             profile = .lunge
+        case .sledPush, .sledPull, .farmersCarry:
+            profile = .continuousEffort
         default:
             return false
         }
@@ -495,6 +541,8 @@ final class WatchRepCountingService {
             processMotionBurpeeJump(motion)
         case .lunge:
             processMotionLunge(motion)
+        case .continuousEffort:
+            processMotionStep(motion)
         case nil:
             // Motion can land in the brief window between start()
             // returning false and the caller noticing. Silent.
@@ -671,6 +719,42 @@ final class WatchRepCountingService {
             crossedNegative = true
         } else if crossedNegative && z > Self.lungePositivePeak {
             if now.timeIntervalSince(lastRepRegisteredAt) >= Self.lungeMinInterval {
+                registerRep(at: now)
+            }
+            crossedNegative = false
+        }
+        lastZ = z
+    }
+
+    /// §51 — Step detector for continuous-effort stations
+    /// (sled push, sled pull, farmers carry). Same negative-
+    /// trough latch as the rep detectors but with much softer
+    /// thresholds because gait impulses on the wrist are
+    /// gentler than overhead presses or jumps.
+    ///
+    /// Cycle anatomy:
+    ///   1. Foot strike — Z briefly negative as the wrist drops
+    ///      under the body's downward weight transfer
+    ///      (~-0.1 to -0.2g typical).
+    ///   2. Mid-stride drive — Z spikes positive as the body
+    ///      rises and the watch-side arm swings (~0.2-0.4g).
+    ///   3. Recovery before the next step.
+    ///
+    /// The iPhone-side detail section reads the resulting
+    /// `repTimestampOffsets` as STEP timestamps and derives
+    /// pace, cadence, and stuck-phase metrics (gaps > 2s
+    /// between steps = athlete paused / lost grip / reset
+    /// position). No new wire format needed — the existing
+    /// rep-timestamp transport carries these as if they were
+    /// rep timestamps; the station type determines how the
+    /// post-race surface interprets them.
+    private func processMotionStep(_ motion: CMDeviceMotion) {
+        let z = motion.userAcceleration.z
+        let now = Date()
+        if z < Self.stepNegativeTrough {
+            crossedNegative = true
+        } else if crossedNegative && z > Self.stepPositivePeak {
+            if now.timeIntervalSince(lastRepRegisteredAt) >= Self.stepMinInterval {
                 registerRep(at: now)
             }
             crossedNegative = false

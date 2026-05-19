@@ -143,6 +143,8 @@ struct WatchRaceMainPage: View {
         case .rowing:           return "STROKES"
         case .skiErg:           return "PULLS"
         case .sandbagLunges:    return "LUNGES"
+        case .sledPush, .sledPull, .farmersCarry:
+            return "STEPS"
         // Burpees + Wall Balls both use the generic "REPS"
         // vocab — neither has a more sport-accurate alternative
         // that reads cleanly at chip size.
@@ -162,6 +164,8 @@ struct WatchRaceMainPage: View {
         case .skiErg:           return "figure.skiing.crosscountry"
         case .burpeeBroadJumps: return "figure.jumprope"
         case .sandbagLunges:    return "figure.cooldown"
+        case .sledPush, .sledPull, .farmersCarry:
+            return "figure.walk"
         default:                return "dumbbell.fill"
         }
     }

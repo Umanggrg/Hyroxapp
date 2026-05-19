@@ -1878,6 +1878,8 @@ struct RaceView: View {
         case .rowing:           return "STROKES"
         case .skiErg:           return "PULLS"
         case .sandbagLunges:    return "LUNGES"
+        case .sledPush, .sledPull, .farmersCarry:
+            return "STEPS"
         // Burpees + Wall Balls share the generic "REPS" vocab.
         default:                return "REPS"
         }
@@ -1888,6 +1890,8 @@ struct RaceView: View {
         case .rowing:           return "strokes counted"
         case .skiErg:           return "pulls counted"
         case .sandbagLunges:    return "lunges counted"
+        case .sledPush, .sledPull, .farmersCarry:
+            return "steps counted"
         default:                return "reps counted"
         }
     }

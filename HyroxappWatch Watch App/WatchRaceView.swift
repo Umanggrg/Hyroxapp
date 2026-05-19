@@ -1139,27 +1139,33 @@ struct WatchRaceView: View {
         return station.rawValue
     }
 
-    // Stations the IMU rep-counting service can score. Four
-    // profiles ship today:
+    // Stations the IMU motion-counting service can score. Five
+    // profiles ship today, covering every workout station:
     //   • Wall Balls       — Z-axis peak with negative-trough
     //                        latch (Phase 13).
     //   • Rowing / SkiErg  — Magnitude-based peak detection with
     //                        valley/peak cycle gate (Phase 46).
     //                        Same detector for both ergs.
-    //   • Burpee BJ        — Z-axis latch with bigger amplitudes
-    //                        + longer refractory (Phase 49).
+    //   • Burpee BJ        — Z-axis latch, big amplitudes,
+    //                        long refractory (Phase 49).
     //   • Sandbag Lunges   — Z-axis latch with softer thresholds
-    //                        (Phase 49). Phase 50 will add gyro-
-    //                        based L/R asymmetry detection.
+    //                        (Phase 49). Phase 50 layers L/R
+    //                        asymmetry derivation in post-race.
+    //   • Sled Push +      — Step detector, very soft Z latch
+    //     Sled Pull +        (gait impulses are gentle). Phase 51
+    //     Farmers Carry      reuses the rep-timestamp pipeline
+    //                        to ship STEP timestamps; the iPhone
+    //                        derives stuck-phase metrics
+    //                        post-race.
     //
-    // Sled push + sled pull + farmers carry are continuous-effort
-    // stations (not rep-based) and go through a separate
-    // instrumentation track (cadence / wall-hits / activity
-    // threshold), not rep counting.
+    // Every workout station now produces some form of motion
+    // telemetry. Runs stay on AirPods running economy (vertical
+    // osc + ground contact) plus HK distance.
     static func isRepCountable(_ station: Station) -> Bool {
         switch station {
         case .wallBalls, .rowing, .skiErg,
-             .burpeeBroadJumps, .sandbagLunges:
+             .burpeeBroadJumps, .sandbagLunges,
+             .sledPush, .sledPull, .farmersCarry:
             return true
         default:
             return false

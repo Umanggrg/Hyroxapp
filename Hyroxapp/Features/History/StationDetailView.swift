@@ -168,6 +168,17 @@ struct StationDetailView: View {
                     StationLungeDetailSection(split: split)
                         .applyScrollAppearTransition()
 
+                    // §51 — Continuous-effort deep dive for Sled
+                    // Push, Sled Pull, and Farmers Carry. Step
+                    // count + cadence + pace headline, plus
+                    // stuck-phase analysis (count, total stuck
+                    // time, longest phase) and a timeline strip
+                    // showing where the stuck phases landed
+                    // along the segment. Hides on every other
+                    // station.
+                    StationContinuousEffortSection(split: split)
+                        .applyScrollAppearTransition()
+
                     // §43 — HR deep-dive layer. Hides itself when
                     // hrSeries is empty (pre-Phase-28 race) or the
                     // station window has <4 samples to chart. The
