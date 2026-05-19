@@ -96,6 +96,22 @@ struct StationDetailView: View {
         personalBest == split
     }
 
+    // §43 — find the parent race for this split by matching the
+    // split's timestamps against each race's splits. Used to
+    // pull `race.hrSeries` (the dense 1Hz HR timeline persisted
+    // post-Phase-28) into the HR analysis section. Returns nil
+    // for orphan splits — shouldn't happen in practice but the
+    // section hides itself in that case rather than crashing.
+    //
+    // Race-scope filter is the parent's [startedAt, endedAt]
+    // window, so this loop is O(races) not O(races × splits).
+    private var parentRace: Race? {
+        allFinishedRaces.first { race in
+            split.startedAt >= race.startedAt
+                && (race.endedAt.map { split.endedAt <= $0 } ?? false)
+        }
+    }
+
     var body: some View {
         ZStack {
             Color.background.ignoresSafeArea()
@@ -115,6 +131,20 @@ struct StationDetailView: View {
                         }
                         .applyScrollAppearTransition()
                     }
+
+                    // §43 — HR deep-dive layer. Hides itself when
+                    // hrSeries is empty (pre-Phase-28 race) or the
+                    // station window has <4 samples to chart. The
+                    // section header is owned inside the section
+                    // so the whole-section hide doesn't leave an
+                    // orphan title behind.
+                    StationHRAnalysisSection(
+                        split: split,
+                        raceHRSeries: parentRace?.hrSeries ?? [],
+                        allFinishedRaces: allFinishedRaces,
+                        maxHeartRate: maxHeartRate
+                    )
+                    .applyScrollAppearTransition()
 
                     VStack(alignment: .leading, spacing: 12) {
                         ProfileSectionHeader(
