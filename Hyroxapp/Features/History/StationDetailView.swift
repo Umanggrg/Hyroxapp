@@ -152,6 +152,22 @@ struct StationDetailView: View {
                     StationErgDetailSection(split: split)
                         .applyScrollAppearTransition()
 
+                    // §50 — Burpee-specific deep dive. Rep count,
+                    // avg leap distance, cadence curve over 80m,
+                    // first-half / second-half decay slope. Hides
+                    // on non-burpee stations.
+                    StationBurpeeDetailSection(split: split)
+                        .applyScrollAppearTransition()
+
+                    // §50 — Lunge-specific deep dive. Rep count,
+                    // cadence, asymmetry between first-lead leg
+                    // and alternate leg derived from rep-time
+                    // alternation, cadence curve over 100m, plus
+                    // a tiered asymmetry insight when the gap is
+                    // meaningful. Hides on non-lunge stations.
+                    StationLungeDetailSection(split: split)
+                        .applyScrollAppearTransition()
+
                     // §43 — HR deep-dive layer. Hides itself when
                     // hrSeries is empty (pre-Phase-28 race) or the
                     // station window has <4 samples to chart. The
