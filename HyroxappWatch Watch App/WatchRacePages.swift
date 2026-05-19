@@ -97,25 +97,28 @@ struct WatchRaceMainPage: View {
         .padding(.bottom, 4)
     }
 
-    // §13.8 Tier 2 — live rep counter chip. Wraps the rep counting
-    // service's @Observable currentRepCount in a small wrist-tuned
-    // surface. Hidden when isCounting is false (off-station or
-    // hardware doesn't support rep counting) or the count is still
-    // zero (no reps detected yet). The chip glows coral with a
-    // dumbbell glyph to read as "this is the active rep counter"
-    // without taking the visual weight of the timer hero.
+    // §13.8 Tier 2 — live rep / stroke / pull counter chip.
+    // Wraps the rep counting service's @Observable currentRepCount
+    // in a small wrist-tuned surface. Hidden when isCounting is
+    // false (off-station or hardware doesn't support counting) or
+    // the count is still zero (no reps detected yet).
+    //
+    // Station-aware label + glyph (§46):
+    //   • Wall Balls   "REPS"    dumbbell glyph
+    //   • Rowing       "STROKES" oars glyph
+    //   • SkiErg       "PULLS"   ski-pole arm-motion glyph
     @ViewBuilder
     private var repCounterChip: some View {
         let service = WatchRepCountingService.shared
         if service.isCounting && service.currentRepCount > 0 {
             HStack(spacing: 4) {
-                Image(systemName: "dumbbell.fill")
+                Image(systemName: repChipGlyph(service.currentStationRaw))
                     .font(.system(size: 10, weight: .heavy))
                 Text("\(service.currentRepCount)")
                     .font(.system(size: 15, weight: .heavy, design: .rounded))
                     .monospacedDigit()
                     .contentTransition(.numericText())
-                Text("REPS")
+                Text(repChipLabel(service.currentStationRaw))
                     .font(.system(size: 9, weight: .heavy))
                     .tracking(0.5)
                     .opacity(0.7)
@@ -126,6 +129,34 @@ struct WatchRaceMainPage: View {
             .background(
                 Capsule().fill(Color.accent.opacity(0.14))
             )
+        }
+    }
+
+    // Station-specific label for the rep counter chip. Reading
+    // "12 STROKES" on a rowing screen is more meaningful than
+    // "12 REPS" — coaching vocabulary matters at glance speed.
+    private func repChipLabel(_ stationRaw: Int?) -> String {
+        guard let raw = stationRaw, let station = Station(rawValue: raw) else {
+            return "REPS"
+        }
+        switch station {
+        case .rowing:   return "STROKES"
+        case .skiErg:   return "PULLS"
+        default:        return "REPS"
+        }
+    }
+
+    // Station-specific glyph for the rep counter chip. Falls
+    // back to the universal dumbbell when the station is unknown
+    // (transient mid-snapshot state).
+    private func repChipGlyph(_ stationRaw: Int?) -> String {
+        guard let raw = stationRaw, let station = Station(rawValue: raw) else {
+            return "dumbbell.fill"
+        }
+        switch station {
+        case .rowing:   return "figure.rower"
+        case .skiErg:   return "figure.skiing.crosscountry"
+        default:        return "dumbbell.fill"
         }
     }
 

@@ -1819,7 +1819,10 @@ struct RaceView: View {
                 // (e.g. propped on the floor) and see progress
                 // without counting in their head.
                 if let count = viewModel.currentRepCount {
-                    statCellReps(count: count)
+                    statCellReps(
+                        count: count,
+                        station: viewModel.currentStation
+                    )
                 }
             } else {
                 statCell(caption: "DIST", value: cumulativeDistanceString(now: now))
@@ -1831,16 +1834,21 @@ struct RaceView: View {
         }
     }
 
-    // §13.8 Tier 2 — live rep count cell. Caps "REPS" label +
+    // §13.8 Tier 2 — live rep / stroke / pull cell. Caps label +
     // watch glyph above the big rounded count number below. Mirrors
     // the cadence cell's structure since they're sibling sensor-
     // sourced metrics. Watch glyph signals "this came from your
     // wrist," distinguishing it from the eventual manual-edit
     // path in StationStatsSheet.
-    private func statCellReps(count: Int) -> some View {
+    //
+    // §46 — label + accessibility text adapt to the active station
+    // so "STROKES" reads on rowing and "PULLS" reads on SkiErg.
+    // Falls back to "REPS" for Wall Balls and any future rep
+    // station that defaults to the original vocabulary.
+    private func statCellReps(count: Int, station: Station?) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
-                Text("REPS")
+                Text(repCellLabel(for: station))
                     .font(.caption2.weight(.heavy))
                     .tracking(0.8)
                     .foregroundStyle(Color.textSecondary)
@@ -1853,9 +1861,25 @@ struct RaceView: View {
                 .monospacedDigit()
                 .foregroundStyle(Color.textPrimary)
                 .contentTransition(.numericText())
-                .accessibilityLabel("\(count) reps counted")
+                .accessibilityLabel("\(count) \(repCellAccessibility(for: station))")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func repCellLabel(for station: Station?) -> String {
+        switch station {
+        case .rowing:   return "STROKES"
+        case .skiErg:   return "PULLS"
+        default:        return "REPS"
+        }
+    }
+
+    private func repCellAccessibility(for station: Station?) -> String {
+        switch station {
+        case .rowing:   return "strokes counted"
+        case .skiErg:   return "pulls counted"
+        default:        return "reps counted"
+        }
     }
 
     // HR cell — caps "HR" label above, big rounded BPM number

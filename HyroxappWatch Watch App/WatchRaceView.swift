@@ -1139,12 +1139,27 @@ struct WatchRaceView: View {
         return station.rawValue
     }
 
-    // Phase 1 — only wall balls. Burpees / sandbag lunges / farmers
-    // carry are tracked in §13.8 Tier 2's deferred work; when their
-    // motion signatures are implemented (and WatchRepCountingService
-    // recognizes them in `start(for:)`), the gate widens here.
+    // Stations the IMU rep-counting service can score. Two
+    // profiles ship today:
+    //   • Wall Balls   — Z-axis peak with negative-trough latch
+    //                    (Phase 13).
+    //   • Rowing /     — Magnitude-based peak detection with
+    //     SkiErg         valley/peak cycle gate (Phase 46). The
+    //                    same detector serves both ergs because
+    //                    the cycle shape is similar enough.
+    //
+    // Burpees + Sandbag Lunges sit behind their own per-station
+    // motion signatures in §13.8 Tier 2 follow-up work. Sled
+    // push + sled pull + farmers carry are continuous-effort
+    // stations (not rep-based) and go through a separate
+    // instrumentation track.
     static func isRepCountable(_ station: Station) -> Bool {
-        station == .wallBalls
+        switch station {
+        case .wallBalls, .rowing, .skiErg:
+            return true
+        default:
+            return false
+        }
     }
 
     // Transition handler. Three meaningful cases:

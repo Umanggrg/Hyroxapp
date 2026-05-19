@@ -7,14 +7,35 @@ import CoreMotion
 // §13.8 Tier 2 — Wrist IMU rep counting on Apple Watch.
 //
 // Marquee AirPods+Watch differentiator. While the athlete is on a
-// rep-based station (Phase 1 = wall balls; future = burpees /
-// sandbag lunges / farmers carry), this service subscribes to
-// high-rate accelerometer data and counts reps in real time. The
-// resulting count gets published to the iPhone via WCSession and
-// auto-fills `Split.repsCompleted` so the athlete doesn't have
-// to remember + type "47" into a sheet post-race.
+// rhythmic-cycle station, this service subscribes to high-rate
+// accelerometer data and counts reps (or strokes / pulls) in real
+// time. The resulting count gets published to the iPhone via
+// WCSession and auto-fills `Split.repsCompleted` so the athlete
+// doesn't have to remember + type "47" into a sheet post-race.
 //
-// Detection algorithm (Phase 1 — wall balls only):
+// Supported stations (per detector profile):
+//   • Wall Balls — Z-axis peak-with-negative-trough latch.
+//     Sharp arm-overhead drive after a catch+squat cycle.
+//   • Rowing strokes / SkiErg pulls (§46) — magnitude-based
+//     peak detection. ~2s rhythmic cycle, less sharp than wall
+//     balls but very consistent. One detector serves both
+//     stations because the cycle shape is similar enough that
+//     the same thresholds work; SkiErg's arm-only motion has
+//     slightly lower peak magnitude than rowing's full-body
+//     drive but stays above the threshold.
+//
+// Out of scope (deliberately, per §45):
+//   • Sled Push + Sled Pull — continuous-effort stations, not
+//     rep-based. They get a separate continuous-effort
+//     instrumentation track (cadence + activity threshold +
+//     wall hits), not rep counting.
+//   • Burpee Broad Jumps + Sandbag Lunges — rhythmic but
+//     bigger cycle variance than ergs; needs its own profile
+//     in a follow-up phase.
+//   • Farmers Carry — CMPedometer cadence (already shipped),
+//     not IMU rep counting.
+//
+// Detection algorithm (per profile below):
 //   1. Subscribe to `CMBatchedSensorManager.deviceMotionUpdates` on
 //      Series 8+ / Ultra (watchOS 9.4+) at the framework's
 //      batched-update rate (~200Hz device motion when paired with
@@ -82,13 +103,57 @@ final class WatchRepCountingService {
     /// the current one.
     private(set) var currentStationRaw: Int?
 
-    // MARK: - Detection state
+    // MARK: - Detector profile
+
+    /// Which detection algorithm the service is currently
+    /// running. Set by `start(for:)` based on the station type;
+    /// `processMotion` dispatches on this so the two profiles
+    /// share lifecycle plumbing (WCSession publish, motion
+    /// subscription, state reset) but use independent signal
+    /// processing.
+    private enum DetectorProfile {
+        case wallBalls
+        /// Rowing strokes + SkiErg pulls share this profile.
+        /// Both have ~2s rhythmic cycles with smooth magnitude
+        /// peaks; same thresholds work across them.
+        case rowingStroke
+    }
+
+    private var activeProfile: DetectorProfile?
+
+    // MARK: - Wall-ball detection state
 
     private var lastRepRegisteredAt: Date = .distantPast
     private var crossedNegative: Bool = false
     private var lastZ: Double = 0
 
-    // MARK: - Tuning constants (phase 1, wall balls)
+    // MARK: - Rowing-stroke detection state (§46)
+
+    /// Two-state cycle gate for the rowing/ski stroke detector.
+    /// `seekingValley` — magnitude must drop below
+    /// `rowingValleyThreshold` before we look for the next peak.
+    /// `seekingPeak` — magnitude rising; first sample above
+    /// `rowingPeakThreshold` registers the stroke and flips
+    /// the gate back to seekingValley.
+    ///
+    /// This is the magnitude-based analogue of the wall ball's
+    /// negative-trough latch — same idea, different signal.
+    private enum StrokeGate {
+        case seekingValley
+        case seekingPeak
+    }
+
+    private var strokeGate: StrokeGate = .seekingValley
+
+    // Last few magnitude samples for smoothing — accelerometer
+    // noise at 200Hz is significant and a single-sample
+    // threshold check produces jitter. 3-sample moving average
+    // smooths the curve enough that peak detection is stable
+    // without lagging meaningfully (15ms at 200Hz).
+    private var magnitudeRing: [Double] = []
+    private static let magnitudeRingSize: Int = 3
+
+    // MARK: - Tuning constants (wall balls)
 
     /// Positive Z threshold for the arm-drive peak. Wall ball
     /// drives produce ~1.0–2.0g upward acceleration at peak; 0.7g
@@ -105,6 +170,32 @@ final class WatchRepCountingService {
     /// for slightly faster reps in training without double-counting
     /// signal-noise oscillations in the arm-drive recovery curve.
     private static let minRepInterval: TimeInterval = 0.8
+
+    // MARK: - Tuning constants (rowing / ski strokes, §46)
+
+    /// Smoothed magnitude must exceed this to register a stroke.
+    /// Rowing drives produce ~0.4–0.7g magnitude peaks (less
+    /// sharp than wall balls but more sustained); 0.35g floor
+    /// catches even the smoothest strokes while filtering out
+    /// background wrist motion between strokes (adjusting grip,
+    /// breathing, etc.). SkiErg pulls land in the same range —
+    /// arm-only motion is slightly weaker but stays above this
+    /// floor.
+    private static let rowingPeakThreshold: Double = 0.35
+
+    /// Smoothed magnitude must drop below this between strokes
+    /// before the next peak counts. Defends against double-
+    /// counting a single stroke's recovery oscillation. Set
+    /// well below the peak floor so genuine recoveries clear
+    /// the valley unambiguously even on choppy form.
+    private static let rowingValleyThreshold: Double = 0.18
+
+    /// Minimum interval between counted strokes. Elite rowers
+    /// cap at ~36 spm in HYROX (1.67s/stroke); the 1.0s floor
+    /// allows for sprint cadence (60 spm = 1.0s) without
+    /// double-counting signal noise. SkiErg pulls cap slightly
+    /// faster but the same floor holds.
+    private static let rowingMinInterval: TimeInterval = 1.0
 
     // MARK: - Motion managers
 
@@ -156,10 +247,20 @@ final class WatchRepCountingService {
     @discardableResult
     func start(for station: Station) -> Bool {
         #if canImport(CoreMotion)
-        // Phase 1 — wall balls only. Other rep stations (burpees,
-        // sandbag lunges, farmers carry) ship in a follow-up
-        // phase with their own per-station motion signatures.
-        guard station == .wallBalls else { return false }
+        // Pick the detector profile for the station, or refuse
+        // if it's not a rhythmic-cycle station we know how to
+        // count. Sled push / sled pull / farmers carry get
+        // continuous-effort instrumentation in a separate track,
+        // not rep counting — they fall through to false here.
+        let profile: DetectorProfile
+        switch station {
+        case .wallBalls:
+            profile = .wallBalls
+        case .rowing, .skiErg:
+            profile = .rowingStroke
+        default:
+            return false
+        }
 
         // Idempotent — re-starting first cancels any in-flight
         // subscription so we don't stack delivery handlers.
@@ -169,14 +270,21 @@ final class WatchRepCountingService {
 
         // Reset per-attempt state — last segment's counts must
         // not bleed into this one. currentRepCount starts at 0,
-        // detection latches go cold.
+        // both profiles' detection state goes cold.
         currentRepCount = 0
         currentStationRaw = station.rawValue
+        activeProfile = profile
         repTimestamps.removeAll()
         lastRepRegisteredAt = .distantPast
         lastPublishedAt = .distantPast
+        // Wall-ball state
         crossedNegative = false
         lastZ = 0
+        // Rowing-stroke state — start gate in "seeking valley"
+        // so the very first sample doesn't false-positive if
+        // it happens to be above the peak threshold.
+        strokeGate = .seekingValley
+        magnitudeRing.removeAll()
 
         // Try the high-rate batched API first. It requires an
         // active HKWorkoutSession to function — WatchWorkoutManager
@@ -255,14 +363,37 @@ final class WatchRepCountingService {
         #endif
         isCounting = false
         currentStationRaw = nil
+        activeProfile = nil
         crossedNegative = false
         lastZ = 0
+        strokeGate = .seekingValley
+        magnitudeRing.removeAll()
     }
 
     // MARK: - Signal processing
 
     #if canImport(CoreMotion)
     private func processMotion(_ motion: CMDeviceMotion) {
+        // Dispatch by profile. The two detectors share zero state
+        // — wall-ball uses Z + negative-trough latch; rowing uses
+        // magnitude + valley/peak gate — so the two branches stay
+        // independent. Adding a third profile is a third branch.
+        switch activeProfile {
+        case .wallBalls:
+            processMotionWallBalls(motion)
+        case .rowingStroke:
+            processMotionRowingStroke(motion)
+        case nil:
+            // Motion can land in the brief window between start()
+            // returning false and the caller noticing. Silent.
+            break
+        }
+    }
+
+    /// Wall-ball detector — Z-axis peak with negative-trough latch.
+    /// Unchanged from Phase 13 ship; just hoisted into its own
+    /// method so the rowing profile can sit alongside.
+    private func processMotionWallBalls(_ motion: CMDeviceMotion) {
         // Z-axis of userAcceleration. Wrist convention: positive
         // Z is "out of the back of the hand" when palm faces down,
         // which translates roughly to "up" during a wall ball
@@ -287,6 +418,68 @@ final class WatchRepCountingService {
             crossedNegative = false
         }
         lastZ = z
+    }
+
+    /// Rowing/SkiErg stroke detector — magnitude-based peak
+    /// detection with two-state cycle gate.
+    ///
+    /// Why magnitude instead of a signed axis: rowing involves
+    /// the wrist sweeping through a horizontal arc (handle pulled
+    /// from extended-forward to retracted-near-chest) and the
+    /// axis-aligned acceleration components depend heavily on
+    /// wrist orientation, which varies between athletes. The
+    /// MAGNITUDE of userAcceleration rises consistently during
+    /// every drive phase regardless of wrist orientation, so
+    /// it generalizes across users without per-user calibration.
+    ///
+    /// Algorithm:
+    ///   1. Compute |userAcceleration| at this sample.
+    ///   2. Push into a 3-sample smoothing ring; use the average
+    ///      (raw accelerometer noise at 200Hz produces false
+    ///      threshold crossings on every sample).
+    ///   3. Gate is in `.seekingValley` after the last stroke.
+    ///      Wait for smoothed magnitude to drop below the valley
+    ///      threshold (recovery phase) before looking for the
+    ///      next peak. Flip to `.seekingPeak`.
+    ///   4. In `.seekingPeak`, the first sample above the peak
+    ///      threshold (after the refractory period elapses)
+    ///      registers a stroke and flips the gate back.
+    private func processMotionRowingStroke(_ motion: CMDeviceMotion) {
+        // 3-sample smoothing reduces noise without lagging
+        // meaningfully (~15ms at 200Hz batched, ~60ms at 50Hz
+        // fallback — both well under a stroke cycle).
+        let accel = motion.userAcceleration
+        let raw = sqrt(accel.x * accel.x + accel.y * accel.y + accel.z * accel.z)
+        magnitudeRing.append(raw)
+        if magnitudeRing.count > Self.magnitudeRingSize {
+            magnitudeRing.removeFirst()
+        }
+        let smoothed = magnitudeRing.reduce(0, +) / Double(magnitudeRing.count)
+
+        let now = Date()
+
+        switch strokeGate {
+        case .seekingValley:
+            // Wait for the recovery dip before arming the next
+            // peak detection. Defends against the post-drive
+            // oscillation re-triggering immediately.
+            if smoothed < Self.rowingValleyThreshold {
+                strokeGate = .seekingPeak
+            }
+        case .seekingPeak:
+            // Refractory window AND magnitude floor must both be
+            // satisfied — the period gate alone isn't enough
+            // because rowing peaks are slightly less sharp than
+            // wall balls (broader plateau means multiple samples
+            // above threshold per stroke; we want the first).
+            guard now.timeIntervalSince(lastRepRegisteredAt) >= Self.rowingMinInterval else {
+                return
+            }
+            if smoothed > Self.rowingPeakThreshold {
+                registerRep(at: now)
+                strokeGate = .seekingValley
+            }
+        }
     }
     #endif
 
