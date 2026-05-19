@@ -1585,6 +1585,58 @@ final class RaceViewModel {
         }
     }
 
+    // §47a — Receive the end-of-segment per-rep / per-stroke
+    // timestamp batch from the Watch. Fires exactly once per
+    // rep-counting station when WatchRepCountingService.stop()
+    // runs (segment advance, finish, abandon — all converge on
+    // stop). Used by the post-race erg detail surface to chart
+    // stroke rate over the 1000m, compute DPS (distance per
+    // stroke), and surface pacing-consistency analytics that
+    // the running-count alone can't power.
+    //
+    // Catch-up pattern mirrors ingestRepCount: walk splits in
+    // reverse, find the most-recent split with matching
+    // stationRaw, stamp repTimestampOffsets if still nil. Don't
+    // clobber a previously-stamped value (paranoid against
+    // duplicate batch delivery via the dual sendMessage +
+    // transferUserInfo transports).
+    //
+    // Offsets are computed relative to the matched split's
+    // startedAt so the Split contract (offsets, not absolute
+    // dates) is preserved. Out-of-window timestamps — those
+    // outside [split.startedAt, split.endedAt] — are filtered
+    // out as defensive defense against clock skew or batched-
+    // delivery races where the Watch's stop() happens slightly
+    // after the iPhone's advance.
+    func ingestRepTimestamps(_ batch: WatchRepTimestampsBatch) {
+        let age = Date().timeIntervalSince(batch.sampledAt)
+        guard age < Self.watchRepStaleThreshold else { return }
+        guard !batch.timestamps.isEmpty else { return }
+
+        let splits = engine.splits
+        for index in splits.indices.reversed() {
+            let split = splits[index]
+            guard split.station.rawValue == batch.stationRaw else { continue }
+            // Already stamped — don't clobber.
+            guard split.repTimestampOffsets == nil else { break }
+
+            let offsets: [TimeInterval] = batch.timestamps.compactMap { ts in
+                let offset = ts.timeIntervalSince(split.startedAt)
+                // In-window filter — defends against batch
+                // arriving so late that some timestamps are
+                // outside the segment boundary.
+                guard offset >= 0, offset <= split.duration else {
+                    return nil
+                }
+                return offset
+            }
+            guard !offsets.isEmpty else { break }
+            engine.setRepTimestamps(offsets, atSplitIndex: index)
+            persistActiveRace()
+            break
+        }
+    }
+
     // Called from `advance()` after engine.advance has appended
     // the just-finished split. Stamps repsCompleted on that split
     // when the latest Watch rep update matches its station and the

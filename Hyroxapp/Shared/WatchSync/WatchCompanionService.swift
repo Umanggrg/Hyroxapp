@@ -94,6 +94,21 @@ final class WatchCompanionService: NSObject {
     // the athlete entered (or nil).
     var onRepCount: (@MainActor @Sendable (WatchRepCountUpdate) -> Void)?
 
+    // §47a — callback invoked on MainActor when the Watch
+    // publishes its full per-rep / per-stroke timestamp batch
+    // at segment-end. Set by RaceView for the active-race
+    // lifetime; the handler forwards into RaceViewModel which
+    // matches the batch's stationRaw to the just-closed split
+    // and stamps Split.repTimestampOffsets.
+    //
+    // Fires AT MOST once per rep-counting segment (Watch only
+    // publishes during stop() and only when the buffer is
+    // non-empty). When no Watch is paired or no rep station
+    // ran, this never fires and the splits' timestamps stay
+    // nil — the StationErgDetailSection hides itself in that
+    // case.
+    var onRepTimestamps: (@MainActor @Sendable (WatchRepTimestampsBatch) -> Void)?
+
     private override init() {
         super.init()
     }
@@ -349,6 +364,17 @@ extension WatchCompanionService: WCSessionDelegate {
             return
         }
 
+        // §47a — End-of-segment rep / stroke timestamp batch.
+        // Single-shot per segment. Powers the post-race
+        // cadence-curve + DPS analytics on the erg detail
+        // section.
+        if let batch = WatchRepTimestampsBatch(dictionary: message) {
+            Task { @MainActor in
+                Self.shared.onRepTimestamps?(batch)
+            }
+            return
+        }
+
         if let action = WatchAction(dictionary: message) {
             Task { @MainActor in
                 print("[WatchCompanion] dispatching action=\(action) — handler \(Self.shared.onAction == nil ? "NOT set" : "set")")
@@ -411,6 +437,16 @@ extension WatchCompanionService: WCSessionDelegate {
         if let repUpdate = WatchRepCountUpdate(dictionary: userInfo) {
             Task { @MainActor in
                 Self.shared.onRepCount?(repUpdate)
+            }
+            return
+        }
+
+        // §47a — Rep / stroke timestamp batch via the queued
+        // path. Mirrors didReceiveMessage's dispatch — same
+        // shape, just arriving via the fallback transport.
+        if let batch = WatchRepTimestampsBatch(dictionary: userInfo) {
+            Task { @MainActor in
+                Self.shared.onRepTimestamps?(batch)
             }
             return
         }

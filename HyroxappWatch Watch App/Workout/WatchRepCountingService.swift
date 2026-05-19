@@ -369,6 +369,14 @@ final class WatchRepCountingService {
     @discardableResult
     func stop() -> Int {
         let final = currentRepCount
+        // §47a — publish the per-rep timestamp batch BEFORE
+        // tearing down so the iPhone has the cadence-curve data
+        // for the just-ended segment. Buffer is already
+        // maintained in `repTimestamps`; just convert + ship.
+        // Captures stationRaw locally because stopInternal()
+        // clears currentStationRaw and publishCurrentRepTimestamps
+        // would no-op after.
+        publishCurrentRepTimestamps()
         stopInternal()
         return final
     }
@@ -551,5 +559,26 @@ final class WatchRepCountingService {
             sampledAt: Date()
         )
         WatchRaceClient.shared.publishRepCount(update)
+    }
+
+    /// §47a — Publish the full per-rep timestamp array to the
+    /// iPhone. Fires once at segment-end inside `stop()`. The
+    /// iPhone uses this to compute stroke-rate curves, DPS,
+    /// pacing consistency — analytics the count-only live
+    /// updates can't power.
+    ///
+    /// No-op when no stroke / rep was actually counted —
+    /// shipping an empty batch would just bloat the channel
+    /// for no value (the receiver's stale-sample / station
+    /// match guards would discard it anyway).
+    func publishCurrentRepTimestamps() {
+        guard let stationRaw = currentStationRaw else { return }
+        guard !repTimestamps.isEmpty else { return }
+        let batch = WatchRepTimestampsBatch(
+            timestamps: repTimestamps,
+            stationRaw: stationRaw,
+            sampledAt: Date()
+        )
+        WatchRaceClient.shared.publishRepTimestamps(batch)
     }
 }

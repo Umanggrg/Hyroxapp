@@ -173,6 +173,36 @@ final class WatchRaceClient: NSObject {
     // de-duplicates by sampledAt timestamp, so even if both
     // transports happen to deliver the same payload the chip
     // only re-renders once.
+    // §47a — Push the per-rep / per-stroke timestamp batch to the
+    // paired iPhone at segment-end. Called from
+    // `WatchRepCountingService.stop()` before tearing down the
+    // detector. iPhone uses these for stroke-rate curves, DPS,
+    // pacing consistency — analytics the running-count live
+    // path can't power.
+    //
+    // Single-shot per segment, so the bandwidth cost is acceptable
+    // even with the timestamp array; live HR + count traffic stays
+    // unchanged. Dual-path delivery for resilience: sendMessage
+    // when reachable (live), transferUserInfo otherwise (queued).
+    func publishRepTimestamps(_ batch: WatchRepTimestampsBatch) {
+        let session = WCSession.default
+        guard session.activationState == .activated else { return }
+
+        let dict = batch.toDictionary()
+
+        if session.isReachable {
+            session.sendMessage(
+                dict,
+                replyHandler: nil,
+                errorHandler: { error in
+                    print("[WatchClient] publishRepTimestamps sendMessage FAILED — \(error.localizedDescription)")
+                }
+            )
+        } else {
+            session.transferUserInfo(dict)
+        }
+    }
+
     func publishRepCount(_ update: WatchRepCountUpdate) {
         let session = WCSession.default
         guard session.activationState == .activated else { return }

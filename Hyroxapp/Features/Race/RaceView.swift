@@ -474,6 +474,13 @@ struct RaceView: View {
         // closure can't fire after the user navigates away from
         // Race. Same teardown discipline as onAction / onHeartRate.
         WatchCompanionService.shared.onRepCount = nil
+        // §47a — same discipline for the end-of-segment timestamp
+        // batch. Even though this only fires at segment-end (so
+        // a stale closure would rarely matter), keeping the
+        // teardown symmetric with the other Watch callbacks
+        // avoids surprising leaks if the close window races with
+        // navigation.
+        WatchCompanionService.shared.onRepTimestamps = nil
         #endif
         // Cancel any in-flight speech so a stale "next: sled push"
         // doesn't fire after the user navigates away from Race.
@@ -3071,6 +3078,16 @@ struct RaceView: View {
         // the just-closed split if its repsCompleted is still nil.
         WatchCompanionService.shared.onRepCount = { update in
             viewModel.ingestRepCount(update)
+        }
+
+        // §47a — End-of-segment timestamp batch from the Watch.
+        // Fires once when WatchRepCountingService.stop() runs (i.e.
+        // when the athlete leaves a rep-counting station). Routes
+        // into the view model to stamp the just-closed split's
+        // repTimestampOffsets — same catch-up pattern as
+        // ingestRepCount, scoped to the batch instead of the count.
+        WatchCompanionService.shared.onRepTimestamps = { batch in
+            viewModel.ingestRepTimestamps(batch)
         }
         #endif
     }

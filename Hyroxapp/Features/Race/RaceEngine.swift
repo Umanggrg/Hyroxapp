@@ -784,6 +784,57 @@ struct RaceEngine: Sendable {
             )
         }
     }
+
+    // §47a — single-mutation setter for the per-rep / per-stroke
+    // timestamp array on a specific split. Called by
+    // RaceViewModel.ingestRepTimestamps when the Watch's
+    // end-of-segment batch lands. State-symmetric across all
+    // engine states because the batch can arrive during any of
+    // them — the queued transferUserInfo fallback can delay
+    // delivery past advance() into the next station, into the
+    // pause / roxzone window, or even after finish.
+    mutating func setRepTimestamps(
+        _ offsets: [TimeInterval],
+        atSplitIndex index: Int
+    ) {
+        switch state {
+        case .notStarted:
+            return
+        case .inProgress(let startedAt, let segmentStart, var splits):
+            guard splits.indices.contains(index) else { return }
+            splits[index].repTimestampOffsets = offsets
+            state = .inProgress(
+                startedAt: startedAt,
+                currentSegmentStartedAt: segmentStart,
+                splits: splits
+            )
+        case .paused(let startedAt, let segmentStart, var splits, let pausedAt):
+            guard splits.indices.contains(index) else { return }
+            splits[index].repTimestampOffsets = offsets
+            state = .paused(
+                startedAt: startedAt,
+                currentSegmentStartedAt: segmentStart,
+                splits: splits,
+                pausedAt: pausedAt
+            )
+        case .inRoxzone(let startedAt, var splits, let roxzoneStart):
+            guard splits.indices.contains(index) else { return }
+            splits[index].repTimestampOffsets = offsets
+            state = .inRoxzone(
+                startedAt: startedAt,
+                splits: splits,
+                roxzoneStartedAt: roxzoneStart
+            )
+        case .finished(let startedAt, let endedAt, var splits):
+            guard splits.indices.contains(index) else { return }
+            splits[index].repTimestampOffsets = offsets
+            state = .finished(
+                startedAt: startedAt,
+                endedAt: endedAt,
+                splits: splits
+            )
+        }
+    }
 }
 
 // MARK: - Helpers

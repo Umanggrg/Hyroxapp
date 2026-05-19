@@ -183,6 +183,36 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
     //   • Pre-roxzone-shipping races decode cleanly with nil
     let roxzoneSeconds: TimeInterval?
 
+    // §47a — per-rep timestamps captured by the Watch's
+    // WatchRepCountingService, encoded as TimeInterval offsets
+    // from `startedAt` for compact storage. Powers the stroke-
+    // rate curve, DPS computation, and pacing-consistency
+    // analytics on the erg detail surface — analytics the
+    // running-total `repsCompleted` count alone can't drive.
+    //
+    // Shape: array of offsets in seconds from startedAt, in
+    // ascending order. `repTimestampOffsets[0]` is the time of
+    // the first stroke; `repTimestampOffsets.last!` is the
+    // time of the final stroke (always <= duration). Array
+    // length equals `repsCompleted` for splits where both are
+    // populated.
+    //
+    // Optional because:
+    //   • Wall-ball / lunge / burpee splits captured before
+    //     §47a shipped don't carry timestamps (only running
+    //     count was published).
+    //   • Manual-only rep entry via StationStatsSheet doesn't
+    //     produce per-rep timing — only the total.
+    //   • Race-shipped without a Watch, or Watch hardware
+    //     without IMU rep counting support → no timestamps.
+    //
+    // Marked `var` (vs the surrounding `let`) so RaceViewModel
+    // can stamp it on segment advance without threading a new
+    // parameter through every Split builder — same single-
+    // mutation-point pattern as `verticalOscCmAvg` and
+    // `groundContactTimeMsAvg`.
+    var repTimestampOffsets: [TimeInterval]? = nil
+
     // `Station.rawValue` is stable and unique within a race, so it doubles as
     // the Identifiable id — no extra UUID needed.
     var id: Int { station.rawValue }
@@ -222,6 +252,9 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
         // verticalOscCmAvg above. Pre-existing splits decode
         // as nil; new ones serialize the field.
         case groundContactTimeMsAvg
+        // §47a — per-stroke / per-rep timestamps as offsets
+        // from startedAt. Same additive-Codable pattern.
+        case repTimestampOffsets
     }
 
     // Convenience initializer preserving the pre-HR API so all existing
@@ -312,6 +345,13 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
         // don't wipe the running-economy reading.
         newSplit.verticalOscCmAvg = verticalOscCmAvg
         newSplit.groundContactTimeMsAvg = groundContactTimeMsAvg
+        // §47a — preserve per-stroke timestamps through every
+        // HR/recovery/station-stats/roxzone patch. Splits go
+        // through multiple builder hops post-race (HK rehydrate,
+        // delayed recovery samples, etc.); the timestamps only
+        // ever land via the dedicated Watch-rep batch path so
+        // every other builder must read-through to avoid wiping.
+        newSplit.repTimestampOffsets = repTimestampOffsets
         return newSplit
     }
 
@@ -348,6 +388,13 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
         )
         newSplit.verticalOscCmAvg = verticalOscCmAvg
         newSplit.groundContactTimeMsAvg = groundContactTimeMsAvg
+        // §47a — preserve per-stroke timestamps through every
+        // HR/recovery/station-stats/roxzone patch. Splits go
+        // through multiple builder hops post-race (HK rehydrate,
+        // delayed recovery samples, etc.); the timestamps only
+        // ever land via the dedicated Watch-rep batch path so
+        // every other builder must read-through to avoid wiping.
+        newSplit.repTimestampOffsets = repTimestampOffsets
         return newSplit
     }
 
@@ -384,6 +431,42 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
         )
         newSplit.verticalOscCmAvg = verticalOscCmAvg
         newSplit.groundContactTimeMsAvg = groundContactTimeMsAvg
+        // §47a — preserve per-stroke timestamps through every
+        // HR/recovery/station-stats/roxzone patch. Splits go
+        // through multiple builder hops post-race (HK rehydrate,
+        // delayed recovery samples, etc.); the timestamps only
+        // ever land via the dedicated Watch-rep batch path so
+        // every other builder must read-through to avoid wiping.
+        newSplit.repTimestampOffsets = repTimestampOffsets
+        return newSplit
+    }
+
+    // §47a — Builder for the rep-timestamps stamp path. Sets the
+    // per-rep offset array on a just-closed split; called by
+    // RaceViewModel.ingestRepTimestamps when a Watch end-of-segment
+    // batch arrives. Other fields preserved. Pass nil to clear.
+    func withRepTimestamps(_ offsets: [TimeInterval]?) -> Split {
+        var newSplit = Split(
+            station: station,
+            startedAt: startedAt,
+            endedAt: endedAt,
+            heartRateAvgBPM: heartRateAvgBPM,
+            heartRateMaxBPM: heartRateMaxBPM,
+            heartRateEntryBPM: heartRateEntryBPM,
+            heartRateEndBPM: heartRateEndBPM,
+            heartRateRecovery30sBPM: heartRateRecovery30sBPM,
+            heartRateRecovery60sBPM: heartRateRecovery60sBPM,
+            heartRateStdDevBPM: heartRateStdDevBPM,
+            lowestSpO2: lowestSpO2,
+            activeCaloriesKcal: activeCaloriesKcal,
+            weightKg: weightKg,
+            repsCompleted: repsCompleted,
+            rpe: rpe,
+            roxzoneSeconds: roxzoneSeconds
+        )
+        newSplit.verticalOscCmAvg = verticalOscCmAvg
+        newSplit.groundContactTimeMsAvg = groundContactTimeMsAvg
+        newSplit.repTimestampOffsets = offsets
         return newSplit
     }
 
@@ -411,6 +494,13 @@ struct Split: Codable, Equatable, Hashable, Identifiable, Sendable {
         )
         newSplit.verticalOscCmAvg = verticalOscCmAvg
         newSplit.groundContactTimeMsAvg = groundContactTimeMsAvg
+        // §47a — preserve per-stroke timestamps through every
+        // HR/recovery/station-stats/roxzone patch. Splits go
+        // through multiple builder hops post-race (HK rehydrate,
+        // delayed recovery samples, etc.); the timestamps only
+        // ever land via the dedicated Watch-rep batch path so
+        // every other builder must read-through to avoid wiping.
+        newSplit.repTimestampOffsets = repTimestampOffsets
         return newSplit
     }
 }

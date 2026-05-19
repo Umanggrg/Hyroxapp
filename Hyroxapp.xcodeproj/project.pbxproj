@@ -119,6 +119,7 @@
 				Shared/WatchSync/WatchDistanceUpdate.swift,
 				Shared/WatchSync/WatchHeartRateUpdate.swift,
 				Shared/WatchSync/WatchRepCountUpdate.swift,
+				Shared/WatchSync/WatchRepTimestampsBatch.swift,
 			);
 			target = D8BC4D402F9B13B2004472F3 /* HyroxappWatch Watch App */;
 		};
