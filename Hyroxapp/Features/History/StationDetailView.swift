@@ -132,6 +132,16 @@ struct StationDetailView: View {
                         .applyScrollAppearTransition()
                     }
 
+                    // §43 Phase 2 — station-aware Work Output card.
+                    // Renders cadence (Wall Balls), pace (everything
+                    // else), AirPods running economy on runs, and any
+                    // manually-logged weight / reps / RPE. Hides
+                    // silently when nothing applies (run with no
+                    // AirPods data + no manual fields = pace only,
+                    // which is still meaningful).
+                    StationWorkOutputCard(split: split)
+                        .applyScrollAppearTransition()
+
                     // §43 — HR deep-dive layer. Hides itself when
                     // hrSeries is empty (pre-Phase-28 race) or the
                     // station window has <4 samples to chart. The
