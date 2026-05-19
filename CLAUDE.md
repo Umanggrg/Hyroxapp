@@ -907,6 +907,129 @@ When we commit to building something from this list:
 
 Don't let §13 grow unchecked — if an idea has been here 6+ months without moving, either commit or prune.
 
+### 13.12 — Per-station detail deep-dives
+
+The shipped `StationDetailView` (§13.3) is generic — same physiology tiles + trend chart for every station. This subsection captures the **station-specific** metrics the detail surface should grow into, station by station. The ROXFIT-but-actually-for-nerds positioning.
+
+**Shared base** (already shipped — applies to every station, don't re-build it per station):
+time + vs PB, effort score, HR entry / peak / end / recovery, trend sparkline over the athlete's history, fatigue impact on the next run, per-station HR signature anomaly callout, race-day weight projection when undertraining at sub-race weight.
+
+The list below is what extends *on top* of that. All ⚪ unless noted.
+
+**Suggested implementation shape**: shared `StationDetailBaseSection` (the existing surface) + a `StationDetailStationSpecificSection` that switches on `Station` and pulls in a dedicated view per station. Rowing and Wall Balls deserve the most real estate; Farmers Carry the least.
+
+**Source legend**: 🤖 sensor-auto-derivable today · 🔧 sensor-auto-derivable after adjacent rep-counting work (§13.8 Tier 2) · 📡 requires Concept2 PM5 BT pairing (§17.6 v2 backlog) · ⌨️ manual user entry. Most are 🤖 from already-captured signal.
+
+#### Rowing (1000m) — the queen of erg data
+
+Decades of sport-specific metrics, mostly unsurfaced because the live builder doesn't expose them.
+
+- 🤖 *Stroke count*, 🤖 *stroke rate (spm)*, 🤖 *distance per stroke (DPS — gold-standard efficiency metric)*, 🤖 *split-per-500m*, 🔧 *drive-to-recovery ratio (DRR)*.
+- 📡 *Average watts*, 📡 *peak watts*, 📡 *watts per stroke*, 📡 *drag factor*.
+- 🤖 *Pace curve over the 1000m*, 🤖 *stroke-rate curve*, 📡 *watts curve*.
+- 🤖 *Stroke-rate consistency score (CV)*, 🤖 *DRR drift across the row*, 🤖 *"did you negative-split?" headline*, ⌨️ *drag-factor reminder ("you said 105 — was the slider actually there?")*.
+- *Headline example*: "1000m in 3:42 · DPS 9.4m · held 28 spm for 80% of the row · negative split by 4s."
+
+#### SkiErg (1000m) — symmetric to rowing, different mechanics
+
+Same erg framework, but upper-body-dominant so the coaching angles differ.
+
+- 🤖 *Pull count*, 🤖 *pull rate (ppm)*, 🤖 *distance per pull*, 🤖 *split-per-500m*.
+- 📡 *Watts (avg + peak + per pull)*, 📡 *drag factor*.
+- 🤖 *Pull rate curve*, 📡 *watts curve*, 🤖 *fatigue ramp over the 1000m*.
+- 🤖 *Arm-vs-bodyweight engagement proxy* — head-motion roll on AirPods correlates with leg drive; flat roll → all-arms (inefficient).
+- 🤖 *Upper-body endurance score* across races — does the second 500m decay improve over training cycles?
+- *Headline example*: "SkiErg fades 12% in the second 500m — top opportunity. Your top-row athletes fade 4%."
+
+#### Sled Push (50m) — pace + impulse + grit
+
+Mostly accelerometer-driven; the most "this hurt the next run" station in HYROX.
+
+- 🤖 *Total time*, 🤖 *split-per-12.5m*, 🤖 *peak m/s*, 🤖 *avg m/s*.
+- 🤖 *Time-stuck count* — moments stationary > 1s during the push.
+- 🤖 *"Wall hits"* — cadence drops to zero mid-push (re-set the feet, dig in again).
+- ⌨️ *Load entered by user*; race-day weight projection already projects times to comp weight.
+- 🤖 *Trunk pitch from AirPods head motion* — forward-lean angle is the coaching signal.
+- 🤖 *Post-push HR entering next run* — already partially shipped via §13.10 \#5 recovery; this surfaces it on the station card directly.
+- *Headline example*: "Sled push 18s · 2 wall hits at 35m · forward lean held for 80% of effort · cost Run 3 +0:14."
+
+#### Sled Pull (50m) — grip + cycle rhythm
+
+Rhythmic enough that arm-pull cycles are clean for IMU detection.
+
+- 🔧 *Pull count* (rhythmic hand-over-hand cycles on Watch IMU).
+- 🔧 *Pulls per minute*, 🔧 *avg distance per pull*.
+- 🤖 *Grip endurance curve* — "pulls per 30s" decay slope tells you whether grip held or failed.
+- 🤖 *Reset behavior* — time walking the rope back, total resets.
+- 🔧 *Hand dominance* — gyro tilt detects which arm leads each pull.
+- *Headline example*: "Sled pull 22s · 14 pulls · grip held flat (no decay) — pull is currently a strength."
+
+#### Burpee Broad Jumps (80m) — rep dynamics + decay slope
+
+Headline-feature territory once Tier 2 IMU rep counting (§13.8) lands.
+
+- 🔧 *Rep count*, 🔧 *cycle time (avg / min / max)*, 🔧 *jump distance per rep (80m / count = "avg leap")*.
+- 🔧 *Floor time vs flight time ratio* — proxy for jump quality.
+- 🤖 *Decay slope* — rep-time over the 80m; flat = paced, climbing = blew up early.
+- 🔧 *Vertical-accel amplitude per rep* — real jump vs step-over "crawl burpee" form detection.
+- *Headline example*: "16 burpee-jumps · avg 5m per leap · slowed 0.4s/rep after rep 10."
+
+#### Farmers Carry (200m) — looks simple, hides grip endurance
+
+The "easy" station with the sneakiest signal.
+
+- 🤖 *Step count*, 🤖 *cadence (steps/min)*, 🤖 *stride length (200m / steps)*, 🤖 *pace m/s*.
+- 🤖 *Drop count* — moments athlete sets the weight down; accelerometer detects the impulse.
+- 🤖 *Drop locations* — even spacing (poor grip) vs at the turn only (acceptable).
+- 🤖 *Power-walk vs jog classification* — pace m/s threshold (~3 mph = walk).
+- 🤖 *Cadence-drop pattern preceding drops* — the grip-failure tell.
+- *Headline example*: "FC in 1:08 · 0 drops · power-walked the whole thing at 3.2 mph."
+
+#### Sandbag Lunges (100m) — alternating-rep mechanics + asymmetry
+
+The killer-insight station nobody else surfaces.
+
+- 🔧 *Total rep count (~50 typical)*, 🔧 *avg time per lunge*, 🔧 *L/R alternation pattern*.
+- 🤖 *Sandbag drop count*.
+- 🔧 *L vs R pacing asymmetry* — gyro detects which side took the impulse; persistent imbalance = injury / weakness signal.
+- 🔧 *Knee-drop quality* — vertical-accel amplitude per rep, full depth vs short stride.
+- *Headline example*: "Lunges 2:12 · 48 reps · left leg 0.2s faster than right (favoring it — knee niggle?)"
+
+#### Wall Balls (75 or 100 reps) — the queen of intelligence
+
+Most accelerometer-friendly station, already partially shipped (rep counting via §13.8 Tier 2 Wall Ball detector).
+
+- 🟢 *Rep count* (live + post-race).
+- 🤖 *Cadence (rpm)*, 🤖 *max unbroken set*, 🤖 *break count*, 🤖 *longest break duration*.
+- 🤖 *Strategy detection* — pattern-match set breaks against canonical strategies ("50-25-20", "30-30-20-20", "unbroken"). Name it on the card.
+- 🤖 *Decline curve* — rep-rate slope; reps in first 25 vs last 25.
+- 🤖 *Throw-phase peak accel* — catch quality proxy.
+- 🤖 *Squat-phase depth* — vertical excursion per rep.
+- 🤖 *Hold count* — pauses > 3s between reps (the "rest in catch" tell).
+- 🤖 *"First miss" timestamp* — when reps stop being continuous.
+- *Headline example*: "100 wall balls in 4:18 · 50-30-20 strategy · rep rate held above 35 rpm until rep 75."
+
+#### Cross-station Profile rollups
+
+Once we have 5+ races worth of station-specific data, the Profile gets compelling new surfaces:
+
+- **Station Strength Map** — already in §13.4 backlog. Radar/spider chart showing where the athlete is elite vs developing. Now driven by the detail metrics above, not just split times.
+- **Per-station decay curve trend** — "your wall ball decay has improved from -15% to -6% over 5 races." One small chart per station.
+- **Compromised-vs-fresh delta per station** — same station, fresh in training (Quick Station) vs after Run 4 in a sim. The gap IS the fatigue resistance number.
+- **Asymmetry trend** — if lunges consistently favor one leg over months, surface as a coaching signal on Profile.
+- **Strategy library** — wall-ball break patterns across races, fastest one highlighted as your A-strategy. Sled-push pacing strategies (steady vs front-load). Row stroke-rate strategies (24 / 26 / 28).
+
+#### Sequencing notes
+
+Most metrics above are derivable from signal we already capture — only Concept2 stroke data (rowing / ski) and rep counting on the non-Wall-Ball stations require new sensor work. Rowing pairing is §17.6 v2 backlog; rep counting on Wall Balls is shipped (§13.8 Tier 2) and burpees / lunges / FC sit behind it in the same roadmap.
+
+Highest-leverage to deepen first (my read, not committed):
+
+1. **Wall Balls + Rowing** as the headline pair — most data, most "wait, my app sees that?" moments.
+2. **Sled Push** next — owns the post-push → next-run recovery angle that's the HYROX-specific differentiator nobody else surfaces.
+3. **Sled Pull + Burpees + Lunges** as a batch — share the IMU rep-counting infrastructure.
+4. **SkiErg + Farmers Carry** last — least sport-specific signal until Concept2 pairing lands for the erg.
+
 ---
 
 ## 14\. App Navigation Architecture (Locked Decision)
