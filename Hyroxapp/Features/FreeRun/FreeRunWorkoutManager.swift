@@ -430,42 +430,16 @@ final class FreeRunWorkoutManager: NSObject {
         lastBuilderHRSampleEnd = .distantPast
     }
 
-    // Pull the latest HR sample out of the live builder's statistics
-    // and forward it through the existing `onHeartRateUpdate` channel
-    // so FreeRunViewModel + the HR ring chip see the same value
-    // they'd see from a Watch HR push. Throttled to ~2Hz to keep
-    // closure firing reasonable. De-duped by sample-end timestamp so
-    // a re-publish for the same underlying sample (didCollectDataOf
-    // fires for every data type, not just HR) doesn't double-update.
-    @available(iOS 26.0, *)
-    fileprivate func publishLatestBuilderHRIfNeeded(
-        from builder: HKLiveWorkoutBuilder
-    ) {
-        guard let hrType = HKObjectType.quantityType(forIdentifier: .heartRate),
-              let stats = builder.statistics(for: hrType),
-              let mostRecent = stats.mostRecentQuantity(),
-              let sampleInterval = stats.mostRecentQuantityDateInterval() else {
-            return
-        }
-
-        let sampledAt = sampleInterval.end
-        guard sampledAt > lastBuilderHRSampleEnd else { return }
-
-        let bpmUnit = HKUnit.count().unitDivided(by: .minute())
-        let bpm = mostRecent.doubleValue(for: bpmUnit)
-        guard bpm >= 30, bpm <= 230 else { return }
-
-        let now = Date()
-        guard now.timeIntervalSince(lastBuilderHRPublishedAt)
-            >= Self.minBuilderHRPublishInterval else {
-            return
-        }
-
-        lastBuilderHRPublishedAt = now
-        lastBuilderHRSampleEnd = sampledAt
-        currentHeartRateBPM = bpm
-        onHeartRateUpdate?(sampledAt, bpm)
-    }
+    // publishLatestBuilderHRIfNeeded was previously defined here at
+    // class scope but its parameter type (HKLiveWorkoutBuilder) is
+    // iOS 26.0+ on iPhone. Even with @available on the function,
+    // Swift's type resolver still rejects the unavailable reference
+    // when the enclosing class isn't itself availability-gated. §48
+    // moved the implementation into the @available(iOS 26.0, *)
+    // HKLiveWorkoutBuilderDelegate extension below — same-file
+    // extensions retain access to the class's private state, so
+    // moving the method just changes WHERE it lives, not its
+    // semantics.
     #endif
 
     // MARK: - Distance arbitration
@@ -601,6 +575,47 @@ extension FreeRunWorkoutManager: HKLiveWorkoutBuilderDelegate {
     ) {
         // No-op — Free Run doesn't emit lap markers / pauses we'd
         // want to record on the builder.
+    }
+
+    // Pull the latest HR sample out of the live builder's statistics
+    // and forward it through the existing `onHeartRateUpdate` channel
+    // so FreeRunViewModel + the HR ring chip see the same value
+    // they'd see from a Watch HR push. Throttled to ~2Hz to keep
+    // closure firing reasonable. De-duped by sample-end timestamp so
+    // a re-publish for the same underlying sample (didCollectDataOf
+    // fires for every data type, not just HR) doesn't double-update.
+    //
+    // Lives in the @available(iOS 26.0, *) extension because the
+    // parameter type HKLiveWorkoutBuilder is iOS 26+ on iPhone.
+    // Class-scope @available on the method alone wasn't enough to
+    // satisfy Swift's type resolver in §48.
+    fileprivate func publishLatestBuilderHRIfNeeded(
+        from builder: HKLiveWorkoutBuilder
+    ) {
+        guard let hrType = HKObjectType.quantityType(forIdentifier: .heartRate),
+              let stats = builder.statistics(for: hrType),
+              let mostRecent = stats.mostRecentQuantity(),
+              let sampleInterval = stats.mostRecentQuantityDateInterval() else {
+            return
+        }
+
+        let sampledAt = sampleInterval.end
+        guard sampledAt > lastBuilderHRSampleEnd else { return }
+
+        let bpmUnit = HKUnit.count().unitDivided(by: .minute())
+        let bpm = mostRecent.doubleValue(for: bpmUnit)
+        guard bpm >= 30, bpm <= 230 else { return }
+
+        let now = Date()
+        guard now.timeIntervalSince(lastBuilderHRPublishedAt)
+            >= Self.minBuilderHRPublishInterval else {
+            return
+        }
+
+        lastBuilderHRPublishedAt = now
+        lastBuilderHRSampleEnd = sampledAt
+        currentHeartRateBPM = bpm
+        onHeartRateUpdate?(sampledAt, bpm)
     }
 }
 #endif
