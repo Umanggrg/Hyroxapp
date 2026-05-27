@@ -337,6 +337,23 @@ struct RaceSummaryView: View {
                                 .foregroundStyle(complianceTint(compliance.tier))
                         }
 
+                    // §55 — Station-level PR callout. Lists any
+                    // workout-station or 1km-run PR set during this
+                    // race that beats the athlete's prior best.
+                    // Race-level PB ribbon on the finish hero
+                    // handles the whole-race PR case (rare); this
+                    // section handles the more common per-station
+                    // wins so they don't go unsurfaced until the
+                    // athlete drills into StationDetailView.
+                    // Self-hides when no PRs were set.
+                    if let race = viewModel.activeRace {
+                        StationPRCalloutSection(
+                            race: race,
+                            allFinishedRaces: allFinishedRaces
+                        )
+                        .padding(.top, 4)
+                    }
+
                     // Target outcome — only shown if the athlete set a
                     // goal. "Goal met" + green delta when beaten,
                     // warning delta when missed. Centralized in

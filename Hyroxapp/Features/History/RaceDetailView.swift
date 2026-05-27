@@ -703,6 +703,17 @@ struct RaceDetailView: View {
                     .foregroundStyle(complianceTint(compliance.tier))
             }
 
+            // §55 — Station-level PR callout. Same component used
+            // on RaceSummaryView right after the race finishes;
+            // surfaces here retrospectively so reviewing an old
+            // race shows which station PRs landed during it.
+            // Self-hides when no PRs were set.
+            StationPRCalloutSection(
+                race: race,
+                allFinishedRaces: allFinishedRaces
+            )
+            .padding(.top, 12)
+
             // Target outcome readout — only shown if a target
             // was set on this race. Tucks into the hero so the
             // success/over-target framing reads as part of the
