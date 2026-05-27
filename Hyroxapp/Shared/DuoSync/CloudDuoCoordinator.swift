@@ -178,15 +178,42 @@ final class CloudDuoCoordinator: DuoTransport {
         }
     }
 
-    // CloudDuoSession already handled hello / disconnect
-    // internally — by the time a message arrives here it's a
-    // race-time event the controller cares about. Forward
-    // unconditionally; controller decides if it cares.
+    // Inbound dispatch from CloudDuoSession.onReceive. Session
+    // already stashed partner identity + flipped `.connected` for
+    // hello — but the coordinator still needs to promote its
+    // `.ready` state from this trigger, otherwise the view stays
+    // stuck on "joining…" forever.
+    //
+    // Hello does NOT bubble to `onRaceMessage` (matches Tier 1's
+    // DuoCoordinator). It's a pre-race handshake event; the race
+    // controller has no use for it and forwarding would risk
+    // misroutes once the race is in flight.
     private func handleInbound(_ message: DuoMessage) {
-        // If this is the first message after hello, promote.
-        // Idempotent — promoting twice is a no-op.
-        promoteIfHelloArrived()
-        onRaceMessage?(message)
+        switch message {
+        case .hello:
+            // Handshake landing — promote to .ready if we now
+            // have everything we need (partner name + division).
+            // Idempotent: a second hello (e.g. host's reciprocal
+            // reply re-arriving) just re-asserts the same state.
+            promoteIfHelloArrived()
+
+        case .disconnect:
+            // Partner left. Session already flipped state to
+            // .disconnected; mirror that up so the view exits
+            // the pairing sheet (or surfaces a banner mid-race).
+            // Still forward to the race controller — it owns the
+            // "partner disconnected mid-race" UX (solo fallback).
+            promoteIfHelloArrived()
+            onRaceMessage?(message)
+
+        default:
+            // Every other message is a race-time event. Promote
+            // first (defensive — covers the rare race where a
+            // requestStart lands before hello's onReceive fires),
+            // then forward.
+            promoteIfHelloArrived()
+            onRaceMessage?(message)
+        }
     }
 }
 

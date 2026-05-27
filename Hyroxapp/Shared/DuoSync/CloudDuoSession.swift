@@ -119,6 +119,21 @@ final class CloudDuoSession {
     // disconnect() can tear it down cleanly.
     private var receiveTask: Task<Void, Never>?
 
+    // Whether this session has already broadcast its `hello`
+    // payload at least once during the current pairing. Gates
+    // the auto-reply in `handleBroadcastEvent` so the host
+    // replies exactly once and the guest doesn't re-broadcast
+    // when it receives the host's reciprocal hello.
+    //
+    // Why this matters: Supabase Realtime broadcasts don't
+    // loop back to the sender by default. With an unconditional
+    // auto-reply, every received hello would generate a fresh
+    // outbound hello to the other side — which would generate
+    // another inbound, ad infinitum. Each side broadcasts hello
+    // exactly once: guest from `joinRoom` step 4, host from
+    // its receive handler when the guest's hello lands.
+    private var hasSentHello = false
+
     // The Supabase client. Default to the shared singleton; let
     // tests inject a mock by initializing with their own client.
     private let client: SupabaseClient
@@ -226,40 +241,106 @@ final class CloudDuoSession {
     func joinRoom(code: String) async {
         state = .joiningRoom
 
+        // Defense-in-depth: normalize the code at the session
+        // boundary too. The pairing view's `attemptJoin` already
+        // passes the validated/normalized form, but callers in
+        // tests or future entry points may not — and a single
+        // stray lowercase character or whitespace silently
+        // turns a correct code into a 0-rows lookup. Cheap to
+        // do twice, expensive to debug if it's missing.
+        let normalizedCode = DuoRoomCode.normalize(code)
+
         // 1) SELECT the waiting room.
-        let waitingRoom: RemoteDuoRace
+        //
+        // We deliberately avoid `.single()` here. PostgREST's
+        // `.single()` collapses three very different conditions
+        // into one indistinguishable error: (a) no row matched,
+        // (b) RLS denied the read, (c) the row decoded to the
+        // wrong shape. The old generic "Code not found or room
+        // is no longer waiting" message was almost always
+        // misleading — most production failures are actually
+        // an un-deployed RLS policy or a Realtime/auth glitch,
+        // not a typo.
+        //
+        // Switch to `.limit(1)` and decode into `[RemoteDuoRace]`.
+        // Then:
+        //   • Empty array         → "Code not found..." (legit)
+        //   • Thrown error        → network / decode / RLS — surface
+        //                            the real message so the user
+        //                            sees what to fix.
+        let matchingRooms: [RemoteDuoRace]
         do {
-            waitingRoom = try await client
+            matchingRooms = try await client
                 .from("duo_races")
                 .select()
-                .eq("pair_code", value: code)
+                .eq("pair_code", value: normalizedCode)
                 .eq("status", value: "waiting")
-                .single()
+                .limit(1)
                 .execute()
                 .value
         } catch {
+            // Real backend error — RLS denial, network failure,
+            // missing table, etc. Surface the actual error so the
+            // user (or a tester) has a fighting chance to debug.
+            state = .disconnected(
+                reason: "Couldn't reach the room: \(error.localizedDescription)"
+            )
+            return
+        }
+
+        guard let waitingRoom = matchingRooms.first else {
+            // SELECT succeeded but no row matched — the code is
+            // wrong OR the host's row has already been claimed by
+            // someone else / abandoned / finished. Show the
+            // historical message verbatim.
             state = .disconnected(
                 reason: "Code not found or room is no longer waiting"
             )
             return
         }
 
-        // 2) Claim the room (UPDATE guest + status).
+        // 2) Claim the room (UPDATE guest + status). The UPDATE
+        // is also gated by RLS (`duo_races_update_join`) — if
+        // that policy is missing or the row was claimed between
+        // our SELECT and UPDATE, the request returns 0 rows.
+        // Chain `.select()` after the update so PostgREST sends
+        // back the affected rows; without it, a zero-row UPDATE
+        // looks indistinguishable from a successful one and we'd
+        // open the channel only to never see the host's hello.
+        // The extra `.eq("status", "waiting")` filter on the
+        // UPDATE is a defensive concurrency guard — if another
+        // guest claimed the row a few ms before us, status is
+        // already 'paired' and our UPDATE matches 0 rows.
         let claim = RemoteDuoRaceUpdate(
             guestUserId: localUserID,
             status: "paired",
             startedAt: nil,
             endedAt: nil
         )
+        let claimedRows: [RemoteDuoRace]
         do {
-            try await client
+            claimedRows = try await client
                 .from("duo_races")
                 .update(claim)
                 .eq("id", value: waitingRoom.id)
+                .eq("status", value: "waiting")
+                .select()
                 .execute()
+                .value
         } catch {
             state = .disconnected(
                 reason: "Couldn't join room: \(error.localizedDescription)"
+            )
+            return
+        }
+
+        guard !claimedRows.isEmpty else {
+            // Either RLS denied the claim (the policy is missing
+            // or scoped wrong) or another guest beat us to it in
+            // the last few milliseconds. Either way, the host
+            // isn't going to receive our hello.
+            state = .disconnected(
+                reason: "Room was claimed by someone else or pairing is unavailable. Try again."
             )
             return
         }
@@ -316,8 +397,12 @@ final class CloudDuoSession {
     }
 
     // Convenience for the hello-on-connect handshake. Symmetric
-    // with `DuoCoordinator.sendHello()`.
+    // with `DuoCoordinator.sendHello()`. Idempotent — once per
+    // session — to break the auto-reply ping-pong (see the
+    // `hasSentHello` doc comment for why).
     func sendHello() {
+        guard !hasSentHello else { return }
+        hasSentHello = true
         send(.hello(
             displayName: localDisplayName,
             divisionRaw: localDivisionRaw
@@ -366,6 +451,12 @@ final class CloudDuoSession {
         partnerName = nil
         partnerDivisionRaw = nil
         partnerUserID = nil
+        // Reset the one-shot hello gate so a fresh pairing
+        // attempt (Tier 1 cancel → re-host, or guest cancel →
+        // re-join) can send hello again. Without this, a
+        // re-paired session would silently never identify
+        // itself to the partner.
+        hasSentHello = false
         state = .disconnected(reason: nil)
     }
 
@@ -459,9 +550,14 @@ final class CloudDuoSession {
             return
         }
 
-        // Hello is handled here so the higher-level coordinator
-        // sees a clean .connected transition. Other messages
-        // forward through to the caller-supplied callback.
+        // Hello is processed here so the session's @Observable
+        // state + partner fields are updated atomically before
+        // anyone else sees the message. After the stash, we ALSO
+        // forward hello through `onReceive` — without that step
+        // the higher-level coordinator never gets a "the
+        // handshake completed" trigger and its `.ready` state
+        // never flips. Tier 1 (`DuoSession`) does the same:
+        // intercept-then-forward.
         switch message {
         case let .hello(displayName, divisionRaw):
             partnerName = displayName
@@ -484,6 +580,14 @@ final class CloudDuoSession {
             if partnerUserID == nil, let roomID {
                 await refetchPartnerUserID(roomID: roomID)
             }
+
+            // CRITICAL: forward hello to the coordinator so it
+            // can promote its CoordState from .joining/.hosting
+            // to .ready. The coordinator reads `session.state`
+            // and `session.partnerDivisionRaw` (both already
+            // set above) when this callback fires, so the
+            // promote check has everything it needs.
+            onReceive?(message)
 
         case .disconnect:
             // Partner deliberately left. Best-effort tear down
