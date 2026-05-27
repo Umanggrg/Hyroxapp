@@ -228,7 +228,27 @@ final class WatchCompanionService: NSObject {
         }
 
         guard session.activationState == .activated else {
-            print("[WatchCompanion] sendControl SKIPPED — not activated")
+            // §54 — cold-launch activation race. WCSession can sit
+            // in .notActivated / .inactive for the first ~100-300ms
+            // after app launch while it settles. A race started in
+            // that window would previously have its `.startWorkout`
+            // control silently dropped, leaving the Watch session
+            // unstarted for the whole race (no HK workout, no HR
+            // stream, no rep counting).
+            //
+            // Fall through to `transferUserInfo` for durable
+            // delivery — the queued payload survives until WCSession
+            // activates and the Watch app picks it up via
+            // didReceiveUserInfo. Late delivery is acceptable for
+            // start/end controls because both carry their own
+            // timestamps; the Watch backdates `startActivity(with:)`
+            // to the actual race-start time. The Watch also
+            // self-heals from the race snapshot's phase
+            // (synchronizeWorkoutSession) so even if this queued
+            // payload never lands, the snapshot triggers session
+            // start on the wrist anyway. Belt-and-suspenders.
+            print("[WatchCompanion] sendControl deferring via transferUserInfo — WCSession not yet activated control=\(control)")
+            session.transferUserInfo(control.toDictionary())
             return
         }
 

@@ -253,10 +253,36 @@ final class RaceViewModel {
         }
     }
 
-    // Push the current state to the live activity. Cheap when
-    // no activity is running (the service early-exits).
-    private func pushLiveActivityUpdate() {
+    // §54 — Throttled Live Activity push. Without throttling,
+    // a single race produces 50-80 LA updates:
+    //   • 16 station-transition persist calls
+    //   • 16 setSegmentStats HK patches (each → persistActiveRace
+    //     → pushLiveActivityUpdate)
+    //   • 16 setRecoveryStats patches
+    //   • N rep-timestamp batches + rehydrate re-runs
+    // iOS's per-app per-hour ActivityKit budget is ~25-50
+    // updates. The race would silently lose its lock-screen LA
+    // halfway through. Same fanout pattern Free Run had
+    // pre-§52; this fix mirrors the §52 issue 8 throttle.
+    //
+    // Default throttled path: 5s minimum interval. Lifecycle
+    // events that NEED to land immediately (advance, finish,
+    // pause, resume, abandon) pass `force: true` to bypass.
+    private var lastLiveActivityPushAt: Date = .distantPast
+    private static let liveActivityPushThrottle: TimeInterval = 5.0
+
+    private func pushLiveActivityUpdate(force: Bool = false) {
         guard let state = currentLiveActivityState() else { return }
+        if !force {
+            let now = Date()
+            guard now.timeIntervalSince(lastLiveActivityPushAt)
+                >= Self.liveActivityPushThrottle else {
+                return
+            }
+            lastLiveActivityPushAt = now
+        } else {
+            lastLiveActivityPushAt = Date()
+        }
         LiveActivityService.shared.update(state)
     }
     #endif
@@ -1077,7 +1103,11 @@ final class RaceViewModel {
                 activeCalories: kcal,
                 atSplitIndex: index
             )
-            self.persistActiveRace()
+            // §54 — HK stats patch, not a user-driven state
+            // change. Throttle the Live Activity push so 16
+            // stations × 2 patches don't burn the ActivityKit
+            // budget.
+            self.persistActiveRace(isLifecycle: false)
         }
 
         // Schedule a delayed recovery-HR capture. The 30s and 60s
@@ -1142,7 +1172,9 @@ final class RaceViewModel {
                 heartRateRecovery60s: r60,
                 atSplitIndex: index
             )
-            self.persistActiveRace()
+            // §54 — async HK recovery sample patch, not a
+            // lifecycle event. Throttle the LA push.
+            self.persistActiveRace(isLifecycle: false)
         }
         #endif
     }
@@ -1349,7 +1381,14 @@ final class RaceViewModel {
     // Mirror the engine's current state onto `activeRace` and save. Called
     // after every state-changing event so the persisted row is always a
     // faithful snapshot of the live engine.
-    private func persistActiveRace() {
+    // §54 — `isLifecycle` distinguishes between user-driven
+    // state transitions (advance / pause / resume / finish /
+    // abandon — `true`, force-pushes the Live Activity update)
+    // and async HK / sensor-patch callbacks (attachSegmentStats,
+    // ingestRepCount, etc. — `false`, throttled). Default true
+    // because most callers are lifecycle events; the few
+    // stats-patch sites explicitly pass false.
+    private func persistActiveRace(isLifecycle: Bool = true) {
         guard let race = activeRace else { return }
 
         switch engine.state {
@@ -1450,13 +1489,14 @@ final class RaceViewModel {
 
         saveContextSilently()
 
-        // Every state change persisted → also push to the
-        // Live Activity. ActivityKit budget per-update is the
-        // bottleneck (not network), but every persist is a real
-        // user-driven event (advance/pause/resume/etc.) so we'd
-        // want to publish those anyway.
+        // §54 — lifecycle persists force-push so state changes
+        // land on the lock screen immediately. Stats-patch
+        // callbacks (attachSegmentStats, ingestRepCount,
+        // ingestRepTimestamps, etc.) pass isLifecycle: false so
+        // their throttled push fits within ActivityKit's per-app
+        // per-hour update budget.
         #if canImport(ActivityKit)
-        pushLiveActivityUpdate()
+        pushLiveActivityUpdate(force: isLifecycle)
         #endif
     }
 
@@ -1579,7 +1619,9 @@ final class RaceViewModel {
                     repsCompleted: .some(update.count),
                     atSplitIndex: index
                 )
-                persistActiveRace()
+                // §54 — rep-count catch-up patch, not a
+                // lifecycle event. Throttle LA push.
+                persistActiveRace(isLifecycle: false)
             }
             break
         }
@@ -1648,7 +1690,9 @@ final class RaceViewModel {
             }
             guard !offsets.isEmpty else { break }
             engine.setRepTimestamps(offsets, atSplitIndex: index)
-            persistActiveRace()
+            // §54 — async rep-timestamp batch from Watch, not a
+            // lifecycle event. Throttle LA push.
+            persistActiveRace(isLifecycle: false)
             break
         }
     }
