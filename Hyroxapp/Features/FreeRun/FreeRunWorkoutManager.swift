@@ -95,6 +95,27 @@ final class FreeRunWorkoutManager: NSObject {
     private var pedometerStartDistance: Double = 0
     private var pedometerCumulative: Double = 0
 
+    // §52 — Baseline carried across pause/resume cycles so the
+    // pedometer's "distance since startDate" semantic doesn't
+    // erase the pre-pause accumulated distance.
+    //
+    // Without this baseline: pause() stops the pedometer at
+    // (say) 200m. resume() calls startPedometer(from: Date())
+    // — CMPedometer's callback then delivers `data.distance`
+    // measured since the resume timestamp (0m, growing). The
+    // previous version assigned that fresh value directly to
+    // `pedometerCumulative`, so the 200m vanished and the
+    // engine's monotonic guard left displayed distance flat
+    // until the post-resume pedometer caught up past 200m —
+    // many minutes later, if at all.
+    //
+    // With the baseline: pause() captures pedometerCumulative
+    // into pedometerBaseline. resume()'s pedometer callback
+    // assigns `pedometerCumulative = baseline + freshSegment`,
+    // so the running total stays accurate. Cleared to 0 on
+    // start() so a brand-new run begins from zero.
+    private var pedometerBaseline: Double = 0
+
     // Latest GPS-integrated distance. We compute it from
     // location-to-location deltas inside `didUpdateLocations`;
     // running total exposed here so the arbiter below picks the
@@ -139,6 +160,19 @@ final class FreeRunWorkoutManager: NSObject {
     private var lastBuilderHRPublishedAt: Date = .distantPast
     private var lastBuilderHRSampleEnd: Date = .distantPast
     private static let minBuilderHRPublishInterval: TimeInterval = 0.5
+
+    // §52 — Flag set when endIPhoneWorkoutSession is called but
+    // the .ended delegate callback hasn't yet cleared the session
+    // handles. During this short window (~100-500ms typical), a
+    // rapid restart (user finishes Free Run and immediately
+    // starts another) would otherwise see iPhoneWorkoutSession
+    // != nil and silently skip the new session start — leaving
+    // AirPods Pro 3 HR dark for the second run. The flag lets
+    // startIPhoneWorkoutSessionIfNeeded log a clearer reason +
+    // skip (the user can retry once teardown completes). A more
+    // ambitious fix would queue the pending start; the current
+    // mitigation just makes the failure mode observable.
+    private var iPhoneSessionTeardownPending: Bool = false
     #endif
 
     // MARK: - Callbacks (FreeRunViewModel registers these)
@@ -169,6 +203,11 @@ final class FreeRunWorkoutManager: NSObject {
         currentHeartRateBPM = nil
         pedometerStartDistance = 0
         pedometerCumulative = 0
+        // §52 — fresh run starts from zero baseline. Pause/
+        // resume cycles below capture the running total into
+        // this slot so resume's fresh pedometer start doesn't
+        // erase prior distance.
+        pedometerBaseline = 0
         gpsCumulative = 0
         lastGoodFix = nil
 
@@ -194,6 +233,14 @@ final class FreeRunWorkoutManager: NSObject {
         // Pause behaves the same regardless of source — we stop
         // accepting new samples until resume, but keep the
         // accumulated distance so the engine doesn't reset.
+        //
+        // §52 — capture pedometerCumulative as the baseline BEFORE
+        // stopping the pedometer. resume()'s fresh
+        // `startPedometer(from: Date())` would otherwise reset
+        // the accumulator's "distance since start" to 0 measured
+        // from the resume timestamp, and the next callback would
+        // overwrite pedometerCumulative with that fresh delta.
+        pedometerBaseline = pedometerCumulative
         stopPedometer()
         stopLocation()
         stopHeartRatePolling()
@@ -203,7 +250,8 @@ final class FreeRunWorkoutManager: NSObject {
     func resume() {
         guard isActive else { return }
         // Restart sources from now() — accumulated distance
-        // continues from the previous high-water mark.
+        // continues from the pre-pause high-water mark via the
+        // pedometerBaseline captured in pause().
         startPedometer(from: Date())
         if activeLocationType == .outdoor {
             startLocation()
@@ -233,8 +281,14 @@ final class FreeRunWorkoutManager: NSObject {
         pedometer.startUpdates(from: startDate) { [weak self] data, _ in
             guard let self, let data, let metres = data.distance else { return }
             Task { @MainActor in
-                let cumulative = metres.doubleValue
-                self.pedometerCumulative = cumulative
+                // §52 — pedometerCumulative = baseline + this-
+                // segment's fresh delta. On the first start() of
+                // a run, baseline is 0 so this is just `metres`.
+                // After a pause/resume, baseline carries the
+                // pre-pause running total and the fresh segment
+                // adds on top, preserving the accumulated distance.
+                let segmentDistance = metres.doubleValue
+                self.pedometerCumulative = self.pedometerBaseline + segmentDistance
                 self.publishDistanceArbitrated(at: Date())
             }
         }
@@ -340,17 +394,51 @@ final class FreeRunWorkoutManager: NSObject {
         // dispatch the control in the first place — so this branch
         // strictly mirrors the Watch-side decision and we never end
         // up with two sessions running at once.
+        //
+        // §52 — handle the cold-launch activation race. On a fresh
+        // app launch, WCSession's activationState can be .inactive
+        // or .notActivated for the first ~100-300ms while the
+        // session settles. During that window, asking
+        // isWatchAppInstalled returns false even for users who DO
+        // have the Watch app — so a naive check would conclude
+        // "Watch absent, start iPhone session" and once the Watch
+        // activates moments later it ALSO starts its session,
+        // producing two duplicate HK workouts for the same run.
+        //
+        // Mitigation: when activationState isn't yet .activated,
+        // schedule the iPhone-session start onto a delayed Task
+        // (up to 1s) and re-check there. By 1s in, activation has
+        // either completed or genuinely failed; the re-check
+        // routes correctly.
         #if canImport(WatchConnectivity)
         let watchSession = WCSession.default
-        let watchOwnsIt = watchSession.activationState == .activated
-            && watchSession.isWatchAppInstalled
+        if watchSession.activationState != .activated {
+            print("[FreeRunPhoneHK] WCSession not yet activated; deferring iPhone session start ~1s for activation to settle")
+            Task { @MainActor in
+                // Poll for up to 1s in 100ms intervals.
+                for _ in 0..<10 {
+                    if WCSession.default.activationState == .activated { break }
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+                self.startIPhoneWorkoutSessionIfNeeded(
+                    locationType: locationType,
+                    startDate: startDate
+                )
+            }
+            return
+        }
+        let watchOwnsIt = watchSession.isWatchAppInstalled
         guard !watchOwnsIt else {
             print("[FreeRunPhoneHK] skip — Watch app installed, Watch owns the session")
             return
         }
         #endif
         guard iPhoneWorkoutSession == nil else {
-            print("[FreeRunPhoneHK] skip — session already active")
+            if iPhoneSessionTeardownPending {
+                print("[FreeRunPhoneHK] skip — previous session still tearing down (delegate .ended callback hasn't fired yet); retry in a moment if you want AirPods Pro 3 HR for this run")
+            } else {
+                print("[FreeRunPhoneHK] skip — session already active")
+            }
             return
         }
 
@@ -412,6 +500,11 @@ final class FreeRunWorkoutManager: NSObject {
         guard #available(iOS 26.0, *) else { return }
         guard let session = iPhoneWorkoutSession as? HKWorkoutSession else { return }
         pendingIPhoneFinalize = finalize
+        // §52 — mark teardown-in-flight so a rapid restart
+        // attempt logs a clear reason instead of silently
+        // skipping. Cleared in clearIPhoneWorkoutHandles
+        // after the delegate's .ended callback fully drains.
+        iPhoneSessionTeardownPending = true
         session.end()
         print("[FreeRunPhoneHK] end requested at=\(endDate) finalize=\(finalize)")
         #endif
@@ -426,6 +519,9 @@ final class FreeRunWorkoutManager: NSObject {
         iPhoneWorkoutSession = nil
         iPhoneWorkoutBuilder = nil
         pendingIPhoneFinalize = true
+        // §52 — drain the teardown-pending flag so the next
+        // start() can proceed without the rapid-restart warning.
+        iPhoneSessionTeardownPending = false
         lastBuilderHRPublishedAt = .distantPast
         lastBuilderHRSampleEnd = .distantPast
     }

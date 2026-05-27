@@ -19,22 +19,27 @@ import Auth
 #endif
 
 // View model for the Free Run flow. Owns the FreeRunEngine, the
-// active SwiftData FreeRun row, and the lifecycle bridge to whichever
-// distance source is feeding metres into the engine.
+// active SwiftData FreeRun row, and the lifecycle bridge to
+// whichever distance source is feeding metres into the engine.
 //
-// Phase 1 scope (this file's current state): lifecycle (start /
-// pause / resume / end / abandon), persistence to SwiftData, engine
-// state passthrough. The HK plumbing (HKWorkoutSession on iPhone for
-// pedometer/GPS, distance ingest from CMPedometer, HR observation,
-// route building, post-finish HK save) lands in Phase 2 — stubbed
-// here with TODO markers so the wiring shape is visible.
-//
-// Watch parity (Phase 3) will reuse these same methods through
-// WatchCompanionService control commands; the iPhone-side calls
-// `sendControl(.startFreeRun(...))` and the Watch's free-run manager
-// drives its own HKWorkoutSession in lockstep — same architecture as
-// HYROX races where the iPhone is the engine of record and the Watch
-// mirrors.
+// Architecture (all shipped):
+//   • Lifecycle — start / pause / resume / end / abandon, all
+//     with SwiftData persistence on every transition.
+//   • Distance — CMPedometer on iPhone for indoor (§39 also pulls
+//     wrist-side distance from the Watch via WCSession), GPS
+//     fusion outdoor. Pedometer baseline carried across pause/
+//     resume cycles (§52) so the accumulated distance survives.
+//   • HR — Watch HK pipeline primary (Phase 13 + 28), iPhone
+//     HKWorkoutSession (iOS 26+) for the no-Watch + AirPods Pro
+//     3 case (§41 + §48). Phone-side polling at 5s as a final
+//     fallback. Continuous HR series persisted on the FreeRun
+//     row (§27).
+//   • Watch parity — WatchCompanionService.sendControl
+//     dispatches startFreeRunWorkout / endFreeRunWorkout /
+//     pauseWorkout / resumeWorkout / discardWorkout so the
+//     Watch's HK session lifecycle stays in lockstep.
+//   • Live Activity (§12C) — start / update / end via
+//     LiveActivityService.startFreeRun.
 //
 // Threading: `@Observable` + `@MainActor` so SwiftUI views read
 // state directly and writes don't race against the UI tree.
@@ -73,6 +78,23 @@ final class FreeRunViewModel {
     // sample would dwarf the value, and we never use the
     // mid-run buffer for anything other than the post-run flush.
     private var hrBuffer: [HRSample] = []
+
+    // §52 — Throttle gate for Live Activity updates. ActivityKit
+    // budget caps per-app updates per hour (typical ~25-50
+    // updates/hour for the highest-frequency apps). Without
+    // throttling, persistActiveRun fires ~1Hz on every distance
+    // sample = 3600 updates per hour, blowing through the budget
+    // in minutes and causing iOS to silently drop subsequent
+    // updates for the rest of the run.
+    //
+    // 5s minimum interval = 12 updates/min = 720/hour worst case
+    // — still over budget but iOS's rate limiter handles the
+    // overflow gracefully (drops surplus while keeping the
+    // cadence steady). Lifecycle events (pause, resume, end)
+    // always force-push regardless of the throttle so state
+    // transitions land immediately.
+    private var lastLiveActivityPushAt: Date = .distantPast
+    private static let liveActivityPushThrottle: TimeInterval = 5.0
 
     // Convenience accessor — true while a run is in progress
     // (engine exists AND it's in .inProgress phase). View layer
@@ -176,12 +198,16 @@ final class FreeRunViewModel {
         guard let engine, engine.isRunning else { return }
         engine.pause(at: Date())
         persistActiveRun()
+        // pauseDistanceSource already mirrors the pause to the
+        // Watch via `WatchControl.pauseWorkout` (see
+        // pauseDistanceSource implementation below). No
+        // additional `sendControl` needed here.
         pauseDistanceSource()
-
-        #if canImport(WatchConnectivity)
-        // Phase 3 — tell the Watch to pause its own session so
-        // distance + HR aggregation pause in lockstep.
-        // Placeholder: WatchCompanionService.shared.sendControl(.pauseFreeRun)
+        // §52 — bypass the LA throttle on lifecycle transitions
+        // so the lock-screen surface flips to "paused" state
+        // immediately, not 0-5s later.
+        #if canImport(ActivityKit)
+        pushFreeRunActivityUpdate(force: true)
         #endif
     }
 
@@ -190,6 +216,12 @@ final class FreeRunViewModel {
         engine.resume(at: Date())
         persistActiveRun()
         resumeDistanceSource()
+        // §52 — same force-push as pause(), so the lock screen
+        // flips back to "running" without waiting on the
+        // throttle window to elapse.
+        #if canImport(ActivityKit)
+        pushFreeRunActivityUpdate(force: true)
+        #endif
     }
 
     // End the run cleanly — flush HK, finalize splits, kick off
@@ -211,7 +243,11 @@ final class FreeRunViewModel {
 
         persistActiveRun()
 
-        stopDistanceSource()
+        // §52 — explicit finalize: true on the happy-path end()
+        // (the legacy default-true behavior). abandon() takes
+        // the false branch by routing through teardown(finalize:
+        // false) → stopDistanceSource(finalize: false).
+        stopDistanceSource(finalize: true)
         stopHeartRateObservation()
         // §11 Free Run cathedral — tear down the head-motion
         // subscription alongside HR. Leaving CMHeadphoneMotionManager
@@ -239,23 +275,40 @@ final class FreeRunViewModel {
     // Abandon — the user cancelled mid-run. Drop the FreeRun row
     // entirely so unfinished sessions don't pollute History.
     // Symmetric with RaceViewModel.abandon for races.
+    //
+    // §52 — pass `finalize: false` through teardown so the
+    // iPhone-side HKWorkoutSession (and the Watch's, when
+    // installed) DISCARDS its workout rather than saving it.
+    // Without this fix the cancelled run would still get
+    // written to Apple Health, polluting the user's workout
+    // history with runs they explicitly cancelled.
     func abandon() {
         engine?.end(at: Date())
         if let run = activeRun {
             modelContext?.delete(run)
             saveContextSilently()
         }
-        teardown()
+        teardown(finalize: false)
     }
 
     // Tear down post-finish or post-abandon. Clears the engine +
     // active run reference but leaves the persisted row alone
     // (it's complete — belongs in History).
+    //
+    // §52 — called only from the happy-path finish flow where
+    // the workout SHOULD be saved to Apple Health, so the
+    // default finalize: true is correct here.
     func finishSession() {
-        teardown()
+        teardown(finalize: true)
     }
 
-    private func teardown() {
+    // §52 — `finalize` controls whether the underlying iPhone
+    // HKWorkoutSession (and Watch session, when installed)
+    // saves its accumulated workout to Apple Health or
+    // discards it. true for happy-path finish + finishSession;
+    // false for abandon (the user explicitly cancelled — their
+    // workout history shouldn't carry phantom entries).
+    private func teardown(finalize: Bool = true) {
         engine = nil
         activeRun = nil
         currentHeartRateBPM = nil
@@ -265,7 +318,7 @@ final class FreeRunViewModel {
         // the abandon path drops the row entirely, so clearing
         // here is safe in both cases.
         hrBuffer = []
-        stopDistanceSource()
+        stopDistanceSource(finalize: finalize)
         stopHeartRateObservation()
         // §11 Free Run cathedral — also unconditionally tear
         // down head-motion on teardown (covers abandon paths
@@ -320,13 +373,16 @@ final class FreeRunViewModel {
         // Mirror the state to the wrist on every persist. Same
         // write-on-every-event cadence as the iPhone summary —
         // Watch sees fresh distance + phase within ~0.5s of the
-        // iPhone-side change.
+        // iPhone-side change. WCSession is internally bounded so
+        // we don't need to throttle here.
         publishWatchSnapshot()
-        // §12C — also push to the Live Activity. ActivityKit
-        // budget caps updates per app per hour; persistActiveRun
-        // is the canonical "real state change happened" hook
-        // (distance milestone, pause, resume, end) so all such
-        // events land on the lock screen.
+        // §12C — also push to the Live Activity. §52 added a 5s
+        // throttle (persistActiveRun fires ~1Hz on every distance
+        // sample, and ActivityKit's per-app per-hour update
+        // budget would be exhausted in minutes without
+        // throttling). Lifecycle-event paths (pause, resume,
+        // end) bypass the throttle via pushFreeRunActivityUpdate
+        // (force: true) so state transitions land immediately.
         #if canImport(ActivityKit)
         pushFreeRunActivityUpdate()
         #endif
@@ -404,8 +460,23 @@ final class FreeRunViewModel {
         )
     }
 
-    private func pushFreeRunActivityUpdate() {
+    /// §52 — Throttled Live Activity update. The default
+    /// throttled path keeps persistActiveRun's ~1Hz cadence from
+    /// burning the ActivityKit per-app per-hour budget. Pass
+    /// `force: true` from lifecycle events (pause, resume, end)
+    /// that NEED to land immediately regardless of throttle.
+    private func pushFreeRunActivityUpdate(force: Bool = false) {
         guard let state = currentFreeRunActivityState() else { return }
+        if !force {
+            let now = Date()
+            guard now.timeIntervalSince(lastLiveActivityPushAt)
+                >= Self.liveActivityPushThrottle else {
+                return
+            }
+            lastLiveActivityPushAt = now
+        } else {
+            lastLiveActivityPushAt = Date()
+        }
         LiveActivityService.shared.updateFreeRun(state)
     }
     #endif
@@ -625,14 +696,14 @@ final class FreeRunViewModel {
         #endif
     }
 
-    private func stopDistanceSource() {
-        // `finalize: true` — saves the run as an HKWorkout to
-        // Apple Health. Use `abandon()` for the cancel path,
-        // which calls .end(finalize: false) via this same method
-        // through teardown's stopDistanceSource — the abandon
-        // path is the only caller that wants the discard
-        // semantic.
-        FreeRunWorkoutManager.shared.end(finalize: true)
+    // §52 — `finalize` controls whether the iPhone + Watch
+    // HKWorkoutSessions save their accumulated workout to Apple
+    // Health (happy-path finish) or discard it (abandon path —
+    // user explicitly cancelled). The previous version was
+    // hardcoded to true which meant cancelled runs still
+    // wrote to Health.
+    private func stopDistanceSource(finalize: Bool = true) {
+        FreeRunWorkoutManager.shared.end(finalize: finalize)
         FreeRunWorkoutManager.shared.onDistanceUpdate = nil
         FreeRunWorkoutManager.shared.onHeartRateUpdate = nil
 
@@ -640,12 +711,16 @@ final class FreeRunViewModel {
         // Mirror end on the Watch — finalize the wrist's HK
         // session so HKLiveWorkoutBuilder.finishWorkout flushes
         // every buffered HR + distance sample to HKHealthStore.
-        // The post-finish rehydrate (8s delayed) then queries
-        // each split's window and finds real samples instead of
-        // the empty windows we saw before this fix.
-        WatchCompanionService.shared.sendControl(
-            .endFreeRunWorkout(at: Date())
-        )
+        // On the abandon path we send discardWorkout instead so
+        // the Watch-side session is also dropped — symmetric
+        // with the iPhone branch above.
+        if finalize {
+            WatchCompanionService.shared.sendControl(
+                .endFreeRunWorkout(at: Date())
+            )
+        } else {
+            WatchCompanionService.shared.sendControl(.discardWorkout)
+        }
         // §39 — Clear the distance callback so a stale closure
         // capturing this viewmodel doesn't keep firing into a
         // torn-down state. A queued transferUserInfo distance
@@ -757,6 +832,15 @@ final class FreeRunViewModel {
         let capturedSplits = engine?.splits ?? []
         let capturedContext = modelContext
 
+        // §52 — flag that a rehydrate is in flight. If the app
+        // is force-killed mid-sleep, the launch-time
+        // reconciliation in `reconcilePendingRehydrates` finds
+        // this flag still set on next launch and retriggers
+        // the rehydrate. Cleared at the end of the Task on
+        // success.
+        capturedRun.needsRehydrate = true
+        try? capturedContext?.save()
+
         Task { @MainActor in
             // 8s buffer matches the race rehydrate path —
             // `finishWorkout` typically completes + propagates
@@ -821,6 +905,12 @@ final class FreeRunViewModel {
                 capturedRun.activeCaloriesKcal = kcal
             }
 
+            // §52 — rehydrate completed successfully. Clear the
+            // pending flag so the launch-time reconciliation
+            // doesn't re-run it. If we crashed before this line,
+            // the flag stays set and the next launch retries.
+            capturedRun.needsRehydrate = false
+
             // Save through the captured context — same path
             // persistActiveRun would use, just with the local
             // reference instead of `self.modelContext` which
@@ -846,6 +936,87 @@ final class FreeRunViewModel {
                 )
             }
             #endif
+        }
+        #endif
+    }
+
+    // MARK: - Launch-time reconciliation (§52)
+
+    /// Scan finished FreeRuns for any with the `needsRehydrate`
+    /// flag still set (indicating the app died mid-rehydrate
+    /// before the HR averages + calorie aggregate could be
+    /// saved) and re-fire the rehydrate logic for each.
+    ///
+    /// Called from the app bootstrap path (ContentView.bootstrap)
+    /// once after launch. Idempotent — if a run was rehydrated
+    /// successfully and the flag is clear, the scan finds nothing.
+    /// If HealthKit is offline / unavailable, the inner rehydrate
+    /// Task swallows the error and the flag stays set for the
+    /// next launch's retry.
+    static func reconcilePendingRehydrates(in context: ModelContext) {
+        #if canImport(HealthKit)
+        let predicate = #Predicate<FreeRun> { freeRun in
+            freeRun.needsRehydrate == true && freeRun.endedAt != nil
+        }
+        let descriptor = FetchDescriptor<FreeRun>(predicate: predicate)
+        guard let pending = try? context.fetch(descriptor), !pending.isEmpty else {
+            return
+        }
+        for run in pending {
+            rehydrateExistingRun(run, in: context)
+        }
+        #endif
+    }
+
+    /// Internal helper — runs the HR + calories rehydrate for an
+    /// already-persisted FreeRun row. Used by the launch-time
+    /// reconciliation above. Same shape as the inline Task in
+    /// rehydrateFromHealthKit but operates on an arbitrary
+    /// finished run rather than `activeRun`.
+    private static func rehydrateExistingRun(_ run: FreeRun, in context: ModelContext) {
+        #if canImport(HealthKit)
+        Task { @MainActor in
+            // No initial sleep — the run finished some time ago
+            // (mid-rehydrate kill could've been seconds OR days
+            // back). HealthKit either has the samples by now or
+            // never will.
+            var newSplits = run.splits
+            for index in newSplits.indices {
+                let split = newSplits[index]
+                let stats = await HealthKitService.shared.heartRateStats(
+                    from: split.startedAt,
+                    to: split.endedAt
+                )
+                if stats.avg != nil || stats.max != nil {
+                    newSplits[index] = FreeRunSplit(
+                        index: split.index,
+                        startedAt: split.startedAt,
+                        endedAt: split.endedAt,
+                        cumulativeDistanceMetres: split.cumulativeDistanceMetres,
+                        segmentDistanceMetres: split.segmentDistanceMetres,
+                        heartRateAvgBPM: stats.avg,
+                        heartRateMaxBPM: stats.max
+                    )
+                }
+            }
+            run.splits = newSplits
+
+            if let endedAt = run.endedAt {
+                let stats = await HealthKitService.shared.heartRateStats(
+                    from: run.startedAt,
+                    to: endedAt
+                )
+                run.heartRateAvgBPM = stats.avg
+                run.heartRateMaxBPM = stats.max
+                let kcal = await HealthKitService.shared.activeCalories(
+                    from: run.startedAt,
+                    to: endedAt
+                )
+                run.activeCaloriesKcal = kcal
+            }
+
+            run.needsRehydrate = false
+            try? context.save()
         }
         #endif
     }

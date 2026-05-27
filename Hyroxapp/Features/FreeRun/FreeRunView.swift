@@ -104,6 +104,17 @@ struct FreeRunView: View {
             #if canImport(WatchConnectivity)
             // Wire the Watch → iPhone action callback (wrist
             // pause/resume/end → view model).
+            //
+            // §52 audit note: WatchCompanionService.shared.onAction
+            // is a single global slot also used by RaceView. The
+            // app's nav structure prevents both views from being
+            // simultaneously appeared (tab bar surfaces one or
+            // the other), and the onDisappear teardown below
+            // clears the handler so the next view's onAppear
+            // re-registers cleanly. If a future redesign allows
+            // overlapping presentation, this slot would need to
+            // become a per-feature handler stack — but for the
+            // current tab-bar UX it's correct as-is.
             WatchCompanionService.shared.onAction = { action in
                 switch action {
                 case .pauseFreeRun: viewModel.pause()

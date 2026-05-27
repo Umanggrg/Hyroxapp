@@ -109,6 +109,18 @@ final class FreeRun {
     // Active calories burned, kcal. Optional like the HR fields.
     var activeCaloriesKcal: Double?
 
+    // §52 — `true` while a post-finish HK rehydrate is in flight
+    // OR pending after a force-kill. Set by
+    // FreeRunViewModel.rehydrateFromHealthKit at the start of the
+    // delayed Task and cleared on successful save. On app launch,
+    // the bootstrap path scans for finished FreeRuns with this
+    // flag still set and re-fires the rehydrate so HR averages
+    // and calorie aggregates land even when the app died
+    // mid-rehydrate.
+    //
+    // Pre-§52 runs decode this as false (additive Codable default).
+    var needsRehydrate: Bool = false
+
     // Optional human-given title. Same pattern as `Race.name` —
     // empty default, falls back to the auto date stamp at every
     // display site.

@@ -322,6 +322,13 @@ struct ContentView: View {
     private func bootstrap() {
         WorkoutTemplate.seedDefaultsIfNeeded(in: modelContext)
 
+        // §52 — retry post-finish HR rehydrate for any finished
+        // FreeRuns that were killed mid-rehydrate. Looks for the
+        // `needsRehydrate == true` flag set on those rows and
+        // re-runs the HK queries. Idempotent — does nothing
+        // when no pending runs exist.
+        FreeRunViewModel.reconcilePendingRehydrates(in: modelContext)
+
         // Ensure exactly one profile exists. This used to live in
         // ProfileView's onAppear but it has to run regardless of
         // which tab the user lands on — the wizard depends on it.
