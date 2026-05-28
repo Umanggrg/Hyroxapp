@@ -218,3 +218,58 @@ CREATE POLICY duo_races_delete_own ON public.duo_races
 
 COMMENT ON TABLE public.duo_races IS
 '§4.5 Tier 2 — coordination metadata for cross-city HYROX Doubles. Race-time events flow via Realtime broadcast, not this table; rows here are room state only.';
+
+-- ============================================================
+-- 6. Troubleshooting probes
+-- ============================================================
+--
+-- Run these in the Supabase SQL Editor when the iOS app shows
+-- "No open room found for that code" or "Code not found or room
+-- is no longer waiting" even though the host clearly has a code
+-- on screen. The two most common deploy-side failures are:
+--
+--   (1) Table exists but the RLS policies above were never
+--       applied (an earlier deploy partially failed, or the
+--       file got re-run with a typo'd policy name).
+--   (2) Realtime publication isn't enabled for duo_races, so
+--       the broadcast channel works but no one ever hears the
+--       hello message.
+--
+-- A. Verify all expected RLS policies are present.
+--    Expected: 7 rows (select_waiting, select_own, insert_self,
+--              update_host, update_join, update_guest,
+--              delete_own).
+--
+-- SELECT policyname, cmd
+--   FROM pg_policies
+--  WHERE schemaname = 'public'
+--    AND tablename  = 'duo_races'
+--  ORDER BY policyname;
+--
+-- B. Verify Realtime is publishing duo_races.
+--    Expected: 1 row.
+--
+-- SELECT schemaname, tablename
+--   FROM pg_publication_tables
+--  WHERE pubname = 'supabase_realtime'
+--    AND tablename = 'duo_races';
+--
+-- C. As an authenticated user (NOT the service-role key), see
+--    what waiting rooms are visible to you. If this returns 0
+--    while the iOS host clearly has a code on screen, the
+--    `duo_races_select_waiting` policy isn't applied. Run the
+--    `CREATE POLICY duo_races_select_waiting ...` block above
+--    again to re-apply.
+--
+-- SELECT id, pair_code, status, created_at
+--   FROM public.duo_races
+--  WHERE status = 'waiting'
+--  ORDER BY created_at DESC
+--  LIMIT 5;
+--
+-- If A/B/C all look right and the iOS app still shows
+-- "No open room found", the issue is almost certainly a real
+-- typo in the code the guest is typing — the Phase 59
+-- diagnostic (status-aware probe in CloudDuoSession.joinRoom)
+-- will say "That room is already paired / in progress /
+-- finished" if a real but non-waiting row exists.

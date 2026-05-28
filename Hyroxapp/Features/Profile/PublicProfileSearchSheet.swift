@@ -4,16 +4,25 @@ import SwiftUI
 import UIKit
 #endif
 
-// First social-discovery surface — type a handle, see another
-// athlete's public profile. Drives straight off
-// `PublicProfileService.lookup(handle:)`; on result, delegates
-// the visual + follow-action surface to `PublicProfileCard`.
+// First social-discovery surface — type a name OR handle, see
+// matching athletes' public profiles. Drives off
+// `PublicProfileService.search(query:)` which does a fuzzy
+// `.ilike` across BOTH handle and display_name, so "Sarah"
+// matches both @sarahb and the user whose display name is
+// "Sarah Brown". On selection, delegates the visual +
+// follow-action surface to `PublicProfileCard`.
 //
 // Four inline states:
 //   • idle      — empty input, nothing fetched yet
-//   • searching — request in flight after Go
-//   • result    — PublicProfileCard renders the athlete
-//   • notFound  — handle didn't match any athlete
+//   • searching — request in flight (fires on debounced typing)
+//   • results   — one or more matching profiles (rendered as a
+//                 vertical stack of PublicProfileCards)
+//   • notFound  — query returned zero matches
+//
+// Debounced live search: each keystroke schedules a 300ms
+// delayed lookup, cancelled if the user keeps typing. This
+// matches the Instagram / Twitter / Strava search affordance —
+// no Go button needed.
 struct PublicProfileSearchSheet: View {
 
     @Environment(\.dismiss) private var dismiss
@@ -23,19 +32,19 @@ struct PublicProfileSearchSheet: View {
 
     // Tracks the current async search task so a rapid retype
     // cancels the in-flight one before kicking off a new
-    // lookup. Without this, two near-simultaneous Go taps
-    // could land their results out of order.
+    // lookup. Without this, two near-simultaneous queries could
+    // land their results out of order.
     @State private var searchTask: Task<Void, Never>?
 
-    // Not Equatable — the `.result` associated value
-    // (RemotePublicProfile) isn't Equatable and synthesizing
+    // Not Equatable — the `.results` associated value
+    // ([RemotePublicProfile]) isn't Equatable and synthesizing
     // would require either propagating that conformance or
     // doing a custom comparison. The view doesn't use `==`
     // on Phase anywhere, so we don't need it.
     private enum Phase {
         case idle
         case searching
-        case result(RemotePublicProfile)
+        case results([RemotePublicProfile])
         case notFound
     }
 
@@ -56,13 +65,18 @@ struct PublicProfileSearchSheet: View {
                             idleHint
                         case .searching:
                             searchingIndicator
-                        case .result(let profile):
-                            PublicProfileCard(profile: profile)
-                                // Force a fresh card per result so
-                                // the follow-state @State inside
-                                // resets when a different athlete
-                                // is shown.
-                                .id(profile.id)
+                        case .results(let profiles):
+                            // Render each match as its own card.
+                            // The `.id(profile.id)` forces a fresh
+                            // PublicProfileCard per athlete so the
+                            // internal follow-state @State doesn't
+                            // bleed from row to row.
+                            VStack(spacing: 12) {
+                                ForEach(profiles) { profile in
+                                    PublicProfileCard(profile: profile)
+                                        .id(profile.id)
+                                }
+                            }
                         case .notFound:
                             notFoundCard
                         }
@@ -79,6 +93,13 @@ struct PublicProfileSearchSheet: View {
                     Button("Done") { dismiss() }
                 }
             }
+            // Debounced live search — every typed character
+            // schedules a lookup ~300ms later, cancelled if the
+            // user keeps typing. Matches the discovery feel of
+            // every other social app.
+            .onChange(of: rawInput) { _, newValue in
+                scheduleSearch(for: newValue)
+            }
         }
     }
 
@@ -86,15 +107,31 @@ struct PublicProfileSearchSheet: View {
 
     private var searchField: some View {
         HStack(spacing: 8) {
-            Image(systemName: "at")
+            Image(systemName: "magnifyingglass")
                 .foregroundStyle(Color.textTertiary)
                 .font(.body.weight(.semibold))
 
-            TextField("handle", text: $rawInput)
+            TextField("Name or @handle", text: $rawInput)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
                 .submitLabel(.search)
                 .onSubmit { performSearch() }
+
+            // Clear button when there's text — small affordance
+            // so the user doesn't have to backspace through a
+            // long query.
+            if !rawInput.isEmpty {
+                Button {
+                    rawInput = ""
+                    searchTask?.cancel()
+                    phase = .idle
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(Color.textTertiary)
+                        .font(.body)
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -105,32 +142,58 @@ struct PublicProfileSearchSheet: View {
         .padding(.horizontal, Layout.screenMargin)
     }
 
-    // Trim, drop a leading @, lowercase, kick off lookup. The
-    // service applies the same normalization defensively, but
-    // doing it here too means our `notFound` UX feels
-    // immediate for empty / whitespace-only input.
-    private func performSearch() {
-        let normalized = rawInput
+    // Debounce the in-flight search by a short interval so the
+    // backend doesn't get hammered on every keystroke. Cancel
+    // any prior pending task before starting a new one.
+    private func scheduleSearch(for query: String) {
+        searchTask?.cancel()
+
+        let trimmed = query
             .trimmingCharacters(in: .whitespaces)
             .trimmingCharacters(in: CharacterSet(charactersIn: "@"))
-            .lowercased()
 
-        guard !normalized.isEmpty else { return }
+        // Reset to idle on an empty / whitespace input rather
+        // than firing a no-op request.
+        guard !trimmed.isEmpty else {
+            phase = .idle
+            return
+        }
+
+        // Don't show "searching…" on every keystroke (it
+        // flickers); only mark searching once the debounce
+        // window has fired and the task actually launches.
+        searchTask = Task { @MainActor in
+            // 300ms debounce. If the task is cancelled before
+            // this returns (because the user typed again), the
+            // outer .cancel() handles it.
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+
+            phase = .searching
+            let results = await PublicProfileService.search(query: trimmed)
+            guard !Task.isCancelled else { return }
+
+            phase = results.isEmpty ? .notFound : .results(results)
+        }
+    }
+
+    // Synchronous fire on submit — bypasses the debounce so
+    // hitting Return immediately runs the search. Matches the
+    // affordance every other search box on iOS has.
+    private func performSearch() {
+        let trimmed = rawInput
+            .trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "@"))
+
+        guard !trimmed.isEmpty else { return }
 
         searchTask?.cancel()
         phase = .searching
 
         searchTask = Task { @MainActor in
-            let result = await PublicProfileService.lookup(handle: normalized)
-            // Swallow the result if the task was cancelled —
-            // a newer search is already in flight and will
-            // populate `phase` itself.
+            let results = await PublicProfileService.search(query: trimmed)
             guard !Task.isCancelled else { return }
-            if let result {
-                phase = .result(result)
-            } else {
-                phase = .notFound
-            }
+            phase = results.isEmpty ? .notFound : .results(results)
         }
     }
 
@@ -141,10 +204,10 @@ struct PublicProfileSearchSheet: View {
             Image(systemName: "person.crop.circle.badge.questionmark")
                 .font(.system(size: 36, weight: .light))
                 .foregroundStyle(Color.textTertiary)
-            Text("Search by handle")
+            Text("Find an athlete")
                 .font(.body.weight(.semibold))
                 .foregroundStyle(Color.textSecondary)
-            Text("Enter another athlete's @handle to view their public profile.")
+            Text("Type a name or @handle to find athletes on Trakrr.")
                 .font(.caption)
                 .foregroundStyle(Color.textTertiary)
                 .multilineTextAlignment(.center)

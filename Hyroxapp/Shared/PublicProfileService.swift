@@ -84,6 +84,63 @@ enum PublicProfileService {
         }
     }
 
+    // Fuzzy search across handle + display name. Returns up to
+    // `limit` rows, ranked by Postgres default (insertion order
+    // — good enough for v1; can swap to a relevance score when
+    // we have enough users for it to matter).
+    //
+    // `.ilike` is case-insensitive LIKE with `%` wildcards on
+    // either side, so typing "sar" matches "sarah" / "Sarah B"
+    // / "musar". The `.or()` filter PostgREST exposes lets us
+    // hit both columns in one round-trip — much simpler than
+    // doing two SELECTs + merging client-side.
+    //
+    // Empty query returns []; this is a search box, not a "list
+    // every user in the app" surface (RLS would deny that
+    // anyway, but the empty-input semantics belongs here).
+    //
+    // Why this exists separately from `lookup(handle:)`: that
+    // older method does an EXACT match for deep-linking flows
+    // (`@sarah` mention → fetch that exact profile). Search is
+    // discovery, exact lookup is navigation. Two different
+    // intents; two different shapes.
+    static func search(
+        query: String,
+        limit: Int = 20,
+        client: SupabaseClient = SupabaseService.shared
+    ) async -> [RemotePublicProfile] {
+        let trimmed = query
+            .trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "@"))
+
+        guard !trimmed.isEmpty else { return [] }
+
+        // Escape the user's query so a stray `%` or `,` doesn't
+        // break the .or filter syntax. PostgREST treats `,` as
+        // an argument separator inside .or(), and `%` is the
+        // SQL wildcard — both need to be neutralized in user
+        // input before we wrap with our own `%…%` pattern.
+        let escaped = trimmed
+            .replacingOccurrences(of: "%", with: "")
+            .replacingOccurrences(of: ",", with: "")
+            .replacingOccurrences(of: "(", with: "")
+            .replacingOccurrences(of: ")", with: "")
+        let pattern = "%\(escaped)%"
+
+        do {
+            let profiles: [RemotePublicProfile] = try await client
+                .from("public_profiles")
+                .select()
+                .or("handle.ilike.\(pattern),display_name.ilike.\(pattern)")
+                .limit(limit)
+                .execute()
+                .value
+            return profiles
+        } catch {
+            return []
+        }
+    }
+
     // MARK: - Race stats
 
     // Look up race aggregates (count, PB, last race) for one
@@ -172,6 +229,7 @@ enum PublicProfileService {
     static func lookup(userID: String) async -> RemotePublicProfile? { nil }
     static func lookup(handle: String) async -> RemotePublicProfile? { nil }
     static func lookup(userIDs: [String]) async -> [RemotePublicProfile] { [] }
+    static func search(query: String, limit: Int = 20) async -> [RemotePublicProfile] { [] }
     static func stats(for userID: String) async -> RemotePublicRaceStats? { nil }
     static func stats(for userIDs: [String]) async -> [RemotePublicRaceStats] { [] }
 }

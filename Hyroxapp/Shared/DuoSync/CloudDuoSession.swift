@@ -289,13 +289,68 @@ final class CloudDuoSession {
         }
 
         guard let waitingRoom = matchingRooms.first else {
-            // SELECT succeeded but no row matched — the code is
-            // wrong OR the host's row has already been claimed by
-            // someone else / abandoned / finished. Show the
-            // historical message verbatim.
-            state = .disconnected(
-                reason: "Code not found or room is no longer waiting"
-            )
+            // Primary SELECT (filtered to status=waiting) found
+            // nothing. The legitimate cases are:
+            //   (a) Wrong code — typo, or never existed
+            //   (b) Host backed out and the row got marked
+            //       'abandoned'
+            //   (c) Someone else joined first; status is now
+            //       'paired' / 'racing' / 'finished'
+            //   (d) RLS policy `duo_races_select_waiting` was
+            //       never deployed and is denying the read
+            //       silently (returns 0 rows, not an error)
+            //
+            // (a) and (d) are indistinguishable from this catch.
+            // (b) and (c) we CAN distinguish — probe with the
+            // status filter removed. The `duo_races_select_own`
+            // policy only lets users see rows where they're
+            // host or guest, so this probe returns a row ONLY
+            // if either: we're already in the room (re-pair
+            // flow), the row is `waiting` (covered by waiting
+            // policy, ruled out), or RLS happens to grant.
+            // For unrelated rows in non-waiting status the
+            // probe also returns 0 — which is fine, the message
+            // collapses to "wrong code or expired" anyway.
+            let anyStatusMatches: [RemoteDuoRace] = (try? await client
+                .from("duo_races")
+                .select()
+                .eq("pair_code", value: normalizedCode)
+                .limit(1)
+                .execute()
+                .value) ?? []
+
+            if let existing = anyStatusMatches.first {
+                // We can see the row, but it isn't waiting.
+                // Tell the user precisely what state it's in
+                // so they know whether to ask the host to
+                // re-host or to double-check the code.
+                let stateDescription: String
+                switch existing.status {
+                case "paired":
+                    stateDescription = "already paired with another athlete"
+                case "racing":
+                    stateDescription = "in progress (race already started)"
+                case "finished":
+                    stateDescription = "finished"
+                case "abandoned":
+                    stateDescription = "no longer open (the host backed out)"
+                default:
+                    stateDescription = "no longer open"
+                }
+                state = .disconnected(
+                    reason: "That room is \(stateDescription). Ask your partner to host a new one."
+                )
+            } else {
+                // Can't see any row with that code. Either the
+                // code is wrong OR the waiting-room SELECT
+                // policy isn't deployed. The latter shows up
+                // consistently across attempts (worth telling
+                // the user something actionable rather than
+                // generic).
+                state = .disconnected(
+                    reason: "No open room found for that code. Check the code or ask your partner to host again."
+                )
+            }
             return
         }
 
