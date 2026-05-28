@@ -82,11 +82,31 @@ enum ProfileSyncService {
             // server already has a row, the upsert will
             // handle it; if it errors out cleanly, the next
             // launch retries.
-            try? await pushLocalProfile(
-                localProfile,
-                userID: userID,
-                client: client
-            )
+            //
+            // Phase 60: we previously discarded any push error
+            // with a bare `try?`. That bit us — three production
+            // accounts ended up without `profiles` rows because
+            // the upsert failed silently (likely a transient
+            // RLS / schema mismatch in an earlier deploy) and
+            // the next launch's syncOnSignIn fell into the
+            // SAME catch (still no remote row, push again, push
+            // fails the same way, no signal). Surface the error
+            // now so we don't repeat that — a banner is still
+            // future work but at minimum a console + DEBUG
+            // assertion makes the failure visible during dev
+            // and reachable from device logs in TestFlight.
+            do {
+                try await pushLocalProfile(
+                    localProfile,
+                    userID: userID,
+                    client: client
+                )
+            } catch {
+                print("[ProfileSyncService] pushLocalProfile failed for \(userID): \(error)")
+                #if DEBUG
+                assertionFailure("ProfileSyncService push failed: \(error)")
+                #endif
+            }
         }
     }
 

@@ -8,8 +8,9 @@ below.
 
 | Order | File | Purpose | Required for |
 | --- | --- | --- | --- |
-| 1 | `duo_races.sql` | Coordination table for cross-city HYROX Doubles. Schema + indexes + RLS policies + updated_at trigger. | §4.5 Tier 2 Cloud Duo Mode |
-| 2 | `delete_user_account.sql` | Self-service account deletion RPC. Cascades through follows, duo_races, races, race-photos + avatars storage, profiles, and auth.users. SECURITY DEFINER, gated on auth.uid(). | §15A App Store Guideline 5.1.1(v) compliance |
+| 1 | `profiles_bootstrap.sql` | `profiles` table + RLS + `updated_at` trigger + `public_profiles` view (security_invoker=false) + auth.users → profiles backfill. Documents what was originally created out-of-band so a fresh project / restored snapshot can rebuild from this repo alone. | v1 auth + sync, cross-user search, follow flows, public profile cards |
+| 2 | `duo_races.sql` | Coordination table for cross-city HYROX Doubles. Schema + indexes + RLS policies + updated_at trigger. | §4.5 Tier 2 Cloud Duo Mode |
+| 3 | `delete_user_account.sql` | Self-service account deletion RPC. Cascades through follows, duo_races, races, race-photos + avatars storage, profiles, and auth.users. SECURITY DEFINER, gated on auth.uid(). | §15A App Store Guideline 5.1.1(v) compliance |
 
 ## Deploy
 
